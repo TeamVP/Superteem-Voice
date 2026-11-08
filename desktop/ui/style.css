@@ -112,8 +112,9 @@ button.pill:has(> span[aria-hidden="true"]:only-child) { min-height: calc(1.55em
 
 /* ---------- Sidebar ---------- */
 .sidebar {
-  width: 290px;
+  width: var(--sidebar-width, 300px);
   flex: none;
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -127,12 +128,26 @@ button.pill:has(> span[aria-hidden="true"]:only-child) { min-height: calc(1.55em
   display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 2px 10px;
   border-radius: 999px; font-size: 12px; color: var(--muted); white-space: nowrap;
 }
-.listen-chip .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--muted); }
-.listen-chip.on .dot { background: var(--ok); }
+.listen-chip { padding: 2px 10px 2px 8px; }
 .listen-chip.on { background: var(--key-2); border-color: var(--key-2); color: #fff; }
-.listen-chip.on .dot { background: #fff; }
-.quick { display: flex; gap: 8px; }
-.quick button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.quick { display: flex; gap: 6px; }
+.quick button { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 8px; white-space: nowrap; }
+.quick .home-btn { flex: none; width: 40px; padding: 0; color: var(--muted); }
+.quick .home-btn.on, .quick .home-btn.on:hover:not(:disabled) { background: var(--key); border-color: var(--key); color: #fff; }
+/* A narrow sidebar keeps the icons: first the buttons drop their words, then Listening does. */
+@container (max-width: 262px) {
+  .quick .label { display: none; }
+}
+@container (max-width: 250px) {
+  .listen-chip .label { display: none; }
+  .listen-chip { padding: 2px 7px; }
+}
+/* Dragged to resize the sidebar, within limits. */
+.splitter { flex: none; width: 6px; margin: 0 -3px; position: relative; z-index: 2; cursor: col-resize; touch-action: none; }
+.splitter::after { content: ""; position: absolute; inset: 0 2px; background: transparent; transition: background 0.15s; }
+.splitter:hover::after, .splitter:focus-visible::after, .splitter.dragging::after { background: var(--key-light); }
+.splitter:focus-visible { outline: none; }
+body.resizing { cursor: col-resize; user-select: none; }
 .search {
   display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 40px;
   border-radius: 10px; background: var(--raised); color: var(--muted);
@@ -399,6 +414,7 @@ body[data-platform="android"] .windows-only { display: none !important; }
 @media (max-width: 720px) {
   body { display: block; }
   .sidebar { width: 100%; height: 100%; border-right: none; display: none; }
+  .splitter { display: none; }
   body.show-list .sidebar { display: flex; }
   body.show-list #main-wrap { display: none; }
   #main-wrap { height: 100%; }
@@ -414,8 +430,10 @@ body[data-platform="android"] .windows-only { display: none !important; }
 }
 .note-title:focus-visible, .note-body:focus-visible { outline: none; }
 
-/* Sidebar header: the name goes home; the home icon sits beside Listening. */
-.brand { background: none; border: none; padding: 0; color: inherit; cursor: pointer; }
+/* Sidebar header: the name goes home; Listening sits beside it. */
+.brand, .brand:hover:not(:disabled) { background: none; border: none; padding: 0; min-height: 0; color: inherit; cursor: pointer; }
+.brand:hover img { opacity: 0.85; }
+.help-toggle { width: 26px; height: 26px; font-weight: 700; font-size: 13px; border: 1px solid var(--line); }
 /* The wordmark has a version for each theme, following the same choice as the colours. */
 .brand img { display: block; height: 22px; width: auto; }
 .brand .logo-dark-mode { display: none; }
@@ -425,7 +443,6 @@ body[data-platform="android"] .windows-only { display: none !important; }
 }
 :root[data-theme="dark"] .brand .logo-light-mode { display: none; }
 :root[data-theme="dark"] .brand .logo-dark-mode { display: block; }
-.brand-tools { display: inline-flex; align-items: center; gap: 4px; }
 .icon-only { width: 32px; height: 32px; min-height: 0; padding: 0; border-radius: 16px; border: none; background: transparent; color: var(--muted); display: inline-grid; place-items: center; cursor: pointer; }
 .icon-only:hover { background: var(--line); color: inherit; }
 .icon-only.danger:hover { color: var(--danger); }
@@ -468,7 +485,6 @@ body[data-platform="android"] .windows-only { display: none !important; }
 .status-picker option { color: var(--text); background: var(--panel); font-weight: 400; }
 .item.done .title { color: var(--muted); text-decoration: line-through; }
 
-/* The home icon is filled while on the home page. */
 .icon-only.on, .icon-only.on:hover { background: var(--key); color: #fff; }
 
 /* Wake word and commands */

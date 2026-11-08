@@ -303,8 +303,10 @@ new MutationObserver(() => {
 }).observe(main, { childList: true });
 document.getElementById("new-meeting").addEventListener("click", () => showMeeting());
 document.getElementById("open-settings").addEventListener("click", () => showSettings());
-document.querySelector(".brand").addEventListener("click", () => showHome());
-document.getElementById("open-home").addEventListener("click", () => showHome());
+// The wordmark is the Home button too.
+const goHome = () => showHome();
+document.querySelector(".brand").addEventListener("click", goHome);
+document.getElementById("open-home").addEventListener("click", goHome);
 // Each example on the Listening page runs as if it had been said.
 document.getElementById("agent-say").addEventListener("click", (e) => {
   const link = e.target.closest("[data-say]");
@@ -313,6 +315,46 @@ document.getElementById("agent-say").addEventListener("click", (e) => {
   run(link.dataset.say);
 });
 document.getElementById("listen-chip").addEventListener("click", () => openAgent());
+
+// The sidebar is resized by dragging its edge, or with the arrow keys there; the width is remembered on this device.
+const SIDEBAR_WIDTH = { min: 236, max: 440, default: 300 };
+function setSidebarWidth(px, remember = true) {
+  const width = Math.round(Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, px)));
+  document.body.style.setProperty("--sidebar-width", `${width}px`);
+  if (remember) try { localStorage.setItem("sidebarWidth", String(width)); } catch {}
+}
+try {
+  const saved = Number(localStorage.getItem("sidebarWidth"));
+  if (saved) setSidebarWidth(saved, false);
+} catch {}
+{
+  const splitter = document.getElementById("splitter");
+  const sidebar = document.querySelector(".sidebar");
+  splitter.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    splitter.setPointerCapture(e.pointerId);
+    const left = sidebar.getBoundingClientRect().left;
+    splitter.classList.add("dragging");
+    document.body.classList.add("resizing");
+    const move = (m) => setSidebarWidth(m.clientX - left, false);
+    const up = (u) => {
+      splitter.removeEventListener("pointermove", move);
+      splitter.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      setSidebarWidth(u.clientX - left);
+    };
+    splitter.addEventListener("pointermove", move);
+    splitter.addEventListener("pointerup", up, { once: true });
+    splitter.addEventListener("pointercancel", up, { once: true });
+  });
+  splitter.addEventListener("dblclick", () => setSidebarWidth(SIDEBAR_WIDTH.default));
+  splitter.addEventListener("keydown", (e) => {
+    const step = e.key === "ArrowLeft" ? -16 : e.key === "ArrowRight" ? 16 : 0;
+    if (!step) return;
+    e.preventDefault();
+    setSidebarWidth(sidebar.getBoundingClientRect().width + step);
+  });
+}
 document.getElementById("back").addEventListener("click", () => {
   leave();
   view = { kind: "home" };
@@ -1305,9 +1347,18 @@ function renderSession(session, processingError, suggestion) {
     speakerBar.append(el("span", { class: "chip", style: `background:${colours.get(sp.key)}` }, input, badge, menu));
   }
   if (used.size) {
-    page.append(speakerBar, speakerForm,
-      el("div", { class: "legend" }, "Rename a voice to update every line, or use ⋯ to merge voices or link a voice print. "
-        + "Dotted lines are less certain; a side bar means two people spoke at once."));
+    // How to read and fix the transcript, behind a "?" so it isn't in the way once known.
+    const help = el("div", { class: "legend", hidden: true, id: "transcript-help" }, "Rename a voice to update every line, or use ⋯ to merge voices or link a voice print. "
+      + "Dotted lines are less certain; a side bar means two people spoke at once.");
+    const helpButton = el("button", { class: "icon-only help-toggle", type: "button", title: "How to read and fix the transcript",
+      "aria-label": "How to read and fix the transcript", "aria-expanded": "false", "aria-controls": "transcript-help" }, "?");
+    helpButton.addEventListener("click", () => {
+      help.hidden = !help.hidden;
+      helpButton.setAttribute("aria-expanded", String(!help.hidden));
+      helpButton.classList.toggle("on", !help.hidden);
+    });
+    speakerBar.append(helpButton);
+    page.append(speakerBar, speakerForm, help);
   }
 
   /// Handles the ⋯ menu beside a speaker's name.
