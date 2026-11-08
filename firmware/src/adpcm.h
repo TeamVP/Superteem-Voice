@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 #ifndef STV_ADPCM_H
 #define STV_ADPCM_H
 

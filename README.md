@@ -11,7 +11,7 @@
   <b>Voice notes transcribed on your own device. No cloud.</b><br>
   <a href="https://voice.superteem.com">Download</a> ·
   <a href="https://github.com/TeamVP/Superteem-Voice/releases">Releases</a> ·
-  <a href="LICENSE">GPL v3</a>
+  <a href="#license">Open source</a>
 </p>
 
 Superteem Voice turns speech into text on your PC or phone. You can dictate notes, record meetings and give voice commands. Nothing is uploaded: there's no account and no server, and the app doesn't track you.
@@ -97,4 +97,6 @@ The Release workflow then builds all three files and publishes a GitHub release,
 
 ## License
 
-Superteem Voice is free software, released under the [GNU General Public License v3.0](LICENSE).
+The apps and the shared `core` library are released under the [GNU General Public License v3.0](LICENSE).
+
+The Voice Pin firmware in `firmware/` is released under the [MIT License](firmware/LICENSE).

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* IMA ADPCM encoder. Must match core/src/adpcm.rs, which core/tests/adpcm_c.rs checks. */
 
 #include "adpcm.h"
