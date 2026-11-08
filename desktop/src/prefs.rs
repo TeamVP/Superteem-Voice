@@ -47,6 +47,10 @@ pub struct Prefs {
     pub quiet: bool,
     /// The first-run setup was finished or skipped.
     pub onboarded: bool,
+    /// The setup step reached, so closing the app part way through returns there.
+    pub setup_step: u32,
+    /// When the terms of use were agreed to, as a Unix time; 0 if never.
+    pub terms_accepted: u64,
     /// Microphones heard working at least once; only these are offered as meeting tracks.
     pub working_mics: Vec<String>,
     /// Microphones the person hid from Devices and Tracks.

@@ -24,7 +24,7 @@ let progress = null;
 // Meetings being processed one at a time, while another can be recorded: { current, waiting }.
 let queue = { current: null, waiting: [] };
 const queued = (id) => queue.current === id || queue.waiting.includes(id);
-let prefs = { wake: false, quiet: false, onboarded: true, inputs: [], pins: false, mics: {}, scripts: [] };
+let prefs = { wake: false, quiet: false, onboarded: true, terms_accepted: 1, inputs: [], pins: false, mics: {}, scripts: [] };
 let homeMode = "note";
 
 const icon = {
@@ -103,6 +103,7 @@ function showPage() {
 function leave() {
   keyphrasePage?.stop();
   keyphrasePage = null;
+  document.body.classList.remove("setup");
   stopProbe();
   cancelOnboardReading();
   cancelDictation();
@@ -1907,7 +1908,7 @@ async function showKeyphrases(printId, message) {
       + "description of the sound is kept with your voice print; the recordings are deleted."));
   if (!print) {
     page.append(el("div", { class: "notice" }, "Make your voice print first: the phrases are kept with it."),
-      el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showOnboarding(0) }, "Make my voice print")));
+      el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showOnboarding(SETUP.voice) }, "Make my voice print")));
     main.replaceChildren(page);
     return;
   }
@@ -2141,7 +2142,7 @@ async function showSettings() {
 
   page.append(el("h2", {}, "Voices"), el("div", { class: "group" },
     linkRow("Voice prints", prints.length ? `${prints.length} saved` : "None yet", () => showVoicePrints()),
-    linkRow("Default microphone and voice print", prefs.enrol_input ?? "Not set up", () => showOnboarding(0)),
+    linkRow("Default microphone and voice print", prefs.enrol_input ?? "Not set up", () => showOnboarding(SETUP.voice)),
     el("div", { class: "windows-only" }, linkRow("Devices", "Test, hide and add microphones and Voice Pins", () => showDevices())),
     el("div", { class: "windows-only" }, linkRow("Wake word and commands", trainedText(prints), () => showKeyphrases()))));
 
@@ -2165,27 +2166,25 @@ async function showSettings() {
   main.replaceChildren(page);
 }
 
+/// Starts the speech model download, or joins the one setup already started. `done` runs if the page is
+/// still showing when it finishes.
 function modelDownloadButton(done) {
   const holder = el("span");
   const button = el("button", { class: "primary pill" }, "Download (142 MB)");
-  button.addEventListener("click", async () => {
+  const wait = async () => {
     button.disabled = true;
-    const label = el("span", {}, "Downloading…");
-    button.replaceChildren(el("span", { class: "spinner" }), label);
-    const unlisten = await listen("model-download", (e) => {
-      label.textContent = `Downloading… ${Math.round(e.payload * 100)}%`;
-    });
+    button.replaceChildren(el("span", { class: "spinner" }), el("span", { "data-model-progress": "" }, downloadText()));
     try {
-      await invoke("download_model");
-      unlisten();
-      done();
+      await downloadModel();
+      if (holder.isConnected) done();
     } catch (e) {
-      unlisten();
       button.disabled = false;
       button.textContent = "Try the download again";
       showError(holder, e);
     }
-  });
+  };
+  button.addEventListener("click", wait);
+  if (modelDownload) wait();
   holder.append(button);
   return holder;
 }
@@ -2206,61 +2205,171 @@ function showListening() {
 // ---------- First run ----------
 
 let onboardEnrolling = false;
+/// Set while setup records takes of "Hey Superteem".
+let setupTraining = false;
 
-/// Cancels a voice print reading left half done, so the microphone is released.
+/// Cancels a voice print reading or wake word training left half done, so the microphone is released.
 function cancelOnboardReading() {
-  if (!onboardEnrolling) return;
-  onboardEnrolling = false;
-  invoke("stop_enrolment", { save: false }).catch(() => {});
+  if (onboardEnrolling) {
+    onboardEnrolling = false;
+    invoke("stop_enrolment", { save: false }).catch(() => {});
+  }
+  if (setupTraining) {
+    setupTraining = false;
+    phraseTraining = null;
+    invoke("stop_phrase_training", { save: false }).catch(() => {});
+  }
 }
 
-async function showOnboarding(step = 0) {
+/// Setup's pages, in order. Android can't listen for the wake word yet, so it skips saying hello.
+const SETUP = { welcome: 0, voice: 1, model: 2, hello: 3, done: 4 };
+
+/// What the person agrees to by pressing "Agree and get started". Kept short on purpose.
+const TERMS = [
+  ["Your voice stays on this device",
+    "Superteem turns speech into text on this computer. Your recordings, transcripts, notes and voice print (a "
+    + "numeric description of how your voice sounds, not a recording of it) are stored only here and are never sent "
+    + "to us or anyone else. The one download is the speech model."],
+  ["You're in control",
+    "Delete voice prints, notes and recordings in the app at any time. Uninstalling removes the app; your files stay "
+    + "in the Superteem Voice folder until you delete it."],
+  ["Open source, no warranty",
+    "Superteem is free software under the GNU General Public License v3. You may use, study, change and share it "
+    + "under that licence. It is provided as is, without warranty of any kind."],
+  ["Use it lawfully",
+    "You are responsible for how you use Superteem. Get consent before recording anyone, follow the recording, "
+    + "privacy and surveillance laws where you are, and don't use it for anything illegal. We can't prevent misuse "
+    + "and aren't responsible for it."],
+  ["Our liability",
+    "To the extent the law allows, Superteem and its authors aren't liable for any loss or damage from using it, "
+    + "including missing or wrong transcripts. Nothing here limits rights you have under the Australian Consumer Law "
+    + "or other laws that can't be excluded."],
+  ["Governing law",
+    "These terms are governed by the laws of Victoria, Australia. If they change, Superteem will ask you again."],
+];
+
+function showTerms() {
+  const dialog = el("dialog", { class: "terms", "aria-label": "Terms of use and privacy" },
+    el("h2", {}, "Terms of use and privacy"),
+    ...TERMS.map(([heading, text]) => el("div", {}, el("h3", {}, heading), el("p", {}, text))),
+    el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => dialog.close() }, "Close")));
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
+// ---------- The speech model download, shared by setup and Settings ----------
+
+/// The download in progress, so setup can start it early and any page can wait on the same one.
+let modelDownload = null;
+let modelProgress = 0;
+let modelError = null;
+
+function downloadModel() {
+  modelDownload ??= (async () => {
+    modelError = null;
+    const unlisten = await listen("model-download", (e) => {
+      modelProgress = e.payload;
+      for (const label of document.querySelectorAll("[data-model-progress]")) label.textContent = downloadText();
+    });
+    try {
+      await invoke("download_model");
+    } catch (e) {
+      modelError = e;
+      throw e;
+    } finally {
+      unlisten();
+      modelDownload = null;
+    }
+  })();
+  return modelDownload;
+}
+
+function downloadText() {
+  return modelProgress ? `Downloading… ${Math.round(modelProgress * 100)}%` : "Downloading…";
+}
+
+async function showOnboarding(step = SETUP.welcome) {
   leave();
   showPage();
   view = { kind: "onboarding", step };
+  document.body.classList.add("setup");
+  const rerun = prefs.onboarded;
+  // Remembered, so closing the app part way through comes back to this page.
+  if (!rerun) invoke("save_prefs", { setupStep: step }).catch(() => {});
   const ready = await invoke("model_ready");
-  const count = platform === "android" ? 3 : 4;
-  const shown = platform === "android" && step === 3 ? 2 : step;
-  const steps = el("div", { class: "steps", "aria-label": `Step ${shown + 1} of ${count}` },
-    Array.from({ length: count }, (_, i) => el("span", { class: i < shown ? "done" : i === shown ? "now" : "" })));
-  const page = el("div", { class: "page" }, steps);
+  const page = el("div", { class: "page" });
+  if (step !== SETUP.welcome) {
+    const count = platform === "android" ? 3 : 4;
+    const shown = platform === "android" && step === SETUP.done ? 2 : step - 1;
+    page.append(el("div", { class: "steps", "aria-label": `Step ${shown + 1} of ${count}` },
+      Array.from({ length: count }, (_, i) => el("span", { class: i < shown ? "done" : i === shown ? "now" : "" }))));
+  }
   const finish = async () => {
     cancelOnboardReading();
-    await invoke("save_prefs", { onboarded: true }).catch(() => {});
-    prefs.onboarded = true;
+    if (!rerun) {
+      await invoke("save_prefs", { onboarded: true, setupStep: 0 }).catch(() => {});
+      prefs.onboarded = true;
+    }
     showHome();
   };
-  const afterVoice = () => showOnboarding(1);
-  if (step === 0) {
-    page.append(el("h1", {}, "Welcome to Superteem"),
-      el("p", {}, "Write notes by voice, record meetings with a track for every voice, or just say “Hey Superteem”. First, let's get your microphone working and make your voice print."),
-      el("p", { class: "legend" }, "Pick the microphone you'll usually use, then read a short passage. It becomes your default microphone for dictation, voice commands and meetings, and Superteem names you in meetings."));
+  // Run again from Settings, setup can be left at any point.
+  const skip = rerun
+    ? el("button", { class: "link", onclick: () => { cancelOnboardReading(); showSettings(); } }, "Back to Settings")
+    : el("button", { class: "link", onclick: finish }, "Skip setup");
+  const afterModel = platform === "android" ? SETUP.done : SETUP.hello;
+
+  if (step === SETUP.welcome) {
+    const agree = el("button", { class: "primary pill big" }, rerun ? "Agree" : "Agree and get started");
+    agree.addEventListener("click", async () => {
+      agree.disabled = true;
+      await invoke("save_prefs", { acceptTerms: true }).catch(() => {});
+      prefs.terms_accepted = Math.floor(Date.now() / 1000);
+      rerun ? showHome() : showOnboarding(SETUP.voice);
+    });
+    page.classList.add("welcome");
+    page.append(
+      el("span", { class: "welcome-logo" },
+        el("img", { class: "logo-light-mode", src: "logo-light-mode.png", alt: "" }),
+        el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" })),
+      el("h1", {}, "Welcome to Superteem"),
+      el("p", { class: "lead" }, "Voice notes, meetings and commands, transcribed on your own device. No cloud."),
+      el("p", {}, rerun ? "There are now terms of use. Agree to them to carry on." : "Ready to get started?"),
+      el("div", { class: "actions" }, agree),
+      el("p", { class: "legend" }, "By continuing you agree to the ",
+        el("button", { class: "link inline", onclick: showTerms }, "terms of use and privacy"), "."));
+  } else if (step === SETUP.voice) {
+    // The model downloads while the voice print is made, so it's usually ready by the next page.
+    if (!ready && !modelDownload) downloadModel().catch(() => {});
+    page.append(el("h1", {}, "Your microphone and voice print"),
+      el("p", {}, "Pick the microphone you'll usually use, then read a short passage aloud so Superteem knows your voice."));
     const body = el("div");
     page.append(body, el("div", { class: "actions" },
-      el("button", { class: "link", onclick: () => { cancelOnboardReading(); afterVoice(); } }, "Skip this step"),
-      el("button", { class: "link", onclick: finish }, "Skip setup")));
+      el("button", { class: "link", onclick: () => { cancelOnboardReading(); showOnboarding(SETUP.model); } }, "Skip this step"),
+      skip));
     main.replaceChildren(page);
-    return voiceSetup(body, afterVoice);
-  } else if (step === 1) {
-    page.append(el("h1", {}, "The speech model"),
-      el("p", {}, "Everything you say is turned into text on this device, never sent anywhere. That needs a one-time download."),
-      ready ? el("p", { style: "color:var(--ok)" }, "Ready.") : modelDownloadButton(() => showOnboarding(1)),
-      el("div", { class: "actions" },
-        el("button", { class: "primary pill", onclick: () => showOnboarding(platform === "android" ? 3 : 2) }, "Continue")));
-  } else if (step === 2) {
-    const tick = el("div", { class: "ticks", id: "onboard-ticks" }, el("span"));
-    const state = el("div", { class: "hint", id: "onboard-state", "aria-live": "polite", style: "text-align:center" },
-      ready ? "Listening… say “Hey Superteem”" : "The wake word needs the speech model. Go back a step to get it, or skip.");
-    page.append(el("h1", {}, "Say hello"),
-      el("p", {}, "Say “Hey Superteem”. From now on Superteem listens for it while the app is open, so you can use it without the screen. Nothing is recorded until you ask."),
-      el("div", { class: "halo" }, el("span", { class: "big-mic", style: "width:104px;height:104px" }, svg("mic", 40))),
-      tick, state,
-      el("p", { class: "legend", style: "text-align:center" }, "Train it to your voice and it answers in a tenth of a second, instead of waiting for speech to text."),
-      el("div", { class: "actions", style: "justify-content:center" },
-        el("button", { class: "pill", onclick: () => showKeyphrases() }, "Train it to my voice"),
-        el("button", { class: "primary pill", onclick: () => showOnboarding(3) }, "Continue"),
-        el("button", { class: "pill", onclick: async () => { await setWake(false).catch(() => {}); showOnboarding(3); } }, "Don't listen for it")));
-    if (ready) setWake(true).catch((e) => { state.textContent = String(e); });
+    return voiceSetup(body, () => showOnboarding(SETUP.model));
+  } else if (step === SETUP.model) {
+    page.append(el("h1", {}, "The speech model"));
+    if (ready) {
+      page.append(el("div", { class: "celebrate", role: "status" },
+        el("span", { class: "badge" }, svg("check", 44)),
+        el("strong", {}, "Your speech model is ready!"),
+        el("p", {}, "Everything you say is now turned into text right here on this device, never sent anywhere.")));
+    } else {
+      page.append(el("p", {}, "Everything you say is turned into text on this device, never sent anywhere. That needs a one-time download."),
+        modelError && !modelDownload ? el("div", { class: "error", role: "alert" }, String(modelError)) : null,
+        modelDownloadButton(() => {
+          speak("The speech model is ready.");
+          showOnboarding(SETUP.model);
+        }));
+    }
+    page.append(el("div", { class: "actions" },
+      el("button", { class: ready ? "primary pill" : "pill", onclick: () => showOnboarding(afterModel) }, ready ? "Continue" : "Continue without it"),
+      skip));
+  } else if (step === SETUP.hello) {
+    main.replaceChildren(page);
+    return sayHello(page, ready, () => showOnboarding(SETUP.done), skip);
   } else {
     page.append(el("h1", {}, "You're set"),
       el("div", { class: "group" },
@@ -2272,6 +2381,114 @@ async function showOnboarding(step = 0) {
   main.replaceChildren(page);
 }
 
+/// Setup's listening step: trains "Hey Superteem" to the person's voice, then has them try it. The round
+/// button shows whether Superteem is listening, and pauses or resumes it.
+async function sayHello(page, ready, next, skip, message) {
+  const [{ print }, fresh] = await Promise.all([keyphrasePrint(), invoke("get_prefs")]);
+  prefs = fresh;
+  const wake = print ? (await invoke("list_keyphrases", { print: print.id })).phrases.find((p) => p.id === "wake") : null;
+  const trained = (wake?.takes ?? 0) > 0;
+  // Untrained, the wake word is found in transcribed words, which needs the model.
+  const canListen = trained || ready;
+  const device = prefs.enrol_input;
+
+  const mic = el("button", { class: "hello-mic off" }, svg("mic", 44));
+  const state = el("div", { class: "hint", id: "onboard-state", "aria-live": "polite", style: "text-align:center" });
+  const tick = el("div", { class: "ticks", id: "onboard-ticks" }, el("span"));
+  const show = () => {
+    const on = canListen && prefs.wake;
+    mic.classList.toggle("on", on);
+    mic.classList.toggle("off", !on);
+    mic.disabled = !canListen;
+    mic.setAttribute("aria-pressed", String(on));
+    mic.title = on ? "Listening. Click to pause." : "Paused. Click to listen.";
+    mic.setAttribute("aria-label", mic.title);
+    if (tick.querySelector(".done")) return;
+    state.textContent = !canListen
+      ? "Train it first, or go back a step for the speech model."
+      : on ? "Listening… say “Hey Superteem”" : "Paused. Click the button to listen again.";
+  };
+  mic.addEventListener("click", async () => {
+    try {
+      await setWake(!prefs.wake);
+    } catch (e) {
+      state.textContent = String(e);
+    }
+    show();
+  });
+
+  const train = async () => {
+    try {
+      await invoke("start_phrase_training", { print: print.id, phrase: "wake", device, replace: true });
+    } catch (e) {
+      return showError(page, e);
+    }
+    setupTraining = true;
+    phraseTraining = { print, phrase: wake };
+    trainHello(page, wake, (note) => sayHello(page, ready, next, skip, note));
+  };
+
+  const actions = el("div", { class: "actions", style: "justify-content:center" });
+  if (!print || !device) {
+    actions.append(el("button", { class: "primary pill", onclick: next }, "Continue"),
+      el("button", { class: "pill", onclick: () => showOnboarding(SETUP.voice) }, "Make my voice print"));
+  } else if (!trained) {
+    actions.append(el("button", { class: "primary pill", onclick: train }, "Train it to my voice"),
+      el("button", { class: "pill", onclick: next }, "Skip for now"));
+  } else {
+    actions.append(el("button", { class: "primary pill", onclick: next }, "Continue"),
+      el("button", { class: "pill", onclick: train }, "Train again"));
+  }
+  page.replaceChildren(page.querySelector(".steps") ?? "",
+    el("h1", {}, "Say hello"),
+    el("p", {}, !print || !device
+      ? "Superteem listens for “Hey Superteem” while the app is open. Make your voice print to train it to you, so it answers in a tenth of a second."
+      : trained
+        ? "Superteem knows how you say it now. Say “Hey Superteem” to try it. It listens while the app is open, and nothing is recorded until you ask."
+        : "Teach Superteem how you say “Hey Superteem”: say it a few times and it answers you in a tenth of a second, rather than anyone in the room."),
+    message ? el("div", { class: "notice", role: "status" }, message) : "",
+    mic, tick, state, actions,
+    el("div", { class: "actions", style: "justify-content:center" }, skip));
+  show();
+  if (canListen && !prefs.wake) setWake(true).then(show, (e) => { state.textContent = String(e); });
+}
+
+/// Records takes of "Hey Superteem" inside setup, then goes back to saying hello with how it went.
+function trainHello(page, phrase, back) {
+  clearInterval(pollTimer);
+  const meter = el("div", { style: "width:0%" });
+  const done = el("button", { class: "primary pill" }, "Done");
+  const cancel = el("button", { class: "pill" }, "Cancel");
+  page.replaceChildren(page.querySelector(".steps") ?? "",
+    el("h1", {}, "Say “Hey Superteem”"),
+    el("p", { class: "legend" }, "Say it once for each line, with a pause of about a second between. Saying it a little "
+      + "differently each time teaches Superteem the ways you really say it."),
+    el("div", { class: "meter wide-meter", "aria-hidden": "true" }, meter),
+    el("ol", { class: "takes" }, phrase.how.map((h) => el("li", {}, h))),
+    el("div", { class: "actions" }, done, cancel));
+  pollTimer = setInterval(async () => {
+    const s = await invoke("recording_status").catch(() => null);
+    if (s?.recording) meter.style.width = `${Math.round((s.streams[0]?.level ?? 0) * 100)}%`;
+  }, 200);
+  const finish = async (save) => {
+    clearInterval(pollTimer);
+    done.disabled = cancel.disabled = true;
+    if (save) done.replaceChildren(el("span", { class: "spinner" }), "Learning your voice…");
+    setupTraining = false;
+    phraseTraining = null;
+    try {
+      const r = await invoke("stop_phrase_training", { save });
+      if (!r) return back();
+      const few = r.heard < phrase.how.length - 1 ? " That's fewer than expected: if it misses you, train again with clear pauses." : "";
+      back(`Got ${r.takes} take${r.takes === 1 ? "" : "s"}. It's ${phraseQuality(r.separation)}.${few}`);
+    } catch (e) {
+      back(String(e));
+    }
+  };
+  done.addEventListener("click", () => finish(true));
+  cancel.addEventListener("click", () => finish(false));
+}
+
 /// Seconds of speech a good voice print needs, and the least that is accepted.
 const VOICE_TARGET_S = 20;
 const VOICE_MIN_S = 8;
@@ -2280,27 +2497,27 @@ const VOICE_MIN_S = 8;
 async function voiceSetup(holder, next, problem) {
   const [{ devices, default: preferred }, fresh] = await Promise.all([invoke("list_devices"), invoke("get_prefs")]);
   prefs = fresh;
-  const name = el("input", { type: "text", class: "plain", placeholder: "Your name", "aria-label": "Your name", value: holder.dataset.name ?? "" });
+  const prints = holder.dataset.name ? [] : await invoke("list_voiceprints").catch(() => []);
+  const known = [...prints].sort((a, b) => a.created - b.created)[0]?.name;
+  const name = el("input", { type: "text", class: "plain", placeholder: "Your name", "aria-label": "Your name", value: holder.dataset.name ?? known ?? "" });
   const mic = el("select", { class: "plain", "aria-label": "Microphone" }, devices.map((d) => el("option", { value: d,
     selected: d === (holder.dataset.mic ?? (devices.includes(prefs.enrol_input) ? prefs.enrol_input : preferred)) }, d)));
   const micInfo = el("span");
   const showNote = () => micInfo.replaceChildren(micNote(prefs.mics[mic.value]) ?? "");
   mic.addEventListener("change", showNote);
   showNote();
-  const consent = el("input", { type: "checkbox" });
   const start = el("button", { class: "primary pill" }, "Check microphone and start");
   holder.replaceChildren(
     problem ? el("div", { class: "notice", role: "alert" }, problem) : null,
     el("h2", {}, "Your name"), name,
+    el("div", { class: "legend" }, "Shown beside what you say in meeting transcripts."),
     el("h2", {}, "Microphone"), el("div", { class: "field" }, mic, micInfo),
     devices.length ? null : el("div", { class: "error" }, "No microphones found. Connect one and come back to this step."),
-    el("label", { class: "field" }, consent, "Keep my voice print on this device"),
-    el("div", { class: "legend" }, "Only a description of how your voice sounds is kept. The recording is deleted."),
+    el("div", { class: "legend" }, "Your voice print is kept on this device: only a description of how your voice sounds. The recording is deleted."),
     el("div", { class: "actions" }, start));
   start.disabled = !devices.length;
   start.addEventListener("click", async () => {
     if (!name.value.trim()) return showError(holder, "Type your name, so meetings can show it.");
-    if (!consent.checked) return showError(holder, "Tick the box to agree to keeping your voice print.");
     holder.dataset.name = name.value.trim();
     holder.dataset.mic = mic.value;
     try {
@@ -2408,6 +2625,7 @@ const agent = {
   pending: null, // the command a "Did you mean…?" asks about
   forcedWake: false,
   levelTimer: null,
+  closedAt: 0,
 };
 let speaking = false;
 /// Whether any phrase is trained, so the microphone can listen through a recording without transcribing
@@ -2526,6 +2744,7 @@ async function openAgent(greet = true) {
 }
 
 function closeAgent() {
+  if (agent.open) agent.closedAt = Date.now();
   agent.open = false;
   agentEl.hidden = true;
   clearInterval(agent.levelTimer);
@@ -2583,14 +2802,21 @@ const justWoke = () => Date.now() - wokeAt < 6000;
 /// "Stop recording", "stop the note", "stop dictating" and the like.
 const STOP_WORDS = /^\W*(stop|end|finish|done|close)\b.*\b(record|note|dictat|writing)/i;
 
+/// Said by mistake, or nothing followed: the panel steps back so speech isn't transcribed for nothing.
+function stepBackIfQuiet() {
+  clearTimeout(agent.quietTimer);
+  agent.quietTimer = setTimeout(() => { if (agent.open && agent.mode === "idle") closeAgent(); }, 10_000);
+}
+
 /// A trained phrase, heard by the keyword spotter about a tenth of a second after it was said.
 function onKeyphrase(h) {
   if (speaking || enrolment || onboardEnrolling || phraseTraining) return;
   // The Settings page shows what was heard instead of acting on it.
   if (keyphrasePage) return keyphrasePage.onHeard(h);
   if (h.rejected) return;
-  if (view.kind === "onboarding" && view.step === 2) {
-    if (h.phrase === "wake") onboardTick();
+  // Setup isn't interrupted: only its hello page hears the wake word, to tick it off.
+  if (view.kind === "onboarding" || !prefs.onboarded) {
+    if (h.phrase === "wake" && view.step === SETUP.hello) onboardTick();
     return;
   }
   // A dictation takes every word as text, apart from "Hey Superteem, stop recording".
@@ -2609,9 +2835,7 @@ function onKeyphrase(h) {
     if (!agent.open) openAgent(false);
     heardLine("Hey Superteem");
     setAgentState("Listening for a command…");
-    // Said by mistake, or nothing followed: the panel steps back so speech isn't transcribed for nothing.
-    clearTimeout(agent.quietTimer);
-    agent.quietTimer = setTimeout(() => { if (agent.open && agent.mode === "idle") closeAgent(); }, 10_000);
+    stepBackIfQuiet();
     return;
   }
   const command = KEYPHRASE_COMMANDS[h.phrase];
@@ -2633,8 +2857,8 @@ function onHeard(text) {
   if (speaking || enrolment || onboardEnrolling || phraseTraining) return;
   if (keyphrasePage) return keyphrasePage.onWords(text);
   const wake = WAKE.exec(text);
-  if (view.kind === "onboarding" && view.step === 2) {
-    if (wake) onboardTick();
+  if (view.kind === "onboarding" || !prefs.onboarded) {
+    if (wake && view.step === SETUP.hello) onboardTick();
     return;
   }
   // A dictation only listens for "Hey Superteem, stop recording"; its words are written at the tick.
@@ -2644,8 +2868,13 @@ function onHeard(text) {
     return;
   }
   if (!agent.open && !wake) return;
+  // A phrase is transcribed a moment after it ends, so the sound of closing the panel arrives once it's shut.
+  if (!agent.open && Date.now() - agent.closedAt < 2500) return;
   const rest = wake ? text.slice(wake.index + wake[0].length).trim() : text;
-  if (!agent.open) openAgent(!rest);
+  if (!agent.open) {
+    openAgent(!rest);
+    if (!rest) stepBackIfQuiet();
+  }
   if (rest) {
     heardLine(text);
     run(rest, true);
@@ -2809,7 +3038,10 @@ async function noteByVoice(id, intro) {
     // The recording is rebuilt from its status once the page draws; listen through it from then.
     setTimeout(() => syncWake().catch(() => {}), 1000);
   } else if (!prefs.onboarded) {
-    showOnboarding(0);
+    // Back to the page setup was on when the app closed. The terms are agreed before anything else.
+    showOnboarding(prefs.terms_accepted ? Math.min(prefs.setup_step ?? 0, SETUP.done) : SETUP.welcome);
+  } else if (!prefs.terms_accepted) {
+    showOnboarding(SETUP.welcome);
   } else {
     showHome();
     // On a phone the list is home.

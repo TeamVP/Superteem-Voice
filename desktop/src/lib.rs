@@ -857,6 +857,8 @@ fn save_prefs(
     wake: Option<bool>,
     quiet: Option<bool>,
     onboarded: Option<bool>,
+    setup_step: Option<u32>,
+    accept_terms: Option<bool>,
     hidden_mics: Option<Vec<String>>,
     pins_added: Option<bool>,
     keep_audio: Option<bool>,
@@ -879,6 +881,12 @@ fn save_prefs(
         }
         if let Some(onboarded) = onboarded {
             p.onboarded = onboarded;
+        }
+        if let Some(step) = setup_step {
+            p.setup_step = step;
+        }
+        if accept_terms == Some(true) {
+            p.terms_accepted = library::now();
         }
         if let Some(theme) = theme {
             p.theme = theme;

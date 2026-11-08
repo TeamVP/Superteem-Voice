@@ -49,7 +49,7 @@ fn kws_check(data: &str, train: &str, test: &str) -> Result<(), String> {
                 listen::Event::Phrase(h) => println!("{at:7.2}s  heard {:16} score {:.2} ({:.0} ms after it ended)", h.text, h.score, h.delay_ms),
                 listen::Event::Speech(pcm) => {
                     let started = std::time::Instant::now();
-                    let words = listen::transcribe_all(&pcm)?;
+                    let words = listen::transcribe_phrase(&pcm)?;
                     println!("{at:7.2}s  command {:?} ({:.1} s of audio, whisper {:.2} s)", words, pcm.len() as f32 / process::RATE as f32, started.elapsed().as_secs_f32());
                 }
             }

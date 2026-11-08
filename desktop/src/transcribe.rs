@@ -17,6 +17,9 @@ const SHORT_CLIP_S: f32 = 20.0;
 const AUDIO_CTX_PER_S: f32 = 1500.0 / 30.0;
 /// About 7.7 s, the shortest window that transcribed short commands without errors.
 const MIN_AUDIO_CTX: f32 = 384.0;
+/// Silence read after a short clip: a second normally, and more when whisper looped on the first read.
+const QUICK_MARGIN_S: f32 = 1.0;
+const RETRY_MARGIN_S: f32 = 8.0;
 /// Context around each segment, because whisper does poorly on clipped words.
 const PADDING_SAMPLES: usize = RATE as usize / 5;
 
@@ -141,26 +144,48 @@ impl Transcriber {
         self.run(pcm, Some(prompt))
     }
 
+    /// Transcribes all of `pcm` with nothing to steer it.
+    pub fn transcribe_plain(&self, pcm: &[i16]) -> Result<String, String> {
+        self.run(pcm, None)
+    }
+
     fn run(&self, pcm: &[i16], prompt: Option<&str>) -> Result<String, String> {
         let mut audio: Vec<f32> = pcm.iter().map(|&s| s as f32 / 32768.0).collect();
         // Whisper rejects clips under a second, which a short command can be.
         audio.resize(audio.len().max(RATE as usize * 11 / 10), 0.0);
+        let seconds = audio.len() as f32 / RATE as f32;
+        if seconds < SHORT_CLIP_S {
+            // Read quickly, whisper sometimes loops on a sentence until it runs out of tokens. A wider window
+            // usually stops it at little cost, so only those clips are read again.
+            for margin in [QUICK_MARGIN_S, RETRY_MARGIN_S] {
+                let (text, capped) = self.decode(&audio, prompt, Some(margin))?;
+                if !capped && !looped(&text) {
+                    return Ok(clean(&text));
+                }
+            }
+        }
+        Ok(clean(&self.decode(&audio, prompt, None)?.0))
+    }
 
+    /// Returns the words, and whether whisper stopped only because it ran out of tokens. With `margin`, the
+    /// window is cut to the clip plus that many seconds; without, whisper reads its full 30 s.
+    fn decode(&self, audio: &[f32], prompt: Option<&str>, margin: Option<f32>) -> Result<(String, bool), String> {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
         params.set_n_threads(cores.clamp(1, 8) as i32);
         let seconds = audio.len() as f32 / RATE as f32;
-        if seconds < SHORT_CLIP_S {
+        // Even fast speech is under 6 tokens a second, so more means whisper is stuck repeating itself.
+        let max_tokens = (16.0 + 8.0 * seconds) as i32;
+        if let Some(margin) = margin {
             // Whisper reads 30 s of audio whatever the clip. A short clip is read with a shorter window, which
             // is four times faster; much shorter than 8 s and whisper starts repeating itself or dropping words.
-            let window = ((seconds + 1.0) * AUDIO_CTX_PER_S).ceil().max(MIN_AUDIO_CTX);
+            let window = ((seconds + margin) * AUDIO_CTX_PER_S).ceil().clamp(MIN_AUDIO_CTX, 1500.0);
             params.set_audio_ctx(window as i32);
             params.set_single_segment(true);
             params.set_no_timestamps(true);
             // Retrying at higher temperatures when unsure costs seconds, and short clips rarely need it.
             params.set_temperature_inc(0.0);
-            // Even fast speech is under 6 tokens a second, so more means whisper is stuck repeating itself.
-            params.set_max_tokens((16.0 + 8.0 * seconds) as i32);
+            params.set_max_tokens(max_tokens);
         }
         if let Some(prompt) = prompt {
             params.set_initial_prompt(prompt);
@@ -173,10 +198,30 @@ impl Transcriber {
         params.set_print_timestamps(false);
 
         let mut state = self.0.create_state().map_err(|e| e.to_string())?;
-        state.full(params, &audio).map_err(|e| e.to_string())?;
-        let text: String = state.as_iter().map(|segment| segment.to_str_lossy().map(|t| t.into_owned()).unwrap_or_default()).collect();
-        Ok(clean(&text))
+        state.full(params, audio).map_err(|e| e.to_string())?;
+        let mut tokens = 0;
+        let text: String = state
+            .as_iter()
+            .map(|segment| {
+                tokens += segment.n_tokens();
+                segment.to_str_lossy().map(|t| t.into_owned()).unwrap_or_default()
+            })
+            .collect();
+        Ok((text, margin.is_some() && tokens >= max_tokens))
     }
+}
+
+/// A sentence or more said three times running is whisper looping, not speech: people repeat a phrase for
+/// emphasis, but rarely a whole sentence three times. Shorter loops are collapsed by `collapse_repeats`.
+const SENTENCE_LOOP_MIN_WORDS: usize = 6;
+const SENTENCE_LOOP_MAX_WORDS: usize = 40;
+
+fn looped(text: &str) -> bool {
+    let keys: Vec<String> =
+        text.split_whitespace().map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase()).filter(|w| !w.is_empty()).collect();
+    (SENTENCE_LOOP_MIN_WORDS..=SENTENCE_LOOP_MAX_WORDS).any(|n| {
+        (0..keys.len().saturating_sub(3 * n - 1)).any(|i| keys[i..i + n] == keys[i + n..i + 2 * n] && keys[i..i + n] == keys[i + 2 * n..i + 3 * n])
+    })
 }
 
 #[cfg(test)]
@@ -198,6 +243,15 @@ mod tests {
         assert_eq!(clean("no no no"), "no no no", "a word said three times is speech");
         assert_eq!(clean("go go go go go"), "go");
         assert_eq!(clean("that that is it"), "that that is it");
+    }
+
+    #[test]
+    fn a_sentence_said_three_times_running_is_a_loop() {
+        let once = "Testing, testing, one, two, three, testing, testing, you and me.";
+        assert!(!looped(&format!("{once} {once}")), "said twice on purpose");
+        assert!(looped(&format!("{once} {once} {once} Testing, testing, one")));
+        assert!(!looped("go go go go go"), "short repeats are collapse_repeats' job");
+        assert!(!looped("We met on Monday. Then we met on Tuesday. Then we met on Wednesday."));
     }
 
     /// Needs the model and a 16 kHz mono 16-bit WAV: set STV_TEST_WAV and run with --ignored.

@@ -16,7 +16,9 @@ use std::sync::{Mutex, OnceLock};
 use stv_core::attribute::window_db;
 use stv_core::kws::Spotter;
 
-/// Biases whisper towards the app's name, which it otherwise hears as "super team".
+/// Biases dictation towards the app's name, which whisper otherwise hears as "super team". Phrases the
+/// listener hears are never given it: on a tap or a cough whisper repeats the prompt back, which read as
+/// the wake word every time.
 const PROMPT: &str = "Hey Superteem.";
 
 static TRANSCRIBER: Mutex<Option<Transcriber>> = Mutex::new(None);
@@ -35,8 +37,18 @@ pub fn phrases_changed() {
     PHRASES_VERSION.fetch_add(1, Ordering::Relaxed);
 }
 
-/// Loads the model once and keeps it, so each phrase is quick.
+/// Transcribes dictation, steered towards the app's name.
 pub fn transcribe_all(pcm: &[i16]) -> Result<String, String> {
+    with_transcriber(|t| t.transcribe_with_prompt(pcm, PROMPT))
+}
+
+/// Transcribes a short phrase heard by the listener, with no prompt for whisper to repeat.
+pub fn transcribe_phrase(pcm: &[i16]) -> Result<String, String> {
+    with_transcriber(|t| t.transcribe_plain(pcm))
+}
+
+/// Loads the model once and keeps it, so each phrase is quick.
+fn with_transcriber(run: impl FnOnce(&Transcriber) -> Result<String, String>) -> Result<String, String> {
     if !transcribe::model_ready() {
         return Err("Download the speech model first, in Settings.".into());
     }
@@ -44,7 +56,7 @@ pub fn transcribe_all(pcm: &[i16]) -> Result<String, String> {
     if slot.is_none() {
         *slot = Some(Transcriber::load()?);
     }
-    slot.as_ref().unwrap().transcribe_with_prompt(pcm, PROMPT)
+    run(slot.as_ref().unwrap())
 }
 
 const FRAME_MS: usize = 1000 * FRAME_SAMPLES / RATE as usize;
@@ -297,7 +309,7 @@ mod imp {
         // Phrases are transcribed on their own thread so listening never stalls behind whisper.
         let words = thread::spawn(move || {
             for phrase in phrases_rx {
-                if let Ok(text) = transcribe_all(&phrase) {
+                if let Ok(text) = transcribe_phrase(&phrase) {
                     if !text.is_empty() {
                         if let Some(on_heard) = ON_HEARD.get() {
                             on_heard(text);
