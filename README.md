@@ -19,22 +19,21 @@ Superteem Voice turns speech into text on your PC or phone. You can dictate note
 ## Features
 
 - **Voice notes:** start a note and talk. Your words are written into it as you go.
-- **Meeting transcripts:** record with up to three microphones and Voice Pins. You get a timecoded transcript with speakers recognised by voice print, plus bookmarks and action items.
+- **Meeting transcripts:** record from several microphones at once. You get a timecoded transcript with speakers recognised by voice print, plus bookmarks and action items.
 - **Voice commands (Windows):** say "Hey Superteem, start meeting", "take a note" or "bookmark that".
 - **Plain files:** each meeting is a folder of WAV audio and `transcript.json`. Text, Markdown and SRT copies are written next to them and regenerated on every edit. On Windows the folders live in `Documents\Superteem Voice`.
-- **Voice Pin:** a wearable Bluetooth microphone. For now it's a prototype on the Seeed XIAO nRF52840 Sense.
+- **Voice Pin (in development):** support for Seeed's wearable [reSpeaker Clip](https://github.com/Seeed-Studio/reSpeaker_Clip), which runs Seeed's own open-source firmware.
 
 Transcription uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with the English `base.en` model. The app downloads the model (about 140 MB) once on first run and then works offline.
 
 ## Download
 
-Get the latest Windows installer, Android APK and pin firmware from **[voice.superteem.com](https://voice.superteem.com)**.
+Get the latest Windows installer and Android APK from **[voice.superteem.com](https://voice.superteem.com)**.
 
 | Device | Requires | File |
 | --- | --- | --- |
 | Windows | Windows 10 or 11, 64-bit | `Superteem-Voice-Setup-x64.exe` |
 | Android | Android 10 or later | `Superteem-Voice-Android.apk` |
-| Voice Pin | Seeed XIAO nRF52840 Sense | `Superteem-Voice-Pin-XIAO-nRF52840-Sense.uf2` |
 
 ## Repository layout
 
@@ -42,8 +41,8 @@ Get the latest Windows installer, Android APK and pin firmware from **[voice.sup
 | --- | --- |
 | `core/` | Rust library shared by every app: pin protocol, ADPCM, keyword spotting, voice prints, speaker attribution, exports |
 | `desktop/` | The Tauri app for Windows and Android: Rust in `src/`, the interface in `ui/`, the Android project in `gen/android/` |
-| `firmware/` | Zephyr firmware for the Voice Pin |
-| `protocol/` | The pin's Bluetooth protocol and its test vectors |
+| `firmware/` | Step 0 radio test firmware for a Seeed XIAO nRF52840 Sense. A development tool for testing Bluetooth audio, not shipped |
+| `protocol/` | The Bluetooth protocol the test firmware speaks, and its test vectors |
 | `site/` | The download page at voice.superteem.com |
 | `public/` | Logos and icons |
 
@@ -73,7 +72,7 @@ rustup target add aarch64-linux-android x86_64-linux-android
 .\desktop\build-android.ps1 -Install
 ```
 
-**Voice Pin firmware.** Install [west](https://docs.zephyrproject.org/latest/develop/west/index.html), then from the repository root:
+**Radio test firmware (development only).** Install [west](https://docs.zephyrproject.org/latest/develop/west/index.html), then from the repository root:
 
 ```sh
 west init -l firmware
@@ -93,10 +92,10 @@ cargo test --manifest-path core/Cargo.toml
 1. Set the version in `desktop/tauri.conf.json`.
 2. Push a matching tag, for example `v0.2.0`.
 
-The Release workflow then builds all three files and publishes a GitHub release, and the download page links to it automatically. Android releases are signed with the key in the repository secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
+The Release workflow then builds the Windows and Android apps and publishes a GitHub release, and the download page links to it automatically. Android releases are signed with the key in the repository secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
 
 ## License
 
-The apps and the shared `core` library are released under the [GNU General Public License v3.0](LICENSE).
+Everything in this repository is released under the [GNU General Public License v3.0](LICENSE).
 
-The Voice Pin firmware in `firmware/` is released under the [MIT License](firmware/LICENSE).
+The reSpeaker Clip's firmware is not part of this project. It is Seeed's, published by Seeed Technology under the Apache License 2.0 at [Seeed-Studio/reSpeaker_Clip](https://github.com/Seeed-Studio/reSpeaker_Clip).

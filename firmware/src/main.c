@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: MIT */
 /* Step 0 radio test firmware for the XIAO nRF52840 Sense.
  *
  * Streams ADPCM frames over an L2CAP channel (PSM 0x0080), or GATT notifications as a fallback,

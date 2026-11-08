@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Superteem Voice</title>
-  <meta name="description" content="Voice notes transcribed on your own device. No cloud. Download Superteem Voice for Windows and Android, and firmware for the Voice Pin.">
+  <meta name="description" content="Voice notes transcribed on your own device. No cloud. Download Superteem Voice for Windows and Android.">
   <link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="brand/appicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -90,6 +90,8 @@
     }
     .download:hover { background: var(--key-1); }
     .download[aria-disabled="true"] { background: var(--line); color: var(--muted); pointer-events: none; }
+    .download.outbound { background: transparent; color: var(--accent-text); border: 1px solid var(--line); }
+    .download.outbound:hover { background: var(--tint); }
     .size { font-weight: 400; opacity: 0.85; }
     .how { margin: 0; font-size: 13px; color: var(--muted); }
 
@@ -144,7 +146,7 @@
           <div><h2>Windows</h2><p class="needs">Windows 10 or 11, 64-bit</p></div>
           <span class="yours-tag">Your device</span>
         </div>
-        <p class="what">The full app: notes, meetings with up to three microphones and Voice Pins, and “Hey Superteem” voice commands.</p>
+        <p class="what">The full app: notes, meetings recorded from several microphones at once, and “Hey Superteem” voice commands.</p>
         <a class="download" data-file="Superteem-Voice-Setup-x64.exe" aria-disabled="true">Download for Windows</a>
         <p class="how">Run the installer. While the app is unsigned, Windows may say the publisher is unknown: choose <b>More info</b>, then <b>Run anyway</b>.</p>
       </article>
@@ -155,7 +157,7 @@
           <div><h2>Android</h2><p class="needs">Android 10 or later</p></div>
           <span class="yours-tag">Your device</span>
         </div>
-        <p class="what">Notes and meetings on your phone, with Voice Pins connected over Bluetooth.</p>
+        <p class="what">Notes and meetings on your phone.</p>
         <a class="download" data-file="Superteem-Voice-Android.apk" aria-disabled="true">Download for Android</a>
         <p class="how">Open the downloaded file. If asked, allow your browser to install apps, then tap <b>Install</b>.</p>
       </article>
@@ -163,11 +165,11 @@
       <article class="card" data-device="pin">
         <div class="card-head">
           <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v5M9.5 11a2.5 2.5 0 0 0 5 0"/></svg></div>
-          <div><h2>Voice Pin</h2><p class="needs">Seeed XIAO nRF52840 Sense prototype</p></div>
+          <div><h2>Voice Pin</h2><p class="needs">Seeed reSpeaker Clip</p></div>
         </div>
-        <p class="what">Firmware for the wearable pin prototype, which streams its microphone to the app.</p>
-        <a class="download" data-file="Superteem-Voice-Pin-XIAO-nRF52840-Sense.uf2" aria-disabled="true">Download firmware</a>
-        <p class="how">Connect the board by USB-C and double-tap its reset button. Copy the file onto the drive that appears.</p>
+        <p class="what">Support for Seeed’s wearable reSpeaker Clip is in development. The Clip runs Seeed’s own open-source firmware, so there is nothing to install from us.</p>
+        <a class="download outbound" href="https://github.com/Seeed-Studio/reSpeaker_Clip">Seeed’s Clip firmware</a>
+        <p class="how">Firmware and updates for the Clip come from Seeed.</p>
       </article>
     </section>
 
@@ -202,7 +204,7 @@
         </div>
         <div class="point">
           <h3>Meeting transcripts</h3>
-          <p>Record with up to three microphones and Voice Pins. You get a timecoded transcript with speakers recognised by voice, plus bookmarks and action items.</p>
+          <p>Record from several microphones at once. You get a timecoded transcript with speakers recognised by voice, plus bookmarks and action items.</p>
         </div>
         <div class="point">
           <h3>Voice commands</h3>
@@ -210,14 +212,14 @@
         </div>
         <div class="point">
           <h3>Voice Pin</h3>
-          <p>A small wearable microphone that clips on and streams to the app over Bluetooth. It is a prototype on Seeed's XIAO board for now.</p>
+          <p>Support for Seeed’s reSpeaker Clip, a wearable recorder that clips onto your clothes, is in development.</p>
         </div>
       </div>
       <p class="note">Transcription is in English for now.</p>
     </section>
 
     <footer>
-      <span>Free and open source: the apps under the <a href="https://github.com/TeamVP/Superteem-Voice/blob/main/LICENSE">GNU GPL v3</a>, the pin firmware under the <a href="https://github.com/TeamVP/Superteem-Voice/blob/main/firmware/LICENSE">MIT License</a></span>
+      <span>Free and open source under the <a href="https://github.com/TeamVP/Superteem-Voice/blob/main/LICENSE">GNU GPL v3</a></span>
       <a href="https://github.com/TeamVP/Superteem-Voice/releases">All releases</a>
       <a href="https://github.com/TeamVP/Superteem-Voice/issues">Report a problem</a>
     </footer>
@@ -231,7 +233,7 @@
     const yours = /Android/i.test(ua) ? "android" : /Windows/i.test(ua) ? "windows" : null;
     if (yours) document.querySelector(`[data-device="${yours}"]`).classList.add("yours");
 
-    const links = [...document.querySelectorAll(".download")];
+    const links = [...document.querySelectorAll(".download[data-file]")];
     for (const link of links) link.dataset.label = link.textContent;
     const megabytes =(bytes) => `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`;
     const release = document.getElementById("release");

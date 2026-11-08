@@ -1,4 +1,4 @@
-# Builds every device's app and publishes them as a GitHub release when a version tag such as v0.2.0 is pushed.
+# Builds the Windows and Android apps and publishes them as a GitHub release when a version tag such as v0.2.0 is pushed.
 # The download page at voice.superteem.com links to the latest release's files by these fixed names.
 # Run it by hand from the Actions tab to build without publishing; the files are then kept as workflow artifacts.
 name: Release
@@ -13,7 +13,6 @@ permissions:
 env:
   WINDOWS_FILE: Superteem-Voice-Setup-x64.exe
   ANDROID_FILE: Superteem-Voice-Android.apk
-  PIN_FILE: Superteem-Voice-Pin-XIAO-nRF52840-Sense.uf2
 
 jobs:
   version:
@@ -98,34 +97,9 @@ jobs:
           path: dist/
           if-no-files-found: ignore
 
-  pin:
-    needs: version
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Set up Zephyr
-        run: |
-          pip install west
-          west init -l firmware
-          west update --narrow -o=--depth=1
-          pip install -r zephyr/scripts/requirements.txt
-          west sdk install -t arm-zephyr-eabi
-      - name: Build the firmware
-        run: |
-          west build -b xiao_ble/nrf52840/sense firmware -d build-pin
-          mkdir -p dist
-          cp build-pin/zephyr/zephyr.uf2 "dist/$PIN_FILE"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pin
-          path: dist/
-
-  # Publishes whatever was built. The Windows app is required; Android and the pin are left out if they failed.
+  # Publishes whatever was built. The Windows app is required; Android is left out if it failed.
   release:
-    needs: [windows, android, pin]
+    needs: [windows, android]
     if: startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.windows.result == 'success'
     runs-on: ubuntu-latest
     permissions:
