@@ -1,0 +1,144 @@
+# Builds every device's app and publishes them as a GitHub release when a version tag such as v0.2.0 is pushed.
+# The download page at voice.superteem.com links to the latest release's files by these fixed names.
+# Run it by hand from the Actions tab to build without publishing; the files are then kept as workflow artifacts.
+name: Release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  WINDOWS_FILE: Superteem-Voice-Setup-x64.exe
+  ANDROID_FILE: Superteem-Voice-Android.apk
+  PIN_FILE: Superteem-Voice-Pin-XIAO-nRF52840-Sense.uf2
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(jq -r .version desktop/tauri.conf.json)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match version $version in desktop/tauri.conf.json"
+            exit 1
+          fi
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          . desktop/build-env.ps1
+          Push-Location desktop
+          npm ci --no-audit --no-fund
+          npm run tauri -- build --bundles nsis
+          if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
+          Pop-Location
+          $setup = Get-ChildItem desktop/target/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item $setup.FullName "dist/$env:WINDOWS_FILE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/
+
+  android:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+      - run: rustup target add aarch64-linux-android
+      - name: Build the APK
+        shell: pwsh
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STV_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          STV_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          STV_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if ($env:KEYSTORE_BASE64) {
+            $env:STV_KEYSTORE = Join-Path $env:RUNNER_TEMP 'release.jks'
+            [IO.File]::WriteAllBytes($env:STV_KEYSTORE, [Convert]::FromBase64String($env:KEYSTORE_BASE64))
+          } elseif ($env:GITHUB_REF -like 'refs/tags/*') {
+            # A debug-signed APK can't be updated by later releases, so it is never published.
+            Write-Output '::warning::The Android signing secrets are not set, so this release has no Android app.'
+            exit 0
+          }
+          ./desktop/build-android.ps1 -Targets aarch64
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item desktop/target/superteem-voice.apk "dist/$env:ANDROID_FILE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/
+          if-no-files-found: ignore
+
+  pin:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Set up Zephyr
+        run: |
+          pip install west
+          west init -l firmware
+          west update --narrow -o=--depth=1
+          pip install -r zephyr/scripts/requirements.txt
+          west sdk install -t arm-zephyr-eabi
+      - name: Build the firmware
+        run: |
+          west build -b xiao_ble/nrf52840/sense firmware -d build-pin
+          mkdir -p dist
+          cp build-pin/zephyr/zephyr.uf2 "dist/$PIN_FILE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pin
+          path: dist/
+
+  # Publishes whatever was built. The Windows app is required; Android and the pin are left out if they failed.
+  release:
+    needs: [windows, android, pin]
+    if: startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.windows.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "Superteem Voice ${GITHUB_REF_NAME#v}" --generate-notes

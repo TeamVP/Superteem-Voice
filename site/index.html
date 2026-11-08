@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Superteem Voice</title>
+  <meta name="description" content="Download Superteem Voice for Windows and Android, and firmware for the Superteem Voice Pin.">
+  <link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="brand/appicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --key: #6f52ad;
+      --key-1: #59428a;
+      --bg: #f6f5f2;
+      --panel: #ffffff;
+      --text: #16181d;
+      --soft: #3e4149;
+      --muted: #5a5d66;
+      --line: #e3e0d9;
+      --tint: #efeaf8;
+      --accent-text: var(--key-1);
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #111317;
+        --panel: #16191e;
+        --text: #ecedef;
+        --soft: #c9ccd2;
+        --muted: #9a9ea8;
+        --line: #2a2e36;
+        --tint: #221d30;
+        --accent-text: #a388dd;
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #111317;
+      --panel: #16191e;
+      --text: #ecedef;
+      --soft: #c9ccd2;
+      --muted: #9a9ea8;
+      --line: #2a2e36;
+      --tint: #221d30;
+      --accent-text: #a388dd;
+      color-scheme: dark;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 16px/1.55 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent-text); }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px 0; }
+    .logo img { display: block; height: 30px; width: auto; }
+    .source { display: inline-flex; align-items: center; gap: 8px; color: var(--soft); text-decoration: none; font-weight: 500; font-size: 15px; }
+    .source:hover { color: var(--text); }
+
+    .hero { padding: 56px 0 40px; max-width: 720px; }
+    .hero h1 { font-size: clamp(32px, 5vw, 48px); line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 16px; font-weight: 700; }
+    .hero p { font-size: 19px; color: var(--soft); margin: 0 0 20px; }
+    .release { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; color: var(--muted); }
+    .badge { background: var(--tint); color: var(--accent-text); font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 16px; padding-bottom: 56px; }
+    /* Each card's four parts share rows with the other cards, so the buttons line up. */
+    .card {
+      display: grid; grid-row: span 4; grid-template-rows: subgrid; gap: 14px; padding: 24px; border-radius: 18px;
+      background: var(--panel); border: 1px solid var(--line);
+    }
+    .card.yours { border-color: var(--key); box-shadow: 0 0 0 3px color-mix(in srgb, var(--key) 18%, transparent); }
+    .card-head { display: flex; align-items: center; gap: 12px; }
+    .icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--tint); color: var(--accent-text); flex: none; }
+    .card h2 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+    .needs { margin: 0; font-size: 14px; color: var(--muted); }
+    .yours-tag { margin-left: auto; align-self: flex-start; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--accent-text); display: none; }
+    .card.yours .yours-tag { display: block; }
+    .card p.what { margin: 0; color: var(--soft); font-size: 15px; }
+    .download {
+      align-self: start; display: flex; align-items: center; justify-content: center; gap: 8px;
+      min-height: 46px; padding: 0 18px; border-radius: 12px; font-weight: 600; font-size: 15px; text-decoration: none;
+      background: var(--key); color: #fff;
+    }
+    .download:hover { background: var(--key-1); }
+    .download[aria-disabled="true"] { background: var(--line); color: var(--muted); pointer-events: none; }
+    .size { font-weight: 400; opacity: 0.85; }
+    .how { margin: 0; font-size: 13px; color: var(--muted); }
+
+    footer { border-top: 1px solid var(--line); padding: 24px 0 40px; font-size: 14px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px 24px; }
+    footer a { color: var(--soft); }
+
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; gap: 16px; }
+      .card.yours { order: -1; }
+      .hero { padding: 32px 0 28px; }
+      .hero p { font-size: 17px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <a class="logo" href="./" aria-label="Superteem">
+        <picture>
+          <source srcset="brand/Superteem-only-light.png" media="(prefers-color-scheme: dark)">
+          <img src="brand/Superteem-only-dark.png" alt="Superteem">
+        </picture>
+      </a>
+      <a class="source" href="https://github.com/TeamVP/Superteem-Voice">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 6l-6 6 6 6M16 6l6 6-6 6"/></svg>
+        Source code
+      </a>
+    </header>
+
+    <section class="hero">
+      <h1>Superteem Voice</h1>
+      <p>Voice notes, timecoded meeting transcripts and voice commands. Speech is transcribed on your own device, and your recordings stay with you.</p>
+      <div class="release" id="release"><span class="badge">Loading the latest release…</span></div>
+    </section>
+
+    <section class="grid" aria-label="Downloads">
+      <article class="card" data-device="windows">
+        <div class="card-head">
+          <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+          <div><h2>Windows</h2><p class="needs">Windows 10 or 11, 64-bit</p></div>
+          <span class="yours-tag">Your device</span>
+        </div>
+        <p class="what">The full app: notes, meetings with up to three microphones and Voice Pins, and “Hey Superteem” voice commands.</p>
+        <a class="download" data-file="Superteem-Voice-Setup-x64.exe" aria-disabled="true">Download for Windows</a>
+        <p class="how">Run the installer. While the app is unsigned, Windows may say the publisher is unknown: choose <b>More info</b>, then <b>Run anyway</b>.</p>
+      </article>
+
+      <article class="card" data-device="android">
+        <div class="card-head">
+          <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg></div>
+          <div><h2>Android</h2><p class="needs">Android 10 or later</p></div>
+          <span class="yours-tag">Your device</span>
+        </div>
+        <p class="what">Notes and meetings on your phone, with Voice Pins connected over Bluetooth.</p>
+        <a class="download" data-file="Superteem-Voice-Android.apk" aria-disabled="true">Download for Android</a>
+        <p class="how">Open the downloaded file. If asked, allow your browser to install apps, then tap <b>Install</b>.</p>
+      </article>
+
+      <article class="card" data-device="pin">
+        <div class="card-head">
+          <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v5M9.5 11a2.5 2.5 0 0 0 5 0"/></svg></div>
+          <div><h2>Voice Pin</h2><p class="needs">Seeed XIAO nRF52840 Sense prototype</p></div>
+        </div>
+        <p class="what">Firmware for the wearable pin prototype, which streams its microphone to the app.</p>
+        <a class="download" data-file="Superteem-Voice-Pin-XIAO-nRF52840-Sense.uf2" aria-disabled="true">Download firmware</a>
+        <p class="how">Connect the board by USB-C and double-tap its reset button. Copy the file onto the drive that appears.</p>
+      </article>
+    </section>
+
+    <footer>
+      <span>Free and open source under the <a href="https://github.com/TeamVP/Superteem-Voice/blob/main/LICENSE">GNU GPL v3</a></span>
+      <a href="https://github.com/TeamVP/Superteem-Voice/releases">All releases</a>
+      <a href="https://github.com/TeamVP/Superteem-Voice/issues">Report a problem</a>
+    </footer>
+  </div>
+
+  <script>
+    const REPO = "TeamVP/Superteem-Voice";
+
+    // Point out the card for the device this page is open on.
+    const ua = navigator.userAgent;
+    const yours = /Android/i.test(ua) ? "android" : /Windows/i.test(ua) ? "windows" : null;
+    if (yours) document.querySelector(`[data-device="${yours}"]`).classList.add("yours");
+
+    const links = [...document.querySelectorAll(".download")];
+    for (const link of links) link.dataset.label = link.textContent;
+    const megabytes =(bytes) => `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`;
+    const release = document.getElementById("release");
+
+    function showRelease(data) {
+      const date = new Date(data.published_at).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+      release.innerHTML = "";
+      const badge = Object.assign(document.createElement("span"), { className: "badge", textContent: `Version ${data.tag_name.replace(/^v/, "")}` });
+      const when = Object.assign(document.createElement("span"), { textContent: `Released ${date}` });
+      const notes = Object.assign(document.createElement("a"), { href: data.html_url, textContent: "What's new" });
+      release.append(badge, when, notes);
+
+      for (const link of links) {
+        const asset = data.assets.find((a) => a.name === link.dataset.file);
+        if (!asset) {
+          link.textContent = "Not in this release";
+          continue;
+        }
+        link.textContent = link.dataset.label;
+        link.href = asset.browser_download_url;
+        link.removeAttribute("aria-disabled");
+        link.append(" ", Object.assign(document.createElement("span"), { className: "size", textContent: `· ${megabytes(asset.size)}` }));
+      }
+    }
+
+    fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: "application/vnd.github+json" } })
+      .then((r) => (r.status === 404 ? null : r.ok ? r.json() : Promise.reject(r.status)))
+      .then((data) => {
+        if (data) return showRelease(data);
+        release.innerHTML = '<span class="badge">The first release is on its way</span>';
+        for (const link of links) link.textContent = "Coming soon";
+      })
+      .catch(() => {
+        // GitHub's API limits how often one address may ask. The fixed latest-release links still work without it.
+        release.innerHTML = `<a href="https://github.com/${REPO}/releases/latest">See the latest release on GitHub</a>`;
+        for (const link of links) {
+          link.href = `https://github.com/${REPO}/releases/latest/download/${link.dataset.file}`;
+          link.removeAttribute("aria-disabled");
+        }
+      });
+  </script>
+</body>
+</html>

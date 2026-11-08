@@ -48,7 +48,8 @@ if (-not (Test-Path (Join-Path $vendor 'build.rs'))) {
 }
 
 if ($Android) {
-    $sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
+    # Android Studio's SDK, unless ANDROID_HOME already points at one (as on GitHub's runners).
+    $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
     $ndk = Get-ChildItem (Join-Path $sdk 'ndk') -Directory | Sort-Object Name | Select-Object -Last 1
     if (-not $ndk) { throw 'Install the Android NDK from Android Studio' }
     $cmakeDir = Get-ChildItem (Join-Path $sdk 'cmake') -Directory | Sort-Object Name | Select-Object -Last 1

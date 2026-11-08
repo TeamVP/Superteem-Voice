@@ -1,0 +1,17 @@
+# The Zephyr workspace for the pin firmware: `west init -l firmware && west update` from the repository root.
+# Only the modules the XIAO nRF52840 Sense needs are fetched.
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: v4.2.0
+      import:
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - hal_nordic
+  self:
+    path: firmware
