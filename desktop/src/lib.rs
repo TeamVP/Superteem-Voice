@@ -805,8 +805,8 @@ async fn start_phrase_training(
 #[tauri::command]
 async fn stop_phrase_training<R: Runtime>(app: AppHandle<R>, save: bool) -> Result<Option<keyphrases::TrainResult>, String> {
     let t = app.state::<AppState>().training.lock().unwrap().take().ok_or("Not recording.")?;
-    listen::set_paused(false);
-    blocking(move || {
+    // Commands stay paused until the takes are learnt, so the last take isn't acted on as it's said.
+    let result = blocking(move || {
         let dir = t.recorder.dir().to_path_buf();
         let last = t.recorder.status();
         t.recorder.stop()?;
@@ -822,7 +822,9 @@ async fn stop_phrase_training<R: Runtime>(app: AppHandle<R>, save: bool) -> Resu
         listen::phrases_changed();
         result
     })
-    .await?
+    .await;
+    listen::set_paused(false);
+    result?
 }
 
 #[tauri::command]

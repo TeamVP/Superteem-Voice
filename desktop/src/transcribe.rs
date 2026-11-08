@@ -77,7 +77,45 @@ fn clean(text: &str) -> String {
             _ => {}
         }
     }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    collapse_repeats(&out.split_whitespace().collect::<Vec<_>>()).join(" ")
+}
+
+/// A run of words said this many times over is whisper stuck in a loop, not speech. A single word needs
+/// more, as people do say "no, no, no".
+const LOOP_REPEATS: usize = 3;
+const LOOP_REPEATS_ONE_WORD: usize = 4;
+const LOOP_MAX_WORDS: usize = 8;
+
+/// Keeps one copy of a phrase whisper repeated over and over ("bookmark that bookmark that bookmark…"),
+/// including the cut-off copy at the end where it ran out of tokens.
+fn collapse_repeats<'a>(words: &[&'a str]) -> Vec<&'a str> {
+    let key = |w: &str| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+    let keys: Vec<String> = words.iter().map(|w| key(w)).collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    'words: while i < words.len() {
+        for n in 1..=LOOP_MAX_WORDS.min((words.len() - i) / LOOP_REPEATS) {
+            let unit = &keys[i..i + n];
+            let mut copies = 1;
+            while i + (copies + 1) * n <= words.len() && keys[i + copies * n..i + (copies + 1) * n] == *unit {
+                copies += 1;
+            }
+            if copies >= if n == 1 { LOOP_REPEATS_ONE_WORD } else { LOOP_REPEATS } {
+                out.extend_from_slice(&words[i..i + n]);
+                let mut next = i + copies * n;
+                // A last copy cut short.
+                let partial = keys[next..].iter().zip(unit).take_while(|(a, b)| a == b).count();
+                if partial < n {
+                    next += partial;
+                }
+                i = next;
+                continue 'words;
+            }
+        }
+        out.push(words[i]);
+        i += 1;
+    }
+    out
 }
 
 pub struct Transcriber(WhisperContext);
@@ -150,6 +188,16 @@ mod tests {
         assert_eq!(clean(" [BLANK_AUDIO] "), "");
         assert_eq!(clean("(wind blowing) Hello  there [music]"), "Hello there");
         assert_eq!(clean("stray) words"), "stray words");
+    }
+
+    #[test]
+    fn repetition_loops_are_collapsed() {
+        let looped = format!("{}bookmark", "bookmark that ".repeat(15));
+        assert_eq!(clean(&looped), "bookmark that");
+        assert_eq!(clean("So, bookmark that. Bookmark that. Bookmark that. Then we ship."), "So, bookmark that. Then we ship.");
+        assert_eq!(clean("no no no"), "no no no", "a word said three times is speech");
+        assert_eq!(clean("go go go go go"), "go");
+        assert_eq!(clean("that that is it"), "that that is it");
     }
 
     /// Needs the model and a 16 kHz mono 16-bit WAV: set STV_TEST_WAV and run with --ignored.

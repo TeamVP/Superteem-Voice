@@ -149,9 +149,16 @@ impl Hearing {
                         self.speech_frames = 0;
                         self.silent_frames = 0;
                         self.command = Some(COMMAND_WAIT_FRAMES);
-                    } else {
-                        // The spotter has handled it, so it isn't transcribed and acted on again.
+                    } else if self.command.is_some() {
+                        // The command after the wake word: the spotter has handled it, so it isn't transcribed too.
                         self.interrupt();
+                    } else {
+                        // The spotter has handled the phrase, so its words aren't transcribed and acted on again,
+                        // but what was said before it in the same breath still is.
+                        let said = (self.samples.saturating_sub(hit.start) as usize).min(self.phrase.len());
+                        self.phrase.truncate(self.phrase.len() - said);
+                        self.speech_frames = self.speech_frames.min(self.phrase.len() / FRAME_SAMPLES);
+                        self.preroll.clear();
                     }
                 }
                 out.push(Event::Phrase(heard));
@@ -362,9 +369,12 @@ mod imp {
                     if ear.dictating && ear.dictation.len() < MAX_DICTATION {
                         ear.dictation.extend_from_slice(&frame);
                     }
-                    (ear.wake && !ear.muted && !ear.paused && !ear.dictating, ear.attentive)
+                    // While dictating, only trained phrases are listened for, so "Hey Superteem, stop recording"
+                    // can end it without every word being transcribed twice.
+                    let dictating = ear.dictating && !hearing.trained();
+                    (ear.wake && !ear.muted && !ear.paused && !dictating, ear.attentive && !ear.dictating)
                 };
-                // While dictating the words go into the note, and while the app speaks it would hear itself.
+                // While the app speaks it would hear itself.
                 if !listening {
                     hearing.interrupt();
                     continue;

@@ -135,6 +135,9 @@ pub struct Marker {
     pub at_s: f64,
     #[serde(default)]
     pub text: String,
+    /// "action" for an action item, written up from what was said there; empty for a bookmark.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

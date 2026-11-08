@@ -253,6 +253,8 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .marker .mono { font-size: 12px; color: var(--muted); margin-right: 6px; }
 .pinned { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); }
 .pinned .bookmark { color: var(--accent, var(--soft)); margin-left: -6px; }
+.pinned .action-item { color: var(--ok); margin-left: -6px; }
+.marker.action, .line.marker-line.action { box-shadow: inset 3px 0 0 var(--ok); }
 .pinned input { border: none; background: transparent; outline: none; flex: 1; min-width: 0; color: var(--text); }
 .live-controls { display: flex; justify-content: center; align-items: center; gap: 28px; margin-top: auto; }
 .round { width: 56px; height: 56px; border-radius: 28px; display: flex; align-items: center; justify-content: center; padding: 0; }
@@ -271,6 +273,7 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .track .bar { flex: 1; height: 16px; background: var(--raised); border-radius: 4px; position: relative; overflow: hidden; }
 .track .bar span { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
 .track .bar i { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--key-light); }
+.track .bar i.action { background: var(--ok); }
 .playhead { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); pointer-events: none; }
 .transport { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .transport .play { width: 44px; height: 44px; border-radius: 22px; border: none; background: var(--key); color: #fff; padding: 0; display: flex; align-items: center; justify-content: center; }
@@ -479,3 +482,8 @@ body[data-platform="android"] .windows-only { display: none !important; }
   transition: background 0.2s, color 0.2s, border-color 0.2s;
 }
 .wake-indicator.on { background: var(--ok); border-color: var(--ok); color: #fff; }
+.try-it { display: flex; align-items: center; gap: 14px; }
+.try-it .wake-indicator { flex: 1; margin: 8px 0; }
+.try-results { margin: 0 0 14px; padding-left: 20px; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.action-items { list-style: none; padding: 0; margin: 6px 0 4px; display: flex; flex-direction: column; gap: 6px; }
+.action-items li { display: grid; grid-template-columns: 64px 1fr; gap: 12px; padding: 8px; border-radius: 8px; background: var(--highlight); box-shadow: inset 3px 0 0 var(--ok); }

@@ -32,6 +32,7 @@ const icon = {
   wave: '<path d="M4 9v6M8 6v12M12 10v4M16 7v10M20 10v4"></path>',
   mic: '<rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0014 0M12 18v3"></path>',
   bookmark: '<path d="M6 3h12v18l-6-4-6 4z"></path>',
+  action: '<rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8 12l3 3 5-6"></path>',
   play: '<path d="M7 4l13 8-13 8z" fill="currentColor" stroke="none"></path>',
   "skip-back": '<path d="M18 5l-10 7 10 7z" fill="currentColor" stroke="none"></path><path d="M6 5v14"></path>',
   "skip-forward": '<path d="M6 5l10 7-10 7z" fill="currentColor" stroke="none"></path><path d="M18 5v14"></path>',
@@ -100,6 +101,7 @@ function showPage() {
 
 /// Leaves whatever page was open: stops playback and polling, and saves a note being edited.
 function leave() {
+  keyphrasePage?.stop();
   keyphrasePage = null;
   stopProbe();
   cancelOnboardReading();
@@ -609,6 +611,7 @@ async function startDictation() {
     return;
   }
   if (!dictation) return;
+  syncWake().catch(() => {});
   const bars = [...wave.children];
   dictation.levelTimer = setInterval(async () => {
     const level = await invoke("listen_level").catch(() => 0);
@@ -627,7 +630,8 @@ function endDictationUi() {
 
 /// Writes what was said at the cursor, or at the end of the note when the cursor is elsewhere,
 /// keeping the audio when Settings asks.
-async function stopDictation() {
+/// `byVoice` when ended with "Hey Superteem, stop recording", which is then left out of the words.
+async function stopDictation(byVoice = false) {
   if (!dictation || dictation.busy) return;
   dictation.busy = true;
   endDictationUi();
@@ -642,7 +646,8 @@ async function stopDictation() {
       note.id = await invoke("save_note", { id: note.id, title: note.title, body: note.body, keepAudio: true });
       view.id = note.id;
     }
-    const words = await invoke("dictate_stop", { note: keep ? note.id : null });
+    const heard = await invoke("dictate_stop", { note: keep ? note.id : null });
+    const words = byVoice ? withoutStopCommand(heard) : heard;
     if (body && slot?.isConnected && words?.trim()) {
       const range = document.createRange();
       range.selectNode(slot);
@@ -656,6 +661,16 @@ async function stopDictation() {
     showDictationError(e);
   }
   dictation = null;
+  syncWake().catch(() => {});
+}
+
+/// The words of a dictation without the "Hey Superteem, stop recording" that ended it.
+function withoutStopCommand(words) {
+  const wake = new RegExp(WAKE.source, "gi");
+  let last = null;
+  for (const m of words.matchAll(wake)) last = m;
+  if (last && STOP_WORDS.test(words.slice(last.index + last[0].length))) return words.slice(0, last.index).trim();
+  return words.replace(/[\s,.!]*\b(stop|end|finish)\b[\w\s']*\b(record\w*|note|dictat\w*)\W*$/i, "").trim();
 }
 
 /// Throws away the dictation: nothing is written and the audio is dropped.
@@ -665,6 +680,7 @@ async function cancelDictation() {
   endDictationUi();
   await invoke("dictate_cancel").catch(() => {});
   dictation = null;
+  syncWake().catch(() => {});
   document.getElementById("note-body")?.focus();
 }
 
@@ -937,6 +953,7 @@ async function startMeeting(devices, pins) {
   // Consent is asked now that the recording is running: { at_s, how, words } once given.
   recording = { started: Date.now(), devices, markers: [], levels: {}, consent: null };
   view = { kind: "recorder" };
+  syncWake().catch(() => {});
   showPage();
   refreshItems();
   renderRecording(await invoke("recording_status"));
@@ -955,18 +972,24 @@ function nowInRecording() {
   return recording ? (Date.now() - recording.started) / 1000 : 0;
 }
 
-function addMarker(text) {
+/// `kind` is "action" for an action item; a bookmark has none. The item itself is taken from the transcript later.
+function addMarker(text, kind = "") {
   if (!recording) return false;
-  recording.markers.push({ at_s: Math.round(nowInRecording() * 10) / 10, text });
+  recording.markers.push({ at_s: Math.round(nowInRecording() * 10) / 10, text, ...(kind ? { kind } : {}) });
   drawMarkers();
   return true;
 }
+
+/// Markers saved before action items had a kind were noted as text.
+const isAction = (m) => m.kind === "action" || (!m.kind && m.text === "Action item");
+const markerLabel = (m) => (isAction(m) ? "Action item" : "Bookmark");
 
 function drawMarkers() {
   const list = document.getElementById("live-markers");
   if (!list || !recording) return;
   list.replaceChildren(...recording.markers.slice(-4).map((m) =>
-    el("div", { class: "marker" }, el("span", { class: "mono" }, clock(m.at_s)), m.text || "Bookmark")));
+    el("div", { class: `marker${isAction(m) ? " action" : ""}` }, el("span", { class: "mono" }, clock(m.at_s)),
+      el("strong", {}, markerLabel(m)), m.text && m.text !== "Action item" ? ` · ${m.text}` : "")));
 }
 
 function renderRecording(status) {
@@ -981,24 +1004,28 @@ function renderRecording(status) {
   // The clock shows once consent is given; until then the question is what matters.
   const time = el("div", { class: "timecode mono", id: "live-time", "aria-live": "off", hidden: !recording.consent }, longClock(status.elapsed_s));
   const lanes = el("div", { class: "lanes", "aria-label": "Tracks" });
-  // One bookmark: press the icon or Enter to mark now, with whatever note is typed.
-  const pinned = el("input", { placeholder: "Bookmark now, with a note if you like, then Enter", "aria-label": "Bookmark note pinned to the current time" });
+  // Press the bookmark or Enter to mark now, or the tick for an action item, with whatever note is typed.
+  const pinned = el("input", { placeholder: "Mark now, with a note if you like: Enter bookmarks it", "aria-label": "Note pinned to the current time" });
   const at = el("span", { class: "mono" }, `@${clock(status.elapsed_s)}`);
-  const mark = () => {
-    addMarker(pinned.value.trim());
+  const mark = (kind) => {
+    addMarker(pinned.value.trim(), kind);
     pinned.value = "";
   };
-  pinned.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); mark(); } });
-  const bookmark = el("button", { class: "icon-btn bookmark", type: "button", "aria-label": "Bookmark this moment", title: "Bookmark this moment", onclick: mark }, svg("bookmark", 18));
+  pinned.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); mark(e.ctrlKey ? "action" : ""); } });
+  const bookmark = el("button", { class: "icon-btn bookmark", type: "button", "aria-label": "Bookmark this moment", title: "Bookmark this moment (Enter)", onclick: () => mark("") }, svg("bookmark", 18));
+  const actionItem = el("button", { class: "icon-btn action-item", type: "button", "aria-label": "Mark an action item", title: "Mark an action item (Ctrl + Enter). It's written up from what was said here.", onclick: () => mark("action") }, svg("action", 18));
+  const hint = meetingListening()
+    ? "Say “Bookmark that”, “Action item” or “Hey Superteem, stop recording”"
+    : "Turn on “Hey Superteem” in Settings to mark and stop by voice";
   const stop = el("button", { class: "stop", "aria-label": "Stop recording", title: "Stop recording" }, el("span"));
   stop.addEventListener("click", () => stopMeeting());
   const recLabel = el("span", {}, recording.consent ? "REC · consent noted" : "REC · asking for consent");
   main.replaceChildren(el("div", { class: "live" },
     el("div", { class: "live-head" }, el("span", { class: "rec" }, el("span", { class: "dot" }), recLabel),
-      el("span", { class: "hint" }, "Say “Hey Superteem, bookmark that” or “stop recording”")),
+      el("span", { class: "hint" }, hint)),
     recording.consent ? null : consentChallenge(recLabel),
     time, lanes, el("div", { class: "markers", id: "live-markers" }),
-    el("div", { class: "pinned" }, bookmark, at, pinned),
+    el("div", { class: "pinned" }, bookmark, actionItem, at, pinned),
     el("div", { class: "live-controls" }, stop)));
   drawMarkers();
 
@@ -1072,11 +1099,13 @@ async function stopMeeting({ discard = false } = {}) {
   } catch (e) {
     stopping = false;
     recording = null;
+    syncWake().catch(() => {});
     showMeeting();
     return;
   }
   stopping = false;
   recording = null;
+  syncWake().catch(() => {});
   if (discard) {
     showMeeting();
     return id;
@@ -1336,11 +1365,23 @@ function renderSession(session, processingError, suggestion) {
   const duration = meta.duration_s || Math.max(1, ...session.segments.map((s) => s.end_s));
   const lineEls = [];
   const transcript = el("div", { class: "transcript" });
-  const markers = [...(meta.markers ?? [])];
+  const allMarkers = sessionMarkers(meta.markers ?? [], session.keyphrases ?? []);
+  const markers = [...allMarkers];
   let previous = null;
-  const markerLine = (m) => el("div", { class: "line marker-line" },
-    el("button", { class: "time mono", title: "Play from here", onclick: () => { player?.seek(m.at_s); player?.play(); } }, clock(m.at_s)),
-    el("div", {}, el("strong", {}, "Bookmark"), m.text ? ` · ${m.text}` : ""));
+  const playFrom = (t) => { player?.seek(t); player?.play(); };
+  const markerLine = (m) => el("div", { class: `line marker-line${isAction(m) ? " action" : ""}` },
+    el("button", { class: "time mono", title: "Play from here", onclick: () => playFrom(m.at_s) }, clock(m.at_s)),
+    el("div", {}, el("strong", {}, markerLabel(m)), markerNote(m, session.segments) ? ` · ${markerNote(m, session.segments)}` : "",
+      m.heard ? el("span", { class: "edited", title: "Heard in the recording when it was processed" }, "heard") : null));
+
+  // Action items, written up from what was said where each was marked.
+  const actions = allMarkers.filter(isAction);
+  if (actions.length) {
+    page.append(el("h2", {}, `Action item${actions.length > 1 ? "s" : ""}`), el("ul", { class: "action-items" },
+      actions.map((m) => el("li", {},
+        el("button", { class: "time mono", title: "Play from here", onclick: () => playFrom(m.at_s) }, clock(m.at_s)),
+        el("span", {}, markerNote(m, session.segments) || el("span", { class: "hint" }, "Nothing was said here to write up."))))));
+  }
   for (const seg of session.segments) {
     while (markers.length && markers[0].at_s <= seg.start_s) {
       transcript.append(markerLine(markers.shift()));
@@ -1477,7 +1518,7 @@ function renderSession(session, processingError, suggestion) {
           style: `left:${(100 * s.start_s) / duration}%;width:${Math.max(0.3, (100 * (s.end_s - s.start_s)) / duration)}%;background:${strong.get(s.speaker) ?? "var(--key-light)"}`,
           title: `${session.speakers.find((sp) => sp.key === s.speaker)?.name ?? ""} · ${clock(s.start_s)}`,
         })),
-        (meta.markers ?? []).map((m) => el("i", { style: `left:${(100 * m.at_s) / duration}%`, title: m.text || "Bookmark" })));
+        allMarkers.map((m) => el("i", { class: isAction(m) ? "action" : "", style: `left:${(100 * m.at_s) / duration}%`, title: `${markerLabel(m)} · ${clock(m.at_s)}` })));
       lanes.append(el("div", { class: "track" }, el("span", { class: "name", style: `color:${strong.get(stream) ?? "inherit"}` }, name), mute, bar));
     }
     lanes.append(head);
@@ -1500,8 +1541,8 @@ function renderSession(session, processingError, suggestion) {
     };
     player = makePlayer(session, duration, onTick);
     playButton.addEventListener("click", () => player?.toggle());
-    // Clip starts, for jumping to the previous or next line in the timeline.
-    const starts = [...new Set(session.segments.map((s) => s.start_s))].sort((a, b) => a - b);
+    // Clip starts, bookmarks and action items, for jumping to the previous or next in the timeline.
+    const starts = [...new Set([...session.segments.map((s) => s.start_s), ...allMarkers.map((m) => m.at_s)])].sort((a, b) => a - b);
     const prevClip = () => {
       // Within a moment of a clip's start, go to the one before, as a music player does.
       const t = (player?.t ?? 0) - 0.5;
@@ -1513,16 +1554,53 @@ function renderSession(session, processingError, suggestion) {
       if (next != null) player?.seek(next);
     };
     tracks.append(lanes, el("div", { class: "transport" },
-      el("button", { class: "pill", "aria-label": "Previous clip", title: "Start of the previous clip", onclick: prevClip }, svg("skip-back", 16)),
+      el("button", { class: "pill", "aria-label": "Previous clip or mark", title: "Start of the previous clip, bookmark or action item", onclick: prevClip }, svg("skip-back", 16)),
       el("button", { class: "pill", "aria-label": "Back 5 seconds", onclick: () => player?.seek(player.t - 5) }, "−5"),
       playButton,
       el("button", { class: "pill", "aria-label": "Forward 5 seconds", onclick: () => player?.seek(player.t + 5) }, "+5"),
-      el("button", { class: "pill", "aria-label": "Next clip", title: "Start of the next clip", onclick: nextClip }, svg("skip-forward", 16)),
+      el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item", onclick: nextClip }, svg("skip-forward", 16)),
       timeLabel, el("span", { class: "grow" }),
       el("span", { class: "hint windows-only" }, "Space plays and pauses")));
     requestAnimationFrame(() => player?.seek(keepTime));
   }
   main.replaceChildren(el("div", { class: "review" }, page, streams.length ? tracks : null));
+}
+
+/// A phrase heard again this close to a marker made while recording is the same moment.
+const SAME_MARK_S = 5;
+const PHRASE_KINDS = { bookmark: "", action: "action" };
+
+/// The markers made while recording, and "Bookmark that" or "Action item" heard in the recording when it was
+/// processed, as when nothing was listening for them at the time.
+function sessionMarkers(saved, phrases) {
+  const heard = phrases
+    .filter((h) => !h.rejected && h.phrase in PHRASE_KINDS)
+    .map((h) => ({ at_s: Math.round(h.start_s * 10) / 10, text: "", kind: PHRASE_KINDS[h.phrase], heard: true }))
+    .filter((h) => !saved.some((m) => isAction(m) === isAction(h) && Math.abs(m.at_s - h.at_s) < SAME_MARK_S));
+  return [...saved, ...heard].sort((a, b) => a.at_s - b.at_s);
+}
+
+/// What a marker says: the note typed with it, or for an action item, what was said where it was marked.
+function markerNote(m, segments) {
+  if (m.text && m.text !== "Action item") return m.text;
+  return isAction(m) ? actionItemText(m, segments) : "";
+}
+
+/// The action an action item was about: the words after "action item" when it was said, otherwise the line
+/// being spoken when it was marked, or the one just before.
+function actionItemText(m, segments) {
+  const lines = segments.filter((s) => s.text?.trim()).sort((a, b) => a.start_s - b.start_s);
+  let i = lines.findIndex((s) => s.start_s <= m.at_s + 1 && s.end_s >= m.at_s - 1);
+  if (i < 0) i = lines.findLastIndex((s) => s.end_s < m.at_s && m.at_s - s.end_s < 15);
+  if (i < 0) return "";
+  let text = lines[i].text.trim();
+  const said = /\baction[\s-]*items?\b[\s,.:;-]*/i.exec(text);
+  if (said) {
+    text = text.slice(said.index + said[0].length).trim();
+    // "Action item." on its own line: the action is in the next one.
+    if (text.split(/\s+/).filter(Boolean).length < 3 && lines[i + 1]) text = `${text} ${lines[i + 1].text.trim()}`.trim();
+  }
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 // Space plays and pauses a meeting when not typing.
@@ -1764,6 +1842,8 @@ async function keyphrasePrint(id) {
 
 async function showKeyphrases(printId, message) {
   leave();
+  // Phrases heard while the page loads, such as the last take, are shown here rather than acted on.
+  keyphrasePage = { trying: false, onHeard() {}, onWords() {}, stop() {} };
   showPage();
   view = { kind: "keyphrases" };
   refreshItems();
@@ -1789,6 +1869,7 @@ async function showKeyphrases(printId, message) {
     page.append(el("div", { class: "field" }, "Phrases for", who));
   }
   const kp = await invoke("list_keyphrases", { print: print.id });
+  phrasesTrained = kp.any_trained;
   const device = prefs.enrol_input;
   const record = async (phrase, replace) => {
     try {
@@ -1818,18 +1899,75 @@ async function showKeyphrases(printId, message) {
   page.append(el("h2", {}, "Phrases"), group);
   if (!device) page.append(el("div", { class: "error" }, "Set up your default microphone first, from Settings."));
 
+  // Try it: press, then speak. Each phrase heard says which command it is, and listening stops after
+  // 10 seconds with nothing heard.
+  const TRY_S = 10;
+  const tryButton = el("button", { class: "primary pill", type: "button" }, "Try it");
   const heard = el("div", { class: "wake-indicator", "aria-live": "polite" },
-    prefs.wake ? "Say a trained phrase to try it" : "Turn on “Hey Superteem” in Settings to try them here");
-  let fade = null;
+    kp.any_trained ? "Press Try it, then say a phrase." : "Train a phrase above, then try it here.");
+  tryButton.disabled = !kp.any_trained;
+  const results = el("ul", { class: "try-results" });
+  let quiet = null;
+  const show = (text, understood) => {
+    heard.textContent = text;
+    heard.classList.add("on");
+    if (understood) results.prepend(el("li", {}, understood));
+    while (results.children.length > 5) results.lastChild.remove();
+  };
+  const stopTrying = (text) => {
+    if (!keyphrasePage?.trying) return;
+    clearTimeout(quiet);
+    keyphrasePage.trying = false;
+    tryButton.textContent = "Try it";
+    heard.classList.remove("on");
+    if (text) heard.textContent = text;
+    syncWake().catch(() => {});
+  };
+  const keepListening = () => {
+    clearTimeout(quiet);
+    quiet = setTimeout(() => stopTrying(`Stopped listening: nothing was heard for ${TRY_S} seconds. Press Try it again.`), TRY_S * 1000);
+  };
+  const commandName = (id) => COMMANDS.find((c) => c.id === id)?.say;
   keyphrasePage = {
+    trying: false,
+    stop: () => stopTrying(),
+    // A trained phrase, heard by the spotter.
     onHeard(h) {
-      if (phraseTraining) return;
-      heard.textContent = `“${h.text}” · heard ${Math.round(h.delay_ms)} ms after you finished · score ${h.score.toFixed(2)}`;
-      heard.classList.add("on");
-      clearTimeout(fade);
-      fade = setTimeout(() => heard.classList.remove("on"), 1800);
+      if (phraseTraining || !this.trying) return;
+      keepListening();
+      const timing = `heard ${Math.round(h.delay_ms)} ms after you finished · score ${h.score.toFixed(2)}`;
+      if (h.rejected) return show(`“${h.text}” didn't sound like ${h.who || "you"}, so it would be ignored · ${timing}`);
+      if (h.phrase === "wake") {
+        chime();
+        return show(`“Hey Superteem” · ${timing}. Now say a command.`);
+      }
+      const command = commandName(KEYPHRASE_COMMANDS[h.phrase]);
+      show(`Understood: ${command} · ${timing}`, `“${h.text}” → ${command}`);
+    },
+    // Words from speech to text: a command after "Hey Superteem", or a phrase not trained yet.
+    onWords(text) {
+      if (!this.trying) return;
+      keepListening();
+      const wake = WAKE.exec(text);
+      const rest = (wake ? text.slice(wake.index + wake[0].length) : text).trim();
+      const [best] = rest ? interpret(rest) : [];
+      if (best?.score >= 1) return show(`Understood: ${best.say} · from the words “${text}”`, `“${text}” → ${best.say}`);
+      show(rest ? `Heard “${text}”, which isn't a command.` : `Heard “${text}”. Now say a command.`);
     },
   };
+  tryButton.addEventListener("click", async () => {
+    if (keyphrasePage.trying) return stopTrying("Stopped listening.");
+    keyphrasePage.trying = true;
+    try {
+      await syncWake();
+    } catch (e) {
+      keyphrasePage.trying = false;
+      return showError(page, e);
+    }
+    tryButton.textContent = "Stop";
+    show(`Listening… say a trained phrase, or “Hey Superteem” and a command. Stops after ${TRY_S} quiet seconds.`);
+    keepListening();
+  });
 
   const sensitivity = el("input", { type: "range", min: "0.7", max: "1.4", step: "0.05", value: kp.sensitivity, "aria-label": "Sensitivity" });
   const saveSettings = async () => {
@@ -1840,7 +1978,7 @@ async function showKeyphrases(printId, message) {
     }
   };
   sensitivity.addEventListener("change", saveSettings);
-  page.append(el("h2", {}, "Try it"), heard,
+  page.append(el("h2", {}, "Try it"), el("div", { class: "try-it" }, tryButton, heard), results,
     el("div", { class: "group" },
       el("div", { class: "row" }, el("span", { class: "label" }, "Sensitivity",
         el("small", {}, "If phrases are missed, slide right or add takes. If it wakes when nobody said it, slide left.")),
@@ -1880,9 +2018,9 @@ function showPhraseTakes() {
   const finish = async (save) => {
     clearInterval(pollTimer);
     stop.disabled = cancel.disabled = true;
-    phraseTraining = null;
+    stop.textContent = save ? "Learning the takes…" : "Done";
     try {
-      const r = await invoke("stop_phrase_training", { save });
+      const r = await invoke("stop_phrase_training", { save }).finally(() => (phraseTraining = null));
       if (!r) return showKeyphrases(print.id);
       const few = r.heard < phrase.how.length - 1
         ? " That's fewer than expected: leave a clear pause between takes, or use Add takes." : "";
@@ -2222,9 +2360,40 @@ const agent = {
   levelTimer: null,
 };
 let speaking = false;
+/// Whether any phrase is trained, so the microphone can listen through a recording without transcribing
+/// everything said in it.
+let phrasesTrained = false;
+
+/// Commands are listened for when voice is on, and also while the voice panel or a spoken note needs them,
+/// while phrases are tried in Settings, and, once phrases are trained, through a meeting or a dictation,
+/// so "Hey Superteem, stop recording" works whenever the app is recording.
+function wantWake() {
+  return prefs.wake || agent.forcedWake || agent.mode === "note" || !!keyphrasePage?.trying
+    || (phrasesTrained && (!!recording || !!dictation));
+}
+
+function syncWake() {
+  return platform === "android" ? Promise.resolve() : invoke("set_wake", { on: wantWake() });
+}
+
+/// Whether a meeting recording hears voice commands.
+function meetingListening() {
+  return platform !== "android" && (prefs.wake || phrasesTrained);
+}
+
+async function refreshPhrasesTrained() {
+  phrasesTrained = (await invoke("list_keyphrases", { print: null }).catch(() => null))?.any_trained ?? phrasesTrained;
+}
+
+/// The voice panel steps back soon after a command in a meeting, so the meeting isn't taken as commands.
+function stepBackSoon() {
+  clearTimeout(agent.quietTimer);
+  agent.quietTimer = setTimeout(() => { if (agent.open && agent.mode === "idle") closeAgent(); }, 2500);
+}
 
 function speak(text) {
-  if (prefs.quiet || !window.speechSynthesis) return;
+  // The app's voice would be on the recording, so in a meeting it answers on screen only.
+  if (prefs.quiet || !window.speechSynthesis || recording) return;
   speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text.replace(/[“”]/g, ""));
   speaking = true;
@@ -2317,21 +2486,21 @@ function closeAgent() {
   // A spoken note keeps listening after the panel closes.
   if (agent.forcedWake && agent.mode !== "note") {
     agent.forcedWake = false;
-    invoke("set_wake", { on: prefs.wake }).catch(() => {});
+    syncWake().catch(() => {});
   }
 }
 
 /// What can be said right now: meeting controls while recording, otherwise starting things.
 function agentCommands() {
   return recording
-    ? ["Bookmark that", "Stop recording", "What can I say?"]
+    ? ["Bookmark that", "Action item", "Stop recording", "What can I say?"]
     : ["Start meeting", "Take a note", "Add to last note", "Read back my last note", "What can I say?"];
 }
 
 function refreshAgentControls() {
   if (recording) {
     setAgentState(`Recording · ${clock(nowInRecording())}`);
-    agentButtons(["Bookmark", () => run("bookmark that")], ["Stop recording", () => run("stop recording"), true]);
+    agentButtons(["Bookmark", () => run("bookmark that")], ["Action item", () => run("action item")], ["Stop recording", () => run("stop recording"), true]);
   } else if (agent.mode === "confirm") {
     const pending = COMMANDS.find((c) => c.id === agent.pending);
     setAgentState("Waiting for your answer");
@@ -2360,16 +2529,32 @@ listen("keyphrase", (e) => onKeyphrase(e.payload));
 /// Commands trained as key phrases, which act as soon as they are heard, without speech to text.
 const KEYPHRASE_COMMANDS = { bookmark: "bookmark", action: "action", stop: "stop-recording" };
 
+/// When "Hey Superteem" was last heard while a note was being taken, so the words after it are a command.
+let wokeAt = 0;
+const justWoke = () => Date.now() - wokeAt < 6000;
+/// "Stop recording", "stop the note", "stop dictating" and the like.
+const STOP_WORDS = /^\W*(stop|end|finish|done|close)\b.*\b(record|note|dictat|writing)/i;
+
 /// A trained phrase, heard by the keyword spotter about a tenth of a second after it was said.
 function onKeyphrase(h) {
-  if (h.rejected || speaking || enrolment || onboardEnrolling || phraseTraining) return;
+  if (speaking || enrolment || onboardEnrolling || phraseTraining) return;
+  // The Settings page shows what was heard instead of acting on it.
   if (keyphrasePage) return keyphrasePage.onHeard(h);
+  if (h.rejected) return;
   if (view.kind === "onboarding" && view.step === 2) {
     if (h.phrase === "wake") onboardTick();
     return;
   }
-  // A spoken note takes every word as text, including "stop note".
-  if (agent.mode === "note") return;
+  // A spoken note or a dictation takes every word as text, apart from "Hey Superteem, stop recording".
+  if (agent.mode === "note" || dictation) {
+    if (h.phrase === "wake") {
+      wokeAt = Date.now();
+      chime();
+    } else if (h.phrase === "stop") {
+      stopNoteByVoice();
+    }
+    return;
+  }
   if (h.phrase === "wake") {
     chime();
     // No greeting: speaking would talk over the command that usually follows straight away.
@@ -2378,7 +2563,7 @@ function onKeyphrase(h) {
     setAgentState("Listening for a command…");
     // Said by mistake, or nothing followed: the panel steps back so speech isn't transcribed for nothing.
     clearTimeout(agent.quietTimer);
-    agent.quietTimer = setTimeout(() => { if (agent.open && agent.mode === "idle" && !recording) closeAgent(); }, 10_000);
+    agent.quietTimer = setTimeout(() => { if (agent.open && agent.mode === "idle") closeAgent(); }, 10_000);
     return;
   }
   const command = KEYPHRASE_COMMANDS[h.phrase];
@@ -2389,21 +2574,40 @@ function onKeyphrase(h) {
   }
 }
 
+/// Ends a spoken note or a dictation when told to by voice.
+function stopNoteByVoice() {
+  wokeAt = 0;
+  if (dictation) {
+    stopDictation(true);
+  } else if (agent.mode === "note") {
+    endVoiceNote();
+    setChip("Voice note saved.");
+    speak("Saved.");
+  }
+}
+
 function onHeard(text) {
   // Words read aloud for a voice print or key phrase aren't commands, even if they arrive late.
   if (speaking || enrolment || onboardEnrolling || phraseTraining) return;
+  if (keyphrasePage) return keyphrasePage.onWords(text);
   const wake = WAKE.exec(text);
   if (view.kind === "onboarding" && view.step === 2) {
     if (wake) onboardTick();
     return;
   }
+  // A dictation only listens for "Hey Superteem, stop recording"; its words are written at the tick.
+  if (dictation && agent.mode !== "note") {
+    const words = wake ? text.slice(wake.index + wake[0].length) : text;
+    if ((wake || justWoke()) && STOP_WORDS.test(words)) stopNoteByVoice();
+    return;
+  }
   // A spoken note: every phrase goes in at the cursor until they say they're done.
   if (agent.mode === "note" && view.kind === "note") {
     const words = wake ? text.slice(wake.index + wake[0].length) : text;
-    if (/^\W*(stop|end|finish|done|close)\b.*\b(note|dictat|writing)|^\W*(that's all|that is all|i'm done|done)\W*$/i.test(words)) {
-      endVoiceNote();
-      setChip("Voice note saved.");
-      speak("Saved.");
+    // "Stop recording" in a note is only a command straight after "Hey Superteem".
+    const command = (wake || justWoke()) && STOP_WORDS.test(words);
+    if (command || /^\W*(stop|end|finish|done|close)\b.*\b(note|dictat|writing)|^\W*(that's all|that is all|i'm done|done)\W*$/i.test(words)) {
+      stopNoteByVoice();
       return;
     }
     const body = document.getElementById("note-body");
@@ -2505,10 +2709,12 @@ async function doCommand(id) {
   }
   if (id === "bookmark") {
     say(addMarker("") ? `Bookmarked at ${clock(nowInRecording())}.` : "Bookmarks are for meetings. Nothing is recording.");
+    if (recording) stepBackSoon();
     return refreshAgentControls();
   }
   if (id === "action") {
-    say(addMarker("Action item") ? `Action item marked at ${clock(nowInRecording())}.` : "Action items are marked in meetings. Nothing is recording.");
+    say(addMarker("", "action") ? `Action item marked at ${clock(nowInRecording())}. It's written up with the transcript.` : "Action items are marked in meetings. Nothing is recording.");
+    if (recording) stepBackSoon();
     return refreshAgentControls();
   }
   if (id === "add-note") {
@@ -2555,10 +2761,8 @@ function endVoiceNote() {
   agent.mode = "idle";
   syncAttentive();
   flushNote();
-  if (agent.forcedWake) {
-    agent.forcedWake = false;
-    invoke("set_wake", { on: prefs.wake }).catch(() => {});
-  }
+  agent.forcedWake = false;
+  syncWake().catch(() => {});
 }
 
 /// With the wake word on, the note is spoken hands-free until "stop note". With it off nothing listens once
@@ -2597,11 +2801,14 @@ function startVoiceNote() {
   if (prefs.wake && platform !== "android") {
     await invoke("set_wake", { on: true }).catch(() => { prefs.wake = false; });
   }
+  await refreshPhrasesTrained();
   showListening();
   const status = await invoke("recording_status").catch(() => ({ recording: false }));
   if (status.recording && !enrolment) {
     view = { kind: "recorder" };
     showMeeting();
+    // The recording is rebuilt from its status once the page draws; listen through it from then.
+    setTimeout(() => syncWake().catch(() => {}), 1000);
   } else if (!prefs.onboarded) {
     showOnboarding(0);
   } else {
