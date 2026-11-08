@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Superteem Voice</title>
-  <meta name="description" content="Download Superteem Voice for Windows and Android, and firmware for the Superteem Voice Pin.">
+  <meta name="description" content="Voice notes transcribed on your own device. No cloud. Download Superteem Voice for Windows and Android, and firmware for the Voice Pin.">
   <link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="brand/appicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -93,12 +93,23 @@
     .size { font-weight: 400; opacity: 0.85; }
     .how { margin: 0; font-size: 13px; color: var(--muted); }
 
+    .hero .eyebrow { font-size: 15px; font-weight: 600; color: var(--accent-text); margin: 0 0 12px; }
+
+    .points { padding-bottom: 48px; }
+    .points h2 { font-size: 26px; letter-spacing: -0.01em; margin: 0 0 20px; }
+    .point-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 40px; }
+    .point { border-top: 2px solid var(--line); padding-top: 14px; }
+    .point h3 { margin: 0 0 6px; font-size: 17px; }
+    .point p { margin: 0; color: var(--soft); font-size: 15px; }
+    .note { margin: 20px 0 0; font-size: 14px; color: var(--muted); }
+
     footer { border-top: 1px solid var(--line); padding: 24px 0 40px; font-size: 14px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px 24px; }
     footer a { color: var(--soft); }
 
     @media (max-width: 860px) {
       .grid { grid-template-columns: 1fr; gap: 16px; }
       .card.yours { order: -1; }
+      .point-grid { grid-template-columns: 1fr; }
       .hero { padding: 32px 0 28px; }
       .hero p { font-size: 17px; }
     }
@@ -120,8 +131,9 @@
     </header>
 
     <section class="hero">
-      <h1>Superteem Voice</h1>
-      <p>Voice notes, timecoded meeting transcripts and voice commands. Speech is transcribed on your own device, and your recordings stay with you.</p>
+      <p class="eyebrow">Superteem Voice</p>
+      <h1>Voice notes transcribed on your own device. No&nbsp;cloud.</h1>
+      <p>Dictate notes, record meetings and give voice commands. Speech becomes text right on your PC or phone, so what you say never leaves it. No account, no subscription, nothing uploaded.</p>
       <div class="release" id="release"><span class="badge">Loading the latest release…</span></div>
     </section>
 
@@ -157,6 +169,51 @@
         <a class="download" data-file="Superteem-Voice-Pin-XIAO-nRF52840-Sense.uf2" aria-disabled="true">Download firmware</a>
         <p class="how">Connect the board by USB-C and double-tap its reset button. Copy the file onto the drive that appears.</p>
       </article>
+    </section>
+
+    <section class="points" aria-labelledby="private">
+      <h2 id="private">Private because it never leaves your device</h2>
+      <div class="point-grid">
+        <div class="point">
+          <h3>Transcribed on your device</h3>
+          <p>Speech recognition runs on your own processor. After a one-time download of the speech model (about 140&nbsp;MB), it works with no internet at all.</p>
+        </div>
+        <div class="point">
+          <h3>No account, no cloud</h3>
+          <p>There is nothing to sign up for and no server to send recordings to. The app has no analytics and no tracking.</p>
+        </div>
+        <div class="point">
+          <h3>Your files, in plain formats</h3>
+          <p>Each meeting is a folder of audio and transcripts as text, Markdown and subtitles (SRT). On Windows they live in <b>Documents\Superteem Voice</b>.</p>
+        </div>
+        <div class="point">
+          <h3>Open source</h3>
+          <p>Every line of the apps and the pin firmware is public under the GNU GPL v3, so anyone can check what it does with your voice.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="points" aria-labelledby="does">
+      <h2 id="does">What it does</h2>
+      <div class="point-grid">
+        <div class="point">
+          <h3>Voice notes</h3>
+          <p>Start a note and talk. Your words are written into it as you go, ready to edit.</p>
+        </div>
+        <div class="point">
+          <h3>Meeting transcripts</h3>
+          <p>Record with up to three microphones and Voice Pins. You get a timecoded transcript with speakers recognised by voice, plus bookmarks and action items.</p>
+        </div>
+        <div class="point">
+          <h3>Voice commands</h3>
+          <p>On Windows, say “Hey Superteem, start meeting”, “take a note” or “bookmark that” without touching the keyboard.</p>
+        </div>
+        <div class="point">
+          <h3>Voice Pin</h3>
+          <p>A small wearable microphone that clips on and streams to the app over Bluetooth. It is a prototype on Seeed's XIAO board for now.</p>
+        </div>
+      </div>
+      <p class="note">Transcription is in English for now.</p>
     </section>
 
     <footer>
