@@ -106,7 +106,6 @@ function leave() {
   stopProbe();
   cancelOnboardReading();
   cancelDictation();
-  endVoiceNote();
   stopPlayback();
   clearInterval(pollTimer);
   flushNote();
@@ -2405,7 +2404,7 @@ const agentState = document.getElementById("agent-state");
 const agentActions = document.getElementById("agent-actions");
 const agent = {
   open: false,
-  mode: "idle", // idle | confirm | note
+  mode: "idle", // idle | confirm
   pending: null, // the command a "Did you mean…?" asks about
   forcedWake: false,
   levelTimer: null,
@@ -2415,11 +2414,11 @@ let speaking = false;
 /// everything said in it.
 let phrasesTrained = false;
 
-/// Commands are listened for when voice is on, and also while the voice panel or a spoken note needs them,
-/// while phrases are tried in Settings, and, once phrases are trained, through a meeting or a dictation,
-/// so "Hey Superteem, stop recording" works whenever the app is recording.
+/// Commands are listened for when voice is on, and also while the voice panel needs them, while phrases are
+/// tried in Settings, and, once phrases are trained, through a meeting or a dictation, so
+/// "Hey Superteem, stop recording" works whenever the app is recording.
 function wantWake() {
-  return prefs.wake || agent.forcedWake || agent.mode === "note" || !!keyphrasePage?.trying
+  return prefs.wake || agent.forcedWake || !!keyphrasePage?.trying
     || (phrasesTrained && (!!recording || !!dictation));
 }
 
@@ -2456,10 +2455,9 @@ function speak(text) {
   speechSynthesis.speak(utterance);
 }
 
-/// While the panel waits for an answer, or a spoken note is being taken, everything said is transcribed;
-/// otherwise only what follows "Hey Superteem".
+/// While the panel waits for an answer everything said is transcribed; otherwise only what follows "Hey Superteem".
 function syncAttentive() {
-  invoke("listen_attentive", { on: agent.open || agent.mode === "note" }).catch(() => {});
+  invoke("listen_attentive", { on: agent.open }).catch(() => {});
 }
 
 /// A short rising tone when the wake word is heard, so the person can carry straight on with the command.
@@ -2534,8 +2532,7 @@ function closeAgent() {
   speechSynthesis?.cancel();
   if (agent.mode === "confirm") agent.mode = "idle";
   syncAttentive();
-  // A spoken note keeps listening after the panel closes.
-  if (agent.forcedWake && agent.mode !== "note") {
+  if (agent.forcedWake) {
     agent.forcedWake = false;
     syncWake().catch(() => {});
   }
@@ -2580,7 +2577,7 @@ listen("keyphrase", (e) => onKeyphrase(e.payload));
 /// Commands trained as key phrases, which act as soon as they are heard, without speech to text.
 const KEYPHRASE_COMMANDS = { bookmark: "bookmark", action: "action", stop: "stop-recording" };
 
-/// When "Hey Superteem" was last heard while a note was being taken, so the words after it are a command.
+/// When "Hey Superteem" was last heard during a dictation, so the words after it are a command.
 let wokeAt = 0;
 const justWoke = () => Date.now() - wokeAt < 6000;
 /// "Stop recording", "stop the note", "stop dictating" and the like.
@@ -2596,8 +2593,8 @@ function onKeyphrase(h) {
     if (h.phrase === "wake") onboardTick();
     return;
   }
-  // A spoken note or a dictation takes every word as text, apart from "Hey Superteem, stop recording".
-  if (agent.mode === "note" || dictation) {
+  // A dictation takes every word as text, apart from "Hey Superteem, stop recording".
+  if (dictation) {
     if (h.phrase === "wake") {
       wokeAt = Date.now();
       chime();
@@ -2625,16 +2622,10 @@ function onKeyphrase(h) {
   }
 }
 
-/// Ends a spoken note or a dictation when told to by voice.
+/// Ends a dictation when told to by voice.
 function stopNoteByVoice() {
   wokeAt = 0;
-  if (dictation) {
-    stopDictation(true);
-  } else if (agent.mode === "note") {
-    endVoiceNote();
-    setChip("Voice note saved.");
-    speak("Saved.");
-  }
+  if (dictation) stopDictation(true);
 }
 
 function onHeard(text) {
@@ -2647,25 +2638,9 @@ function onHeard(text) {
     return;
   }
   // A dictation only listens for "Hey Superteem, stop recording"; its words are written at the tick.
-  if (dictation && agent.mode !== "note") {
+  if (dictation) {
     const words = wake ? text.slice(wake.index + wake[0].length) : text;
     if ((wake || justWoke()) && STOP_WORDS.test(words)) stopNoteByVoice();
-    return;
-  }
-  // A spoken note: every phrase goes in at the cursor until they say they're done.
-  if (agent.mode === "note" && view.kind === "note") {
-    const words = wake ? text.slice(wake.index + wake[0].length) : text;
-    // "Stop recording" in a note is only a command straight after "Hey Superteem".
-    const command = (wake || justWoke()) && STOP_WORDS.test(words);
-    if (command || /^\W*(stop|end|finish|done|close)\b.*\b(note|dictat|writing)|^\W*(that's all|that is all|i'm done|done)\W*$/i.test(words)) {
-      stopNoteByVoice();
-      return;
-    }
-    const body = document.getElementById("note-body");
-    if (body && words.trim()) {
-      const span = insertWords(body, noteRange(body), words);
-      if (span && document.activeElement === body) getSelection().collapse(span, span.childNodes.length);
-    }
     return;
   }
   if (!agent.open && !wake) return;
@@ -2678,13 +2653,6 @@ function onHeard(text) {
     heardLine(text);
     if (agent.mode !== "idle" || recording) refreshAgentControls();
   }
-}
-
-function setChip(text) {
-  const chip = document.getElementById("dictation-chip");
-  if (!chip) return;
-  chip.hidden = false;
-  chip.textContent = text;
 }
 
 /// Answers one command, spoken or typed.
@@ -2807,34 +2775,14 @@ async function doCommand(id) {
   }
 }
 
-function endVoiceNote() {
-  if (agent.mode !== "note") return;
-  agent.mode = "idle";
-  syncAttentive();
-  flushNote();
-  agent.forcedWake = false;
-  syncWake().catch(() => {});
-}
-
-/// With the wake word on, the note is spoken hands-free until "stop note". With it off nothing listens once
-/// the panel closes, so the note opens with dictation running instead and the tick writes it down.
+/// A note asked for by voice opens with dictation running, as the mic button does, and the tick writes it
+/// down. Once phrases are trained, "Hey Superteem, stop note" writes it down too.
 async function noteByVoice(id, intro) {
-  if (prefs.wake) {
-    say(`${intro} Go ahead, and say “stop note” when you're done.`);
-    await openNote(id, { dictate: false });
-    return startVoiceNote();
-  }
   const dictate = platform !== "android";
-  say(dictate ? `${intro} Go ahead, and press the tick when you're done.` : intro);
+  const done = phrasesTrained ? "press the tick or say “Hey Superteem, stop note”" : "press the tick";
+  say(dictate ? `${intro} Go ahead, and ${done} when you're done.` : intro);
   closeAgent();
   await openNote(id, { dictate });
-}
-
-function startVoiceNote() {
-  agent.mode = "note";
-  syncAttentive();
-  closeAgent();
-  setTimeout(() => setChip("Voice note: just talk. Say “stop note” when you're done."), 50);
 }
 
 // ---------- Start ----------
