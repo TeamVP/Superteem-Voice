@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Superteem Voice</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="show-list">
+  <aside class="sidebar">
+    <div class="brand-row">
+      <button class="brand" title="Home" aria-label="Superteem">
+        <img class="logo-light-mode" src="logo-light-mode.png" alt="">
+        <img class="logo-dark-mode" src="logo-dark-mode.png" alt="">
+      </button>
+      <span class="brand-tools">
+        <button id="listen-chip" class="listen-chip pill windows-only" title="Listening for “Hey Superteem”. Click to talk.">
+          <span class="dot"></span><span id="listen-label">Voice off</span>
+        </button>
+        <button id="open-home" class="icon-only" title="Home" aria-label="Home">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"></path></svg>
+        </button>
+      </span>
+    </div>
+    <div class="quick">
+      <button id="new-note">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path></svg>New note
+      </button>
+      <button id="new-meeting">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9v6M8 6v12M12 10v4M16 7v10M20 10v4"></path></svg>Meeting
+      </button>
+    </div>
+    <label class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+      <input id="search" type="search" placeholder="Search notes and meetings" autocomplete="off" aria-label="Search notes and meetings">
+    </label>
+    <nav id="items" class="items" aria-label="Notes and meetings"></nav>
+    <div class="sidebar-foot">
+      <button id="open-settings" class="link">Settings</button>
+    </div>
+  </aside>
+  <main id="main-wrap">
+    <button id="back" class="link back">‹ All notes</button>
+    <div id="main"></div>
+  </main>
+
+  <section id="agent" class="agent" hidden aria-live="polite" aria-label="Talk to Superteem">
+    <div class="top">
+      <span>Voice mode · screen optional · replies are spoken</span>
+      <button id="agent-close" class="pill">Close</button>
+    </div>
+    <div id="agent-log" class="log"></div>
+    <div class="foot">
+      <div id="agent-bars" class="bars" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+      <div id="agent-state" class="state">Listening</div>
+      <div id="agent-actions" class="agent-actions"></div>
+      <form id="agent-type" class="type">
+        <input id="agent-input" placeholder="Or type a command" aria-label="Type a command" autocomplete="off">
+        <button class="primary pill">Send</button>
+      </form>
+      <div id="agent-say" class="say"></div>
+    </div>
+  </section>
+  <script src="commands.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

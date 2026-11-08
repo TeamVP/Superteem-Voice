@@ -1,0 +1,11 @@
+{
+  "name": "superteem-voice",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
