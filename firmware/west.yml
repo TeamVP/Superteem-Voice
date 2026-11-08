@@ -13,5 +13,7 @@ manifest:
           - cmsis
           - cmsis_6
           - hal_nordic
+          # Bluetooth pairing does its cryptography through PSA, which mbedtls provides.
+          - mbedtls
   self:
     path: firmware
