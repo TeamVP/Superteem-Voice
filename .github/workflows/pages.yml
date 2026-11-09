@@ -53,8 +53,37 @@ jobs:
           jq '{tag_name, published_at, html_url, assets: [.assets[] | {name, size}]}' latest.json > _site/download/release.json
           ls -l _site/download
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - id: artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+      # actions/deploy-pages names each deployment after the commit, and GitHub Pages treats a second
+      # deployment of a commit it has already deployed as done without publishing it. A release tagged on a
+      # commit whose site changes were deployed on push then left the page offering the previous release.
+      # So each run is deployed under its own name, through the same API deploy-pages uses.
       - id: deployment
-        uses: actions/deploy-pages@v4
+        name: Deploy to GitHub Pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact_id }}
+        run: |
+          oidc=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -r .value)
+          version="$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          created=$(gh api -X POST "repos/$GITHUB_REPOSITORY/pages/deployments" \
+            -F artifact_id="$ARTIFACT_ID" -f pages_build_version="$version" -f oidc_token="$oidc")
+          id=$(jq -r .id <<< "$created")
+          echo "page_url=$(jq -r .page_url <<< "$created")" >> "$GITHUB_OUTPUT"
+          echo "Deployment $id for $version"
+          for attempt in $(seq 1 120); do
+            status=$(gh api "repos/$GITHUB_REPOSITORY/pages/deployments/$id" --jq .status)
+            echo "Status: $status"
+            case "$status" in
+              succeed) exit 0 ;;
+              deployment_failed|deployment_content_failed|deployment_cancelled|deployment_lost|deployment_attempt_error)
+                echo "::error::The Pages deployment ended with $status"; exit 1 ;;
+            esac
+            sleep 5
+          done
+          echo "::error::The Pages deployment didn't finish in 10 minutes"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/pages/deployments/$id/cancel" || true
+          exit 1
