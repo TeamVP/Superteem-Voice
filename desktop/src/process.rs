@@ -25,8 +25,14 @@ fn seconds(window: usize) -> f64 {
     (window * pipeline::WINDOW_MS) as f64 / 1000.0
 }
 
-/// A session with journals but no transcript, such as one cut short by a crash.
+pub const COMPACTED: &str = "This meeting's audio was deleted, so it can't be processed again.";
+
+/// A session with journals but no transcript, such as one cut short by a crash. A compacted session
+/// never does: its audio was deleted on purpose.
 pub fn needs_processing(dir: &Path) -> bool {
+    if library::load_meta(dir).compacted {
+        return false;
+    }
     let has_journal = fs::read_dir(dir)
         .map(|entries| entries.flatten().any(|e| e.path().extension().is_some_and(|x| x == "stvj")))
         .unwrap_or(false);
@@ -117,6 +123,10 @@ fn name_from_prints(meta: &mut Meta, segments: &[Segment], line_voices: &BTreeMa
 
 /// Returns a short summary for the screen. `progress` gets a stage name and the fraction done.
 pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<String, String> {
+    // Processing a session whose audio is gone would replace its transcript with an empty one.
+    if library::load_meta(dir).compacted {
+        return Err(COMPACTED.into());
+    }
     progress("Loading audio", 0.0);
     let mut names = Vec::new();
     let mut sources = Vec::new();
@@ -379,6 +389,27 @@ mod tests {
         write_journal(&dir.join("input1.stvj"), &[0; FRAME_SAMPLES]);
         assert!(needs_processing(&dir));
         fs::write(dir.join("transcript.json"), "[]").unwrap();
+        assert!(!needs_processing(&dir));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_compacted_session_is_never_processed() {
+        let dir = std::env::temp_dir().join(format!("stv-compacted-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let meta = Meta { title: "Kept".into(), ..Meta::default() };
+        let segments = vec![Segment { text: "Hello".into(), stream: "input1".into(), speaker: "input1".into(), ..Default::default() }];
+        library::save(&dir, &meta, &segments).unwrap();
+        write_journal(&dir.join("input1.stvj"), &[0; FRAME_SAMPLES]);
+        library::compact(&dir).unwrap();
+        assert!(!needs_processing(&dir));
+        assert_eq!(process_session(&dir, &|_, _| {}).unwrap_err(), COMPACTED);
+        assert_eq!(library::load_segments(&dir), segments);
+
+        // Even a journal left behind, with the transcript gone, isn't offered for processing.
+        write_journal(&dir.join("input1.stvj"), &[0; FRAME_SAMPLES]);
+        fs::remove_file(dir.join("transcript.json")).unwrap();
         assert!(!needs_processing(&dir));
         let _ = fs::remove_dir_all(&dir);
     }

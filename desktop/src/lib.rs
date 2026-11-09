@@ -306,7 +306,9 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, discard: Option<bool>) ->
 /// Processes a session again, or for the first time after a crash. Edited lines are kept.
 #[tauri::command]
 fn process_session<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(), String> {
-    library::session_dir(&id)?;
+    if library::load_meta(&library::session_dir(&id)?).compacted {
+        return Err(process::COMPACTED.into());
+    }
     enqueue(&app, id);
     Ok(())
 }
@@ -352,6 +354,10 @@ struct SessionView {
     voiceprints: Vec<PrintChoice>,
     /// Key phrases heard in the session.
     keyphrases: Vec<keyphrases::Heard>,
+    /// Bytes of WAVs and journals, freed by compacting.
+    audio_bytes: u64,
+    /// Being recorded or processed, so it can't be compacted.
+    busy: bool,
 }
 
 #[derive(Serialize)]
@@ -398,6 +404,8 @@ fn get_session(state: State<AppState>, id: String) -> Result<SessionView, String
         model_ready: transcribe::model_ready(),
         voiceprints: prints.into_iter().map(|p| PrintChoice { id: p.id, name: p.name }).collect(),
         keyphrases: keyphrases::load_session(&dir),
+        audio_bytes: library::audio_bytes(&dir),
+        busy,
         id,
         meta,
         segments,
@@ -1286,6 +1294,20 @@ fn delete_session(state: State<AppState>, id: String) -> Result<(), String> {
     library::delete(&id)
 }
 
+/// Deletes a meeting's audio for good and keeps its transcript. Returns the bytes freed.
+#[tauri::command]
+fn compact_session(state: State<AppState>, id: String) -> Result<u64, String> {
+    let _guard = state.edit.lock().unwrap();
+    let dir = library::session_dir(&id)?;
+    if state.recording.lock().unwrap().as_ref().is_some_and(|r| r.dir() == dir) {
+        return Err("This meeting is being recorded.".into());
+    }
+    if is_queued(&state, &id) {
+        return Err("This meeting is being processed.".into());
+    }
+    library::compact(&dir)
+}
+
 #[tauri::command]
 fn open_folder(id: Option<String>) -> Result<(), String> {
     let dir = match id {
@@ -1370,6 +1392,7 @@ pub fn run() {
             get_prefs,
             save_prefs,
             delete_session,
+            compact_session,
             open_folder,
             start_wake_practice,
             stop_wake_practice,

@@ -333,7 +333,7 @@ async function refreshItems() {
     ...sessions.map((s) => ({ kind: "session", id: s.id, title: meetingTitle(s.id, s.title), when: s.created, status: s.status,
       sub: [`Meeting · ${timeText(s.created)}`, s.duration_s ? clock(s.duration_s) : null,
         queue.current === s.id ? "processing…" : queue.waiting.includes(s.id) ? "waiting to process" : null,
-        s.needs_processing ? "not processed" : null].filter(Boolean).join(" · ") })),
+        s.needs_processing ? "not processed" : null, s.compacted ? "audio deleted" : null].filter(Boolean).join(" · ") })),
   ].sort((a, b) => b.when - a.when);
 
   itemsNav.replaceChildren();
@@ -1393,6 +1393,38 @@ function makePlayer(session, duration, onTick) {
   return p;
 }
 
+/// "142 MB", for space on disk.
+function sizeText(bytes) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  if (bytes < 1024 ** 3) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+/// The bin button's menu: [choice, label, detail, disabled] each.
+function deleteMenu(choices, run) {
+  const wrap = el("span", { class: "export-menu delete-menu" });
+  const button = el("button", { class: "icon-only danger", type: "button", "aria-haspopup": "menu", "aria-expanded": "false",
+    title: "Delete this meeting or its audio", "aria-label": "Delete this meeting or its audio" }, svg("trash", 18));
+  const menu = el("div", { class: "menu", role: "menu", hidden: true });
+  const close = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outside, true); };
+  const outside = (e) => { if (!wrap.contains(e.target)) close(); };
+  button.addEventListener("click", () => {
+    if (!menu.hidden) return close();
+    menu.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    document.addEventListener("click", outside, true);
+    menu.querySelector("button:not([disabled])")?.focus();
+  });
+  menu.addEventListener("keydown", (e) => { if (e.key === "Escape") { close(); button.focus(); } });
+  for (const [choice, label, detail, disabled] of choices) {
+    const item = el("button", { type: "button", role: "menuitem", disabled }, el("strong", {}, label), el("small", {}, detail));
+    item.addEventListener("click", () => { close(); run(choice); });
+    menu.append(item);
+  }
+  wrap.append(button, menu);
+  return wrap;
+}
+
 /// Words, not just Whisper's "[BLANK_AUDIO]" or "(silence)" markers or punctuation.
 function hasWords(text) {
   return /[\p{L}\p{N}]/u.test((text ?? "").replace(/\[[^\]]*\]|\([^)]*\)/g, ""));
@@ -1463,17 +1495,47 @@ function renderSession(session, processingError, suggestion) {
     }
   });
 
-  const remove = el("button", { class: "icon-only danger", title: "Delete this meeting", "aria-label": "Delete this meeting" }, svg("trash", 18));
-  remove.addEventListener("click", async () => {
-    if (!remove.dataset.armed) {
-      remove.dataset.armed = "1";
-      remove.classList.add("armed");
-      remove.replaceChildren(svg("trash", 16), platform === "android" ? "Tap again to delete permanently" : "Click again to move to the Recycle Bin");
-      setTimeout(() => { delete remove.dataset.armed; remove.classList.remove("armed"); remove.replaceChildren(svg("trash", 18)); }, 4000);
-      return;
-    }
+  // Delete offers the whole meeting, or just its audio ("Compact"), which keeps the transcript.
+  const confirmBox = el("div", { class: "notice confirm", role: "alertdialog", hidden: true });
+  const askFirst = (text, label, run) => {
+    const go = el("button", { class: "primary danger-fill", type: "button" }, label);
+    go.addEventListener("click", async () => { go.disabled = true; await run(); go.disabled = false; });
+    confirmBox.replaceChildren(el("p", {}, text), go,
+      el("button", { type: "button", onclick: () => { confirmBox.hidden = true; } }, "Cancel"));
+    confirmBox.hidden = false;
+    go.focus();
+  };
+  const deleteWhole = async () => {
     stopPlayback();
     if (await save("delete_session", {})) showHome();
+  };
+  const compactWhy = session.busy ? "Not while it is being recorded or processed"
+    : session.needs_processing ? "Not processed yet, so there is no transcript to keep"
+    : meta.compacted || !session.audio_bytes ? "Its audio is already deleted" : null;
+  const compact = async () => {
+    stopPlayback();
+    try {
+      const freed = await invoke("compact_session", { id });
+      await reload();
+      const notice = main.querySelector(".compacted-notice");
+      if (notice && freed) notice.prepend(`Audio deleted, ${sizeText(freed)} freed. `);
+    } catch (e) {
+      showError(page, e);
+    }
+  };
+  const remove = deleteMenu([
+    ["delete", platform === "android" ? "Delete permanently" : "Move to Recycle Bin",
+      platform === "android" ? "The whole meeting, transcript and audio" : "The whole meeting. It can be restored from the Recycle Bin."],
+    ["compact", "Compact", compactWhy ?? `Delete only the audio and keep the transcript · frees ${sizeText(session.audio_bytes)}`, !!compactWhy],
+  ], (choice) => {
+    if (choice === "compact") {
+      askFirst(`Delete this meeting's audio for good and free ${sizeText(session.audio_bytes)}? The transcript, names, bookmarks and action items stay and can still be edited and exported, `
+        + "but the meeting can't be played or transcribed again. This can't be undone.", "Delete audio", compact);
+    } else if (platform === "android") {
+      askFirst("Delete this meeting and its audio for good? This can't be undone.", "Delete", deleteWhole);
+    } else {
+      deleteWhole();
+    }
   });
   const edits = session.segments.filter((s) => s.edited).length;
   const reprocess = el("button", { class: "link with-icon", title: "Transcribe again: run speaker detection and transcription again", "aria-label": "Transcribe again" },
@@ -1487,8 +1549,8 @@ function renderSession(session, processingError, suggestion) {
     refreshItems();
     return true;
   });
-  const exporter = exportMenu([...TRANSCRIPT_EXPORTS,
-    ["package", "Edit package", "Every track and the transcript mix as audio, with an EDL, Premiere and Resolve XML and a REAPER project"]],
+  const exporter = exportMenu([...TRANSCRIPT_EXPORTS, ...(meta.compacted ? [] : [
+    ["package", "Edit package", "Every track and the transcript mix as audio, with an EDL, Premiere and Resolve XML and a REAPER project"]])],
     (format) => invoke("export_session", { id, title: meetingTitle(id, meta.title), format }));
   page.append(title, el("div", { class: "meta" },
     picker,
@@ -1496,14 +1558,17 @@ function renderSession(session, processingError, suggestion) {
     meta.duration_s ? el("span", { title: clock(meta.duration_s) }, `Length: ${lengthText(meta.duration_s)}`) : null,
     el("span", { class: "grow" }),
     session.segments.length ? exporter : null,
-    platform === "windows" ? el("button", { class: "icon-only", title: "Open this meeting's folder, with its audio, transcript and exports", "aria-label": "Open this meeting's folder",
-      onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
-    session.model_ready && !session.needs_processing ? reprocess : null,
-    remove), exporter.status);
+    platform === "windows" ? el("button", { class: "icon-only", title: meta.compacted ? "Open this meeting's folder, with its transcript and exports" : "Open this meeting's folder, with its audio, transcript and exports",
+      "aria-label": "Open this meeting's folder", onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
+    session.model_ready && !session.needs_processing && !meta.compacted ? reprocess : null,
+    remove), exporter.status, confirmBox);
 
   const processNow = el("button", { class: "primary" }, "Process now");
   processNow.addEventListener("click", () => processAgain(id));
-  if (session.needs_processing) {
+  if (meta.compacted) {
+    page.append(el("div", { class: "notice compacted-notice" },
+      "This meeting's audio was deleted to save space. The transcript can still be read, edited and exported, but not played or transcribed again."));
+  } else if (session.needs_processing) {
     page.append(el("div", { class: "notice" },
       el("p", {}, "This recording was saved but not processed, perhaps because the app closed while recording. Its audio is safe."),
       processNow));
@@ -1511,7 +1576,7 @@ function renderSession(session, processingError, suggestion) {
     page.append(el("div", { class: "notice" }, `Processing failed: ${processingError}`));
   } else if (!session.segments.length) {
     page.append(el("div", { class: "notice" }, "No speech was found in this recording."));
-  } else if (!session.transcribed) {
+  } else if (!session.transcribed && !meta.compacted) {
     page.append(el("div", { class: "notice" }, session.model_ready
       ? "This meeting has no transcript yet. Use Transcribe (↻) above."
       : "This meeting has no transcript. Get the speech model in Settings, then use Transcribe (↻) above."));
@@ -1730,7 +1795,7 @@ function renderSession(session, processingError, suggestion) {
     // An overlapping line always shows its speaker, since the one before may be the other voice.
     const same = previous === seg.speaker && !seg.overlap && !double;
     const line = el("div", { class: `line${low ? " low" : ""}${same ? " same-speaker" : ""}${seg.overlap ? " overlap" : ""}${suggested ? " suggest" : ""}${double ? " double" : ""}` });
-    const time = el("button", { class: "time mono", title: "Play from this line" }, clock(seg.start_s));
+    const time = el("button", { class: "time mono", title: streams.length ? "Play from this line" : "No audio to play" }, clock(seg.start_s));
     time.addEventListener("click", () => {
       if (!player) return;
       player.seek(seg.start_s);
@@ -2521,7 +2586,7 @@ async function showVocabulary(message) {
     el("p", { class: "legend" }, "Names, products and acronyms that speech to text writes as everyday words, such as “SIBR” "
       + "written as “cyber”. Voice tells the speech model about these words before it listens, and corrects what it "
       + "still gets wrong. In a meeting, each corrected word is underlined: click it to undo the change."));
-  if (message) page.append(el("p", { class: "notice", role: "status" }, message));
+  if (message) page.append(el("p", { class: "vocab-notice", role: "status" }, message));
   if (!terms.length) page.append(el("div", { class: "empty" }, "No words yet."));
   for (const t of terms) {
     const remove = el("button", { class: "link danger" }, "Delete");
