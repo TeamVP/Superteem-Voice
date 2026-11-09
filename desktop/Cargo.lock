@@ -3637,6 +3637,8 @@ dependencies = [
  "btleplug",
  "cpal",
  "futures",
+ "rustls",
+ "rustls-native-certs",
  "serde",
  "serde_json",
  "stv-core",
@@ -3646,6 +3648,7 @@ dependencies = [
  "trash",
  "ureq",
  "uuid",
+ "webpki-roots 0.26.11",
  "whisper-rs",
 ]
 
@@ -4379,7 +4382,6 @@ dependencies = [
  "log",
  "once_cell",
  "rustls",
- "rustls-native-certs",
  "rustls-pki-types",
  "socks",
  "url",

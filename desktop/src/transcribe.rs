@@ -160,8 +160,24 @@ fn parse_windows_proxy(server: &str) -> Option<String> {
     find("https").or_else(|| find("http")).or_else(|| find("socks").map(|v| format!("socks5://{v}")))
 }
 
+/// Mozilla's roots, built into the app so they work everywhere, plus whatever the system trusts, so a
+/// company proxy whose certificate is installed in Windows is trusted too. Android's store isn't readable
+/// this way, which is why the built-in roots are always there.
+fn tls() -> Result<std::sync::Arc<rustls::ClientConfig>, String> {
+    let mut roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
+    if let Ok(system) = rustls_native_certs::load_native_certs() {
+        roots.add_parsable_certificates(system);
+    }
+    let config = rustls::ClientConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
+        .with_safe_default_protocol_versions()
+        .map_err(|e| e.to_string())?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(std::sync::Arc::new(config))
+}
+
 fn agent() -> Result<ureq::Agent, String> {
-    let mut builder = ureq::AgentBuilder::new();
+    let mut builder = ureq::AgentBuilder::new().tls_config(tls()?);
     if let Some(p) = proxy() {
         let proxy = ureq::Proxy::new(&p.url).map_err(|e| format!("The proxy {} isn't usable: {e}", p.shown))?;
         builder = builder.proxy(proxy);
@@ -328,6 +344,30 @@ fn looped(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn downloads_always_trust_the_built_in_roots() {
+        assert!(tls().is_ok());
+        assert!(webpki_roots::TLS_SERVER_ROOTS.len() > 100);
+    }
+
+    /// Reaches the real server, so it only runs when asked: cargo test -- --ignored reaches_the_model
+    #[test]
+    #[ignore]
+    fn reaches_the_model_server() {
+        let response = agent().unwrap().get(MODEL_URL).set("Range", "bytes=0-15").call().expect("connects over TLS");
+        assert!(matches!(response.status(), 200 | 206), "{}", response.status());
+        // As on Android, where the system's store can't be read: the built-in roots alone are enough.
+        let roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
+        let config = rustls::ClientConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let bare = ureq::AgentBuilder::new().tls_config(std::sync::Arc::new(config)).build();
+        let response = bare.get(MODEL_URL).set("Range", "bytes=0-15").call().expect("built-in roots are enough");
+        assert!(matches!(response.status(), 200 | 206), "{}", response.status());
+    }
 
     #[test]
     fn windows_proxy_settings_are_read() {

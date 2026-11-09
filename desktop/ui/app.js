@@ -2427,14 +2427,17 @@ async function modelHelp(changed) {
   return el("div", { class: "model-help" },
     el("h2", {}, "Download proxy"),
     el("div", { class: "field" }, proxy, saved),
-    el("div", { class: "legend" }, "Only needed if your network uses a proxy that Windows doesn't already know about. "
-      + "user:password@ can go before the address. ", using),
-    el("h2", {}, "Adding the model yourself"),
-    el("div", { class: "legend" }, "Download ", el("code", {}, info.file), " in a browser and put it in ",
-      el("code", { class: "path" }, info.folder), ". Superteem picks it up straight away."),
-    el("div", { class: "actions" },
-      platform === "windows" ? el("button", { class: "pill", onclick: () => invoke("open_models_folder").catch((e) => showError(copy.parentElement, e)) }, "Open the model folder") : "",
-      copy));
+    el("div", { class: "legend" }, platform === "windows"
+      ? "Only needed if your network uses a proxy that Windows doesn't already know about. "
+      : "Only needed if your network makes apps go through a proxy. ",
+    "user:password@ can go before the address. ", using),
+    // Android keeps the app's folder private, so the model can't be put there by hand.
+    platform === "windows" ? el("h2", {}, "Adding the model yourself") : "",
+    platform === "windows" ? el("div", { class: "legend" }, "Download ", el("code", {}, info.file), " in a browser and put it in ",
+      el("code", { class: "path" }, info.folder), ". Superteem picks it up straight away.") : "",
+    platform === "windows" ? el("div", { class: "actions" },
+      el("button", { class: "pill", onclick: () => invoke("open_models_folder").catch((e) => showError(copy.parentElement, e)) }, "Open the model folder"),
+      copy) : "");
 }
 
 /// How many good takes of "Hey Superteem" setup asks for, and the misses after which skipping is offered.

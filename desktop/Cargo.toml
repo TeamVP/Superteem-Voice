@@ -14,8 +14,12 @@ stv-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = ["protocol-asset", "custom-protocol"] }
-# The OS trust store and SOCKS, so downloads work behind company proxies.
-ureq = { version = "2", features = ["native-certs", "socks-proxy"] }
+# Downloads trust Mozilla's roots built into the app plus the system's own store, which company proxies
+# add their certificates to. The system store alone left Android trusting nothing.
+ureq = { version = "2", features = ["socks-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-native-certs = "0.7"
+webpki-roots = "0.26"
 whisper-rs = "0.16"
 
 # Android records in its Kotlin foreground service, so these are Windows only.
