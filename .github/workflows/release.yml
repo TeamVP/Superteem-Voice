@@ -113,6 +113,19 @@ jobs:
           # Changed when how whisper.cpp is compiled changes, so an old build of it isn't reused.
           prefix-key: v1-portable-cpu
       - run: rustup target add aarch64-linux-android
+      # The Gradle wrapper tries its download once, and services.gradle.org has been slow enough to fail it.
+      # Fetching it first, with retries, leaves it in the cache for the build.
+      - name: Fetch Gradle
+        shell: pwsh
+        working-directory: desktop/gen/android
+        run: |
+          foreach ($attempt in 1..4) {
+            ./gradlew.bat --version
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Output "Gradle download attempt $attempt failed; trying again."
+            Start-Sleep -Seconds (15 * $attempt)
+          }
+          throw 'Could not download Gradle'
       - name: Build the APK
         shell: pwsh
         env:
