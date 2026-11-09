@@ -148,6 +148,33 @@ jobs:
             Start-Sleep -Seconds (15 * $attempt)
           }
           throw 'Could not download Gradle'
+      # Maven Central sends the Kotlin compiler on to a GitHub release link from these machines, and those
+      # links have returned 504 for hours. Google's mirror of Maven Central serves the files itself, so
+      # every Gradle build here (buildSrc and plugins included) is pointed at it.
+      - name: Use Google's Maven Central mirror
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:USERPROFILE '.gradle\init.d'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Set-Content (Join-Path $dir 'central-mirror.gradle') @'
+          def mirror = 'https://maven-central.storage-download.googleapis.com/maven2/'
+          def useMirror = { RepositoryHandler repos ->
+              repos.withType(MavenArtifactRepository).configureEach { repo ->
+                  def url = repo.url.toString()
+                  if (url.startsWith('https://repo.maven.apache.org/maven2') || url.startsWith('https://repo1.maven.org/maven2')) {
+                      repo.url = mirror
+                  }
+              }
+          }
+          beforeSettings { settings ->
+              useMirror(settings.pluginManagement.repositories)
+              useMirror(settings.dependencyResolutionManagement.repositories)
+          }
+          allprojects {
+              useMirror(buildscript.repositories)
+              useMirror(repositories)
+          }
+          '@
       - name: Build the APK
         shell: pwsh
         env:
