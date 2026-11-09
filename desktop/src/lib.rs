@@ -1,4 +1,4 @@
-//! The Superteem Voice app, shared by Windows and Android.
+//! Voice by Superteem, shared by Windows and Android.
 
 #[cfg(not(target_os = "android"))]
 pub mod capture;

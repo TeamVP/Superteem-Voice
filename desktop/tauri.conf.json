@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Superteem Voice",
+  "productName": "Voice by Superteem",
   "version": "0.2.6",
   "identifier": "io.superteem.voice",
   "build": {
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Superteem Voice",
+        "title": "Voice by Superteem",
         "width": 1180,
         "height": 780,
         "minWidth": 720,
@@ -36,7 +36,8 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "installerIcon": "icons/icon.ico"
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "installer-hooks.nsh"
       }
     }
   }

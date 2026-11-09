@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h1 align="center">Superteem Voice</h1>
+<h1 align="center">Voice by Superteem</h1>
 
 <p align="center">
   <b>Voice notes transcribed on your own device. No cloud.</b><br>
@@ -14,7 +14,7 @@
   <a href="#license">Open source</a>
 </p>
 
-Superteem Voice turns speech into text on your PC or phone. You can dictate notes, record meetings and give voice commands. Nothing is uploaded: there's no account and no server, and the app doesn't track you.
+Voice by Superteem turns speech into text on your PC or phone. You can dictate notes, record meetings and give voice commands. Nothing is uploaded: there's no account and no server, and the app doesn't track you.
 
 ## Features
 
@@ -32,8 +32,8 @@ Get the latest Windows installer and Android APK from **[voice.superteem.com](ht
 
 | Device | Requires | File |
 | --- | --- | --- |
-| Windows | Windows 10 or 11, 64-bit | `Superteem-Voice-Setup-x64.exe` |
-| Android | Android 10 or later | `Superteem-Voice-Android.apk` |
+| Windows | Windows 10 or 11, 64-bit | `Voice-by-Superteem-Setup-x64.exe` |
+| Android | Android 10 or later | `Voice-by-Superteem-Android.apk` |
 
 ## Repository layout
 

@@ -439,6 +439,10 @@ body[data-platform="android"] .windows-only { display: none !important; }
 .help-toggle { width: 26px; height: 26px; font-weight: 700; font-size: 13px; border: 1px solid var(--line); }
 /* The wordmark has a version for each theme, following the same choice as the colours. */
 .brand img { display: block; height: 22px; width: auto; }
+/* The product name sits after the Superteem wordmark: "[Superteem] Voice". */
+.brand { display: inline-flex; align-items: center; gap: 7px; }
+.brand .product { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; line-height: 1; color: var(--text); }
+.welcome-title .product { font-weight: 700; }
 .brand .logo-dark-mode, .welcome-logo .logo-dark-mode { display: none; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) :is(.brand, .welcome-logo) .logo-light-mode { display: none; }

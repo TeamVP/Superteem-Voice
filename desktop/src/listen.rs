@@ -642,7 +642,7 @@ mod imp {
             .flatten()
             .map(|e| e.path())
             .find(|p| p.extension().is_some_and(|x| x == "stvj"))
-            .ok_or("Nothing was recorded. Check Superteem may use the microphone, in Settings.")?;
+            .ok_or("Nothing was recorded. Check Voice may use the microphone, in Settings.")?;
         Ok(stv_core::pipeline::load_source(&journal, RATE).map_err(|e| e.to_string())?.pcm)
     }
 

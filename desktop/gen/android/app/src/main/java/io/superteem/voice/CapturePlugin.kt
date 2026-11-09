@@ -121,7 +121,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         if (missing.isNotEmpty()) {
             asked.edit().apply { missing.forEach { putBoolean(it, true) } }.apply()
             activity.requestPermissions(missing.toTypedArray(), 1)
-            return invoke.reject("Superteem needs access to the microphone. Allow it, then try again.")
+            return invoke.reject("Voice needs access to the microphone. Allow it, then try again.")
         }
         val intent = Intent(activity, CaptureService::class.java)
             .putExtra(CaptureService.EXTRA_DIR, args.dir)

@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 env:
-  WINDOWS_FILE: Superteem-Voice-Setup-x64.exe
-  ANDROID_FILE: Superteem-Voice-Android.apk
+  WINDOWS_FILE: Voice-by-Superteem-Setup-x64.exe
+  ANDROID_FILE: Voice-by-Superteem-Android.apk
 
 jobs:
   version:
@@ -230,7 +230,7 @@ jobs:
         run: |
           ls -l dist
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
-            --title "Superteem Voice ${GITHUB_REF_NAME#v}" --generate-notes
+            --title "Voice by Superteem ${GITHUB_REF_NAME#v}" --generate-notes
       # The download page serves its own copy of the release's files. A release made with this workflow's
       # token doesn't start other workflows, so the page is republished here.
       - name: Republish the download page

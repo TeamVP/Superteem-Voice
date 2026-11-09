@@ -1767,7 +1767,7 @@ async function showVoicePrints(error) {
   const page = el("div", { class: "page" },
     el("button", { class: "link", onclick: () => showSettings() }, "‹ Settings"),
     el("h1", {}, "Voice prints"),
-    el("p", { class: "legend" }, "A voice print lets Superteem recognise someone and name them in new meetings. "
+    el("p", { class: "legend" }, "A voice print lets Voice recognise someone and name them in new meetings. "
       + "It is kept only on this device, as a description of how the voice sounds; the recording made for it is deleted. "
       + "Only make one with the person's agreement."));
   if (error) page.append(el("div", { class: "error" }, String(error)));
@@ -1947,7 +1947,7 @@ async function showKeyphrases(printId, message) {
   const page = el("div", { class: "page" },
     el("button", { class: "link", onclick: () => showSettings() }, "‹ Settings"),
     el("h1", {}, "Wake word and commands"),
-    el("p", { class: "legend" }, "Say each phrase a few times so Superteem hears it the moment it's said, without waiting "
+    el("p", { class: "legend" }, "Say each phrase a few times so Voice hears it the moment it's said, without waiting "
       + "for speech to text. It learns how you say them, so it answers you rather than anyone in the room. Only a "
       + "description of the sound is kept with your voice print; the recordings are deleted. Record again throws "
       + "away every take kept for that phrase and starts it fresh."));
@@ -2097,7 +2097,7 @@ function showPhraseTakes() {
   const cancel = el("button", { class: "pill" }, "Cancel");
   const page = el("div", { class: "page" }, el("h1", {}, `Say “${phrase.text}”`),
     el("p", { class: "legend" }, "Say it once for each line, with a pause of about a second between. Say it a little "
-      + "differently each time: that teaches Superteem the ways you really say it."
+      + "differently each time: that teaches Voice the ways you really say it."
       + (phrase.after ? ` Say just “${phrase.text}”; it only counts after “${phrase.after}”.` : "")),
     banner, el("div", { class: "meter wide-meter" }, meter),
     el("ol", { class: "takes" }, phrase.how.map((h) => el("li", {}, h))),
@@ -2210,7 +2210,7 @@ async function showSettings() {
 
   page.append(el("h2", {}, "Meetings"), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, "Consent question",
-      el("small", {}, "Superteem always confirms everyone agreed before a meeting is recorded.")), el("span", { class: "value" }, "Always asked")),
+      el("small", {}, "Voice always confirms everyone agreed before a meeting is recorded.")), el("span", { class: "value" }, "Always asked")),
     el("div", { class: "row" }, el("span", { class: "label" }, "Tracks used last time"),
       el("span", { class: "value" }, [...prefs.inputs, prefs.pins ? "Voice Pins" : null].filter(Boolean).join(", ") || "Default microphone"))));
 
@@ -2291,17 +2291,17 @@ const SETUP = { welcome: 0, voice: 1, model: 2, hello: 3, done: 4, permissions: 
 /// What the person agrees to by pressing "Agree and get started". Kept short on purpose.
 const TERMS = [
   ["Your voice stays on this device",
-    "Superteem turns speech into text on this computer. Your recordings, transcripts, notes and voice print (a "
+    "Voice by Superteem turns speech into text on this device. Your recordings, transcripts, notes and voice print (a "
     + "numeric description of how your voice sounds, not a recording of it) are stored only here and are never sent "
     + "to us or anyone else. The one download is the speech model."],
   ["You're in control",
     "Delete voice prints, notes and recordings in the app at any time. Uninstalling removes the app; your files stay "
     + "in the Superteem Voice folder until you delete it."],
   ["Open source, no warranty",
-    "Superteem is free software under the GNU General Public License v3. You may use, study, change and share it "
+    "Voice is free software under the GNU General Public License v3. You may use, study, change and share it "
     + "under that licence. It is provided as is, without warranty of any kind."],
   ["Use it lawfully",
-    "You are responsible for how you use Superteem. Get consent before recording anyone, follow the recording, "
+    "You are responsible for how you use Voice. Get consent before recording anyone, follow the recording, "
     + "privacy and surveillance laws where you are, and don't use it for anything illegal. We can't prevent misuse "
     + "and aren't responsible for it."],
   ["Our liability",
@@ -2309,7 +2309,7 @@ const TERMS = [
     + "including missing or wrong transcripts. Nothing here limits rights you have under the Australian Consumer Law "
     + "or other laws that can't be excluded."],
   ["Governing law",
-    "These terms are governed by the laws of Victoria, Australia. If they change, Superteem will ask you again."],
+    "These terms are governed by the laws of Victoria, Australia. If they change, Voice will ask you again."],
 ];
 
 function showTerms() {
@@ -2370,7 +2370,7 @@ function setupSteps(step) {
 const PERMISSIONS = {
   microphone: ["Microphone", "Needed to record meetings, notes and your voice print.", true],
   nearby: ["Nearby devices", "For a Bluetooth headset microphone and Superteem Voice Pins.", false],
-  notifications: ["Notifications", "Shows that recording is on while you use other apps, with a tap back to Superteem.", false],
+  notifications: ["Notifications", "Shows that recording is on while you use other apps, with a tap back to Voice.", false],
 };
 
 /// A live list of the app's Android permissions, each with its state and the way to allow it. Checked again
@@ -2419,7 +2419,7 @@ function showPermissions() {
   main.replaceChildren(el("div", { class: "page" },
     el("button", { class: "link back-link", onclick: () => showSettings() }, "‹ Settings"),
     el("h1", {}, "App permissions"),
-    el("p", {}, "What Superteem may use on this phone. Everything stays on the phone."),
+    el("p", {}, "What Voice may use on this phone. Everything stays on the phone."),
     permissionsPanel()));
 }
 
@@ -2468,7 +2468,8 @@ async function showOnboarding(step = SETUP.welcome) {
       el("h1", { class: "welcome-title" }, "Welcome to ",
         el("span", { class: "welcome-logo", role: "img", "aria-label": "Superteem" },
           el("img", { class: "logo-light-mode", src: "logo-light-mode.png", alt: "" }),
-          el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" }))),
+          el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" })),
+        " ", el("span", { class: "product" }, "Voice")),
       el("p", { class: "lead" }, "Voice notes, meetings and commands, transcribed on your own device. No cloud."),
       rerun ? el("p", {}, "There are now terms of use. Agree to them to carry on.") : "",
       el("p", { class: "legend" }, "By continuing you agree to the ",
@@ -2479,7 +2480,7 @@ async function showOnboarding(step = SETUP.welcome) {
     const next = el("button", { class: "primary pill" }, "Continue");
     next.addEventListener("click", () => showOnboarding(SETUP.voice));
     page.append(setupHeading("Permissions", skipTo(SETUP.voice)),
-      el("p", {}, "Allow Superteem to use the microphone so it can record. The others are optional."),
+      el("p", {}, "Allow Voice to use the microphone so it can record. The others are optional."),
       permissionsPanel((microphone) => {
         next.textContent = microphone ? "Continue" : "Continue without the microphone";
         next.className = microphone ? "primary pill" : "pill";
@@ -2490,7 +2491,7 @@ async function showOnboarding(step = SETUP.welcome) {
     if (!ready && !modelDownload) downloadModel().catch(() => {});
     const next = () => showOnboarding(SETUP.model);
     page.append(setupHeading("Your microphone and voice print", skipTo(SETUP.model)),
-      el("p", { class: "setup-intro" }, "Pick the microphone you'll usually use, then read a short passage aloud so Superteem knows your voice."));
+      el("p", { class: "setup-intro" }, "Pick the microphone you'll usually use, then read a short passage aloud so the app knows your voice."));
     const body = el("div");
     page.append(body);
     main.replaceChildren(page);
@@ -2555,7 +2556,7 @@ async function modelHelp(changed) {
     // Android keeps the app's folder private, so the model can't be put there by hand.
     platform === "windows" ? el("h2", {}, "Adding the model yourself") : "",
     platform === "windows" ? el("div", { class: "legend" }, "Download ", el("code", {}, info.file), " in a browser and put it in ",
-      el("code", { class: "path" }, info.folder), ". Superteem picks it up straight away.") : "",
+      el("code", { class: "path" }, info.folder), ". Voice picks it up straight away.") : "",
     platform === "windows" ? el("div", { class: "actions" },
       el("button", { class: "pill", onclick: () => invoke("open_models_folder").catch((e) => showError(copy.parentElement, e)) }, "Open the model folder"),
       copy) : "");

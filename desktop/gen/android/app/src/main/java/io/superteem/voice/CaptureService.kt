@@ -86,7 +86,7 @@ class CaptureService : Service() {
     /** The connected-device type needs Bluetooth permission, so it is claimed only when Bluetooth is used. */
     private fun startInForeground(bluetooth: Boolean) {
         val notification = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Superteem Voice is recording")
+            .setContentTitle("Voice is recording")
             .setContentText("Recording audio streams")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
