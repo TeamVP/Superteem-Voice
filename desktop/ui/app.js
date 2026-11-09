@@ -32,7 +32,10 @@ const icon = {
   wave: '<path d="M4 9v6M8 6v12M12 10v4M16 7v10M20 10v4"></path>',
   mic: '<rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0014 0M12 18v3"></path>',
   bookmark: '<path d="M6 3h12v18l-6-4-6 4z"></path>',
-  action: '<rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8 12l3 3 5-6"></path>',
+  // A clipboard with a tick: something to be done, written down.
+  action: '<path d="M9 4H6.5A1.5 1.5 0 005 5.5v14A1.5 1.5 0 006.5 21h11a1.5 1.5 0 001.5-1.5v-14A1.5 1.5 0 0017.5 4H15"></path><rect x="9" y="2.5" width="6" height="3.5" rx="1"></rect><path d="M8.5 13.5l2.5 2.5 4.5-5"></path>',
+  save: '<path d="M5 3h11.5L20 6.5V19a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 011-2z"></path><path d="M8 3v5h7V3"></path><rect x="7.5" y="13" width="9" height="8"></rect>',
+  keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"></path>',
   play: '<path d="M7 4l13 8-13 8z" fill="currentColor" stroke="none"></path>',
   "skip-back": '<path d="M18 5l-10 7 10 7z" fill="currentColor" stroke="none"></path><path d="M6 5v14"></path>',
   "skip-forward": '<path d="M6 5l10 7-10 7z" fill="currentColor" stroke="none"></path><path d="M18 5v14"></path>',
@@ -323,6 +326,7 @@ new MutationObserver(() => {
 }).observe(main, { childList: true });
 document.getElementById("new-meeting").addEventListener("click", () => showMeeting());
 document.getElementById("open-settings").addEventListener("click", () => showSettings());
+document.getElementById("open-shortcuts").addEventListener("click", () => showShortcuts());
 // The wordmark is the Home button too.
 const goHome = () => showHome();
 document.querySelector(".brand").addEventListener("click", goHome);
@@ -1062,9 +1066,17 @@ function addMarker(text, kind = "") {
 /// Markers saved before action items had a kind were noted as text.
 const isAction = (m) => m.kind === "action" || (!m.kind && m.text === "Action item");
 const markerLabel = (m) => (isAction(m) ? "Action item" : "Bookmark");
+/// A marker's icon in place of its name, which screen readers and the tooltip still give.
+const markerIcon = (m, size = 16) => {
+  const icon = el("span", { class: `marker-icon${isAction(m) ? " action" : ""}`, role: "img", "aria-label": markerLabel(m), title: markerLabel(m) });
+  icon.innerHTML = svg(isAction(m) ? "action" : "bookmark", size).outerHTML;
+  return icon;
+};
 
 /// The marker open for changing while recording.
 let editingMarker = null;
+/// Marks now on the recording page, with whatever note is typed: set while that page is drawn.
+let liveMark = null;
 
 /// Every marker made so far; clicking one opens it to change its note or delete it.
 function drawMarkers() {
@@ -1077,23 +1089,24 @@ function drawMarkers() {
     if (m === editingMarker) {
       const input = el("input", { value: typed(m), placeholder: isAction(m) ? "What needs doing" : "Add a note to this bookmark", "aria-label": `Note for the ${what} at ${clock(m.at_s)}` });
       const close = () => { editingMarker = null; drawMarkers(); };
-      const done = () => { m.text = input.value.trim(); close(); };
+      const done = () => { if (editingMarker === m) { m.text = input.value.trim(); close(); } };
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); done(); }
-        if (e.key === "Escape") { e.preventDefault(); close(); }
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
       });
       const remove = () => { recording.markers.splice(recording.markers.indexOf(m), 1); close(); };
       const row = el("div", { class: `marker editing${isAction(m) ? " action" : ""}` }, el("span", { class: "mono" }, clock(m.at_s)),
-        el("strong", {}, markerLabel(m)), input,
-        el("button", { class: "primary pill", type: "button", onclick: done }, "Save"),
-        el("button", { class: "icon-btn trash", type: "button", title: `Delete this ${what}`, "aria-label": `Delete this ${what}`, onclick: remove }, svg("trash", 18)),
-        el("button", { class: "icon-btn", type: "button", title: "Cancel", "aria-label": "Cancel", onclick: close }, svg("close", 18)));
+        markerIcon(m), input,
+        el("button", { class: "icon-btn save", type: "button", title: "Save (Enter)", "aria-label": "Save", onclick: done }, svg("save", 18)),
+        el("button", { class: "icon-btn trash", type: "button", title: `Delete this ${what}`, "aria-label": `Delete this ${what}`, onclick: remove }, svg("trash", 18)));
+      // Clicking anywhere else keeps what was typed; Esc leaves it as it was.
+      row.addEventListener("focusout", (e) => { if (!row.contains(e.relatedTarget)) done(); });
       requestAnimationFrame(() => input.focus());
       return row;
     }
     const open = () => { editingMarker = m; drawMarkers(); };
     const row = el("div", { class: `marker${isAction(m) ? " action" : ""}`, role: "button", tabindex: "0", title: "Click to change the note or delete it" },
-      el("span", { class: "mono" }, clock(m.at_s)), el("strong", {}, markerLabel(m)), typed(m) ? ` · ${typed(m)}` : "");
+      el("span", { class: "mono" }, clock(m.at_s)), markerIcon(m), typed(m) ? el("span", {}, typed(m)) : el("span", { class: "hint" }, isAction(m) ? "Action item" : "Bookmark"));
     row.addEventListener("click", open);
     row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
     return row;
@@ -1121,9 +1134,12 @@ function renderRecording(status) {
     addMarker(pinned.value.trim(), kind);
     pinned.value = "";
   };
+  liveMark = mark;
   pinned.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); mark(e.ctrlKey ? "action" : ""); } });
-  const bookmark = el("button", { class: "icon-btn bookmark", type: "button", "aria-label": "Bookmark this moment", title: "Bookmark this moment (Enter)", onclick: () => mark("") }, svg("bookmark", 18));
-  const actionItem = el("button", { class: "icon-btn action-item", type: "button", "aria-label": "Mark an action item", title: "Mark an action item (Ctrl + Enter). It's written up from what was said here.", onclick: () => mark("action") }, svg("action", 18));
+  const bookmark = el("button", { class: "mark-btn bookmark", type: "button", "aria-label": "Bookmark this moment", title: "Bookmark this moment (B, or Enter in the note)", onclick: () => mark("") },
+    svg("bookmark", 18), el("span", { class: "label" }, "Bookmark"), el("kbd", {}, "B"));
+  const actionItem = el("button", { class: "mark-btn action-item", type: "button", "aria-label": "Add an action item", title: "Add an action item (A, or Ctrl + Enter in the note). It's written up from what was said here.", onclick: () => mark("action") },
+    svg("action", 18), el("span", { class: "label" }, "Action item"), el("kbd", {}, "A"));
   const hint = meetingListening()
     ? "Say “Bookmark that”, “Action item” or “Hey Superteem, stop recording”"
     : "Turn on “Hey Superteem” in Settings to mark and stop by voice";
@@ -1135,7 +1151,8 @@ function renderRecording(status) {
       el("span", { class: "hint" }, hint)),
     recording.consent ? null : consentChallenge(recLabel),
     problem, time, lanes, el("div", { class: "markers", id: "live-markers" }),
-    el("div", { class: "pinned" }, bookmark, actionItem, at, pinned),
+    el("div", { class: "mark-buttons" }, bookmark, actionItem),
+    el("div", { class: "pinned" }, at, pinned),
     el("div", { class: "live-controls" }, stop)));
   drawMarkers();
 
@@ -1314,6 +1331,9 @@ async function openSession(id, processingError) {
 let sessionListeners = null;
 /// Whether the meeting page also shows the clips left out of the script as doubles.
 let showDoubles = false;
+/// What a meeting plays: "transcript", with each track muted where the script takes its words from another
+/// microphone, or "manual", every track unless muted by hand.
+let playMix = "transcript";
 
 /// `suggestion` is lines that sound like one just moved: { lines, speaker }.
 function renderSession(session, processingError, suggestion) {
@@ -1515,8 +1535,8 @@ function renderSession(session, processingError, suggestion) {
   const markerLine = (m) => {
     const note = markerNote(m, scriptLines);
     const typed = m.text && m.text !== "Action item" ? m.text : "";
-    const body = el("div", { class: "marker-body", role: "button", tabindex: "0", title: "Click to change the note or delete it" },
-      el("strong", {}, markerLabel(m)), note ? ` · ${note}` : "",
+    const body = el("div", { class: "marker-body", role: "button", tabindex: "0", title: `${markerLabel(m)}: click to change the note or delete it` },
+      markerIcon(m), note ? el("span", {}, note) : el("span", { class: "hint" }, markerLabel(m)),
       m.heard ? el("span", { class: "edited", title: "Heard in the recording when it was processed" }, "heard") : null);
     const line = el("div", { class: `line marker-line${isAction(m) ? " action" : ""}` },
       el("button", { class: "time mono", title: "Play from here", onclick: () => playFrom(m.at_s) }, clock(m.at_s)), body);
@@ -1525,17 +1545,20 @@ function renderSession(session, processingError, suggestion) {
       line.classList.add("editing");
       const input = el("input", { value: typed, placeholder: isAction(m) ? note || "What needs doing" : "Add a note to this bookmark",
         "aria-label": `Note for the ${markerLabel(m).toLowerCase()} at ${clock(m.at_s)}` });
-      const cancel = () => { line.classList.remove("editing"); editor.replaceWith(body); };
-      const done = () => (input.value.trim() === typed ? cancel() : saveMarker(m, input.value.trim(), false));
+      let closed = false;
+      const cancel = () => { closed = true; line.classList.remove("editing"); editor.replaceWith(body); };
+      const done = () => { if (!closed) input.value.trim() === typed ? cancel() : (closed = true, saveMarker(m, input.value.trim(), false)); };
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") { e.preventDefault(); done(); }
         if (e.key === "Escape") { e.preventDefault(); cancel(); }
       });
       const what = markerLabel(m).toLowerCase();
-      const editor = el("div", { class: "marker-edit" }, el("strong", {}, markerLabel(m)), input,
-        el("button", { class: "primary pill", type: "button", onclick: done }, "Save"),
-        el("button", { class: "icon-btn trash", type: "button", title: `Delete this ${what}`, "aria-label": `Delete this ${what}`, onclick: () => saveMarker(m, m.text ?? "", true) }, svg("trash", 18)),
-        el("button", { class: "icon-btn", type: "button", title: "Cancel", "aria-label": "Cancel", onclick: cancel }, svg("close", 18)));
+      const editor = el("div", { class: "marker-edit" }, markerIcon(m), input,
+        el("button", { class: "icon-btn save", type: "button", title: "Save (Enter)", "aria-label": "Save", onclick: done }, svg("save", 18)),
+        el("button", { class: "icon-btn trash", type: "button", title: `Delete this ${what}`, "aria-label": `Delete this ${what}`,
+          onclick: () => { closed = true; saveMarker(m, m.text ?? "", true); } }, svg("trash", 18)));
+      // Clicking anywhere else keeps what was typed; Esc leaves it as it was.
+      editor.addEventListener("focusout", (e) => { if (!editor.contains(e.relatedTarget)) done(); });
       body.replaceWith(editor);
       line.scrollIntoView({ block: "nearest", behavior: "smooth" });
       input.focus();
@@ -1681,18 +1704,54 @@ function renderSession(session, processingError, suggestion) {
     const timeLabel = el("span", { class: "mono hint" });
     const playButton = el("button", { class: "play", "aria-label": "Play" }, svg("play", 18));
     const lanes = el("div", { class: "track-lanes", title: "Click to jump to a moment" });
+    // Where each track is quiet in the transcript mix: greyed out there, and not one of the script's own clips.
+    const clipSpans = (s) => (s.parts?.length ? s.parts : [[s.start_s, s.end_s]]);
+    const quietIn = new Map(streams.map((stream) => [stream, {
+      greyed: [
+        ...scriptLines.filter((s) => s.stream !== stream && s.also_on?.includes(stream)).map((s) => [s.start_s, s.end_s]),
+        ...doubles.filter((s) => s.stream === stream).flatMap(clipSpans),
+      ],
+      used: scriptLines.filter((s) => s.stream === stream).flatMap(clipSpans),
+    }]));
+    const within = (spans, t) => spans.some(([a, b]) => t >= a && t < b);
+    const quietAt = (stream, t) => within(quietIn.get(stream).greyed, t) && !within(quietIn.get(stream).used, t);
+    const muteButtons = new Map();
+    const manualMuted = new Set();
+    const applyMix = (t) => {
+      for (const stream of streams) {
+        const muted = playMix === "transcript" ? quietAt(stream, t) : manualMuted.has(stream);
+        const audio = player?.audios.get(stream);
+        if (audio && audio.muted !== muted) audio.muted = muted;
+        const button = muteButtons.get(stream);
+        button.classList.toggle("on", muted);
+        button.classList.toggle("auto", playMix === "transcript");
+        button.setAttribute("aria-pressed", String(muted));
+      }
+    };
+    const mixLabel = el("span", { class: "mix-switch", role: "group", "aria-label": "What you hear" });
+    const drawMix = () => {
+      const option = (value, label, title) => {
+        const b = el("button", { class: `pill${playMix === value ? " on" : ""}`, type: "button", "aria-pressed": String(playMix === value), title }, label);
+        b.addEventListener("click", () => { playMix = value; drawMix(); applyMix(player?.t ?? 0); });
+        return b;
+      };
+      mixLabel.replaceChildren(
+        option("transcript", "Transcript mix", "Hear what the transcript used: each track is muted where its sound is greyed out"),
+        option("manual", "Manual", "Every track plays; mute them yourself with M"));
+    };
+    drawMix();
     for (const stream of streams) {
       const speaker = session.speakers.find((s) => s.key === stream);
       const name = speaker?.name ?? streamName(stream, prefs.inputs);
-      const mute = el("button", { class: "mute", "aria-pressed": "false", title: `Mute ${name}` }, "M");
+      const mute = el("button", { class: "mute", "aria-pressed": "false", title: `Mute ${name}. In the transcript mix it lights up while the track is muted; pressing it switches to Manual.` }, "M");
       mute.addEventListener("click", (e) => {
         e.stopPropagation();
-        const audio = player?.audios.get(stream);
-        if (!audio) return;
-        audio.muted = !audio.muted;
-        mute.classList.toggle("on", audio.muted);
-        mute.setAttribute("aria-pressed", String(audio.muted));
+        // Taking over from the transcript mix starts from every track playing.
+        if (playMix === "transcript") { playMix = "manual"; manualMuted.clear(); drawMix(); }
+        manualMuted.has(stream) ? manualMuted.delete(stream) : manualMuted.add(stream);
+        applyMix(player?.t ?? 0);
       });
+      muteButtons.set(stream, mute);
       const clip = (start, end, style, title, cls = "") => el("span", {
         class: cls,
         style: `left:${(100 * start) / duration}%;width:${Math.max(0.3, (100 * (end - start)) / duration)}%;${style}`,
@@ -1741,6 +1800,7 @@ function renderSession(session, processingError, suggestion) {
       playButton.replaceChildren(svg(playing ? "pause" : "play", 18));
       playButton.setAttribute("aria-label", playing ? "Pause" : "Play");
       for (const { seg, line } of lineEls) line.classList.toggle("playing", playing && t >= seg.start_s && t < seg.end_s);
+      applyMix(t);
     };
     player = makePlayer(session, duration, onTick);
     playButton.addEventListener("click", () => player?.toggle());
@@ -1757,13 +1817,14 @@ function renderSession(session, processingError, suggestion) {
       if (next != null) player?.seek(next);
     };
     tracks.append(lanes, el("div", { class: "transport" },
-      el("button", { class: "pill", "aria-label": "Previous clip or mark", title: "Start of the previous clip, bookmark or action item", onclick: prevClip }, svg("skip-back", 16)),
+      el("button", { class: "pill", "aria-label": "Previous clip or mark", title: "Start of the previous clip, bookmark or action item (←)", onclick: prevClip }, svg("skip-back", 16)),
       el("button", { class: "pill", "aria-label": "Back 5 seconds", onclick: () => player?.seek(player.t - 5) }, "−5"),
       playButton,
       el("button", { class: "pill", "aria-label": "Forward 5 seconds", onclick: () => player?.seek(player.t + 5) }, "+5"),
-      el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item", onclick: nextClip }, svg("skip-forward", 16)),
-      timeLabel, el("span", { class: "grow" }),
-      el("span", { class: "hint windows-only" }, "Space plays and pauses")));
+      el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item (→)", onclick: nextClip }, svg("skip-forward", 16)),
+      timeLabel, el("span", { class: "grow" }), mixLabel));
+    player.prevClip = prevClip;
+    player.nextClip = nextClip;
     requestAnimationFrame(() => player?.seek(keepTime));
   }
   main.replaceChildren(el("div", { class: "review" }, page, streams.length ? tracks : null));
@@ -1808,14 +1869,89 @@ function actionItemText(m, segments) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-// Space plays and pauses a meeting when not typing.
+/// The keyboard shortcuts, as shown on the Shortcuts page. Each is [keys, what it does].
+const SHORTCUTS = [
+  ["Anywhere", [
+    [["Ctrl", "N"], "New note"],
+    [["Ctrl", "M"], "Start a meeting"],
+    [["Alt", "V"], "Start or stop dictation (in a note: dictate there; elsewhere: in a new note)"],
+    [["Ctrl", "Space"], "Start or finish dictation in a note"],
+    [["Esc"], "Cancel dictation"],
+  ]],
+  ["Recording a meeting", [
+    [["B"], "Bookmark this moment, when not typing"],
+    [["A"], "Add an action item, when not typing"],
+    [["Alt", "B"], "Bookmark this moment, even while typing a note"],
+    [["Alt", "A"], "Add an action item, even while typing a note"],
+    [["Enter"], "In the note box: bookmark with the note"],
+    [["Ctrl", "Enter"], "In the note box: action item with the note"],
+  ]],
+  ["Playing back a meeting, when not typing", [
+    [["Space"], "Play or pause"],
+    [["←", "→"], "Previous or next clip, bookmark or action item"],
+    [["Shift", "←", "→"], "Back or forward 20 seconds"],
+    [["Ctrl", "←", "→"], "Back or forward 1 second"],
+  ]],
+];
+
+/// Typing somewhere: single keys and arrows belong to the text there.
+function typingIn(target) {
+  return !!target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
 window.addEventListener("keydown", (e) => {
-  if (view.kind !== "session" || !player || e.code !== "Space" || e.ctrlKey) return;
+  if (e.defaultPrevented || e.repeat && !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   const t = e.target;
-  if (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(t.tagName) || t.getAttribute?.("role") === "button") return;
-  e.preventDefault();
-  player.toggle();
+  // Anywhere in the app.
+  if (e.ctrlKey && !e.altKey && !e.shiftKey && key === "n") {
+    e.preventDefault();
+    openNote(null);
+    return;
+  }
+  if (e.ctrlKey && !e.altKey && !e.shiftKey && key === "m") {
+    e.preventDefault();
+    showMeeting();
+    return;
+  }
+  if (e.altKey && !e.ctrlKey && key === "v" && platform !== "android") {
+    e.preventDefault();
+    if (view.kind === "note") dictation ? stopDictation() : startDictation();
+    else if (!recording) openNote(null, { dictate: true });
+    return;
+  }
+  // Recording a meeting: single keys when not typing, and with Alt always.
+  if (view.kind === "recorder" && recording && liveMark && !e.ctrlKey && (key === "b" || key === "a")) {
+    if (!e.altKey && typingIn(t)) return;
+    e.preventDefault();
+    liveMark(key === "a" ? "action" : "");
+    return;
+  }
+  // Playing back a meeting.
+  if (view.kind !== "session" || !player || typingIn(t)) return;
+  if (e.code === "Space" && !e.ctrlKey && !e.altKey) {
+    if (t.tagName === "BUTTON" || t.getAttribute?.("role") === "button") return;
+    e.preventDefault();
+    player.toggle();
+  } else if ((key === "ArrowLeft" || key === "ArrowRight") && !e.altKey) {
+    const back = key === "ArrowLeft";
+    e.preventDefault();
+    if (e.shiftKey) player.seek(player.t + (back ? -20 : 20));
+    else if (e.ctrlKey) player.seek(player.t + (back ? -1 : 1));
+    else back ? player.prevClip?.() : player.nextClip?.();
+  }
 });
+
+function showShortcuts() {
+  leave();
+  showPage();
+  view = { kind: "shortcuts" };
+  refreshItems();
+  const keys = (combo) => el("span", { class: "keys" }, combo.flatMap((k, i) => [i ? el("span", { class: "plus" }, k === "→" ? "/" : "+") : null, el("kbd", {}, k)]));
+  main.replaceChildren(el("div", { class: "page shortcuts" }, el("h1", {}, "Keyboard shortcuts"),
+    SHORTCUTS.flatMap(([group, rows]) => [el("h2", {}, group), el("div", { class: "group" },
+      rows.map(([combo, what]) => el("div", { class: "row" }, el("span", { class: "label" }, what), keys(combo))))])));
+}
 
 /// The ⋯ menu beside a speaker: merge into another speaker, or link, unlink or create a voice print.
 function speakerMenu(sp, speakers, onPick) {

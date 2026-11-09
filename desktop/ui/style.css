@@ -171,6 +171,9 @@ body.resizing { cursor: col-resize; user-select: none; }
 .item .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item .sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-foot { display: flex; justify-content: space-between; align-items: center; padding: 0 4px; }
+.shortcuts-link { display: inline-flex; align-items: center; gap: 6px; }
+.shortcuts .row .keys { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.shortcuts .plus { color: var(--muted); font-size: 12px; }
 .empty { color: var(--muted); padding: 8px; font-size: 13px; }
 
 /* ---------- Pages ---------- */
@@ -267,9 +270,9 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .spark { flex: 1; height: 28px; display: flex; align-items: center; gap: 2px; overflow: hidden; background: var(--raised); border-radius: 6px; padding: 0 4px; }
 .spark span { flex: 1 0 3px; max-width: 4px; border-radius: 2px; min-height: 2px; }
 .markers { display: flex; flex-direction: column; gap: 8px; max-height: 232px; overflow-y: auto; }
-.marker { padding: 8px 12px; border-radius: 10px; background: var(--highlight); font-size: 14px; cursor: pointer; flex: none; }
-.marker:hover:not(.editing) { box-shadow: inset 0 0 0 1px var(--key-light); }
-.marker.action:hover:not(.editing) { box-shadow: inset 3px 0 0 var(--ok), inset 0 0 0 1px var(--key-light); }
+.marker { padding: 8px 12px; border-radius: 10px; background: var(--raised); font-size: 14px; cursor: pointer; flex: none; }
+.marker:hover:not(.editing) { box-shadow: inset 0 0 0 1px var(--muted); }
+.marker.action:hover:not(.editing) { box-shadow: inset 3px 0 0 var(--ok), inset 0 0 0 1px var(--muted); }
 /* A bookmark or action item open for changing its note, or deleting it. */
 .marker.editing, .marker-edit { display: flex; align-items: center; gap: 8px; cursor: default; }
 .marker.editing input, .marker-edit input { flex: 1; min-width: 0; }
@@ -277,11 +280,20 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .marker-edit .icon-btn, .marker.editing .icon-btn { width: 32px; height: 32px; background: transparent; color: var(--muted); }
 .icon-btn.trash:hover { color: var(--danger); background: var(--hover); }
 .marker-body { cursor: pointer; border-radius: 6px; }
-.marker-body:hover strong { color: var(--accent-text); }
+.marker-body:hover { color: var(--text); }
 .marker .mono { font-size: 12px; color: var(--muted); margin-right: 6px; }
 .pinned { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); }
-.pinned .bookmark { color: var(--accent, var(--soft)); margin-left: -6px; }
-.pinned .action-item { color: var(--ok); margin-left: -6px; }
+/* Bookmark and action item while recording: an icon, a name and the key that does it. */
+.mark-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.mark-btn { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 10px; border-radius: 10px; font-weight: 600; }
+.mark-btn.bookmark > span:first-child { color: var(--soft); }
+.mark-btn.action-item > span:first-child { color: var(--ok); }
+kbd { font: 600 11px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; padding: 3px 6px; border-radius: 5px; border: 1px solid var(--line); border-bottom-width: 2px; background: var(--raised); color: var(--soft); }
+.marker-icon { display: inline-flex; vertical-align: -3px; color: var(--soft); margin-right: 8px; }
+.marker-icon.action { color: var(--ok); }
+.marker .hint, .marker-body .hint { color: var(--muted); }
+.icon-btn.save { color: var(--soft); }
+.icon-btn.save:hover { background: var(--hover); color: var(--text); }
 .marker.action, .line.marker-line.action { box-shadow: inset 3px 0 0 var(--ok); }
 .pinned input { border: none; background: transparent; outline: none; flex: 1; min-width: 0; color: var(--text); }
 .live-controls { display: flex; justify-content: center; align-items: center; gap: 28px; margin-top: auto; }
@@ -298,6 +310,12 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .track .name { width: 140px; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .track .mute { min-height: 22px; height: 22px; width: 28px; padding: 0; font-size: 11px; font-weight: 600; border-radius: 4px; color: var(--muted); }
 .track .mute.on { background: var(--key); border-color: var(--key); color: #fff; }
+/* Muted by the transcript mix rather than by hand. */
+.track .mute.auto { border-style: dashed; }
+.track .mute.auto.on { background: var(--key-2); border-color: var(--key-light); }
+.mix-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; gap: 2px; }
+.mix-switch .pill { border: none; min-height: 28px; padding: 3px 12px; font-size: 13px; background: transparent; color: var(--muted); }
+.mix-switch .pill.on { background: var(--key); color: #fff; }
 .track .bar { flex: 1; height: 16px; background: var(--raised); border-radius: 4px; position: relative; overflow: hidden; }
 .track .bar span { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
 .track .bar span.echo {
@@ -305,10 +323,10 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
   background: repeating-linear-gradient(135deg, var(--line) 0 4px, transparent 4px 7px), var(--hover);
   box-shadow: inset 0 0 0 1px var(--line);
 }
-.track .bar i { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1px; background: var(--key-light); cursor: pointer; z-index: 1; }
+.track .bar i { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1px; background: var(--muted); cursor: pointer; z-index: 1; }
 /* A wider target than the tick itself, so a bookmark is easy to click. */
 .track .bar i::after { content: ""; position: absolute; top: 0; bottom: 0; left: -5px; right: -5px; }
-.track .bar i:hover { background: var(--accent-text); width: 4px; }
+.track .bar i:hover { background: var(--text); width: 4px; }
 .track .bar i.action { background: var(--ok); }
 .playhead { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); pointer-events: none; }
 .transport { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -336,7 +354,7 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .line-action button:disabled { opacity: 0.4; cursor: not-allowed; }
 .line.playing { background: var(--highlight); }
 .line.same-speaker .who { display: none; }
-.line.marker-line { background: var(--highlight); margin: 4px -8px; }
+.line.marker-line { background: var(--raised); margin: 4px -8px; }
 .time { border: none; background: none; padding: 0; min-height: 0; color: var(--muted); font-size: 12px; text-align: left; align-self: start; margin-top: 3px; }
 .time:hover { color: var(--accent-text); background: none !important; }
 .who { margin-bottom: 2px; }
@@ -535,7 +553,7 @@ body[data-platform="android"] .windows-only { display: none !important; }
 .try-it .wake-indicator { flex: 1; margin: 8px 0; }
 .try-results { margin: 0 0 14px; padding-left: 20px; color: var(--muted); font-size: 14px; line-height: 1.7; }
 .action-items { list-style: none; padding: 0; margin: 6px 0 4px; display: flex; flex-direction: column; gap: 6px; }
-.action-items li { display: grid; grid-template-columns: 64px 1fr; gap: 12px; padding: 8px; border-radius: 8px; background: var(--highlight); box-shadow: inset 3px 0 0 var(--ok); }
+.action-items li { display: grid; grid-template-columns: 64px 1fr; gap: 12px; padding: 8px; border-radius: 8px; background: var(--raised); box-shadow: inset 3px 0 0 var(--ok); }
 
 /* ---------- First-run setup: a page of its own, without the sidebar ---------- */
 body.setup .sidebar, body.setup .splitter, body.setup .back { display: none !important; }
