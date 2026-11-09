@@ -67,6 +67,19 @@ fn remove_audio(only: Option<&str>) {
     }
 }
 
+/// The dictation audio kept for a note, oldest first.
+pub fn kept_audio(id: &str) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(audio_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.split_once('_').is_some_and(|(owner, _)| owner == id)))
+        .collect();
+    files.sort();
+    files
+}
+
 pub fn purge_old_audio() {
     remove_audio(None);
 }

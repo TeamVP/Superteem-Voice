@@ -35,6 +35,7 @@ const icon = {
   // A clipboard with a tick: something to be done, written down.
   action: '<path d="M9 4H6.5A1.5 1.5 0 005 5.5v14A1.5 1.5 0 006.5 21h11a1.5 1.5 0 001.5-1.5v-14A1.5 1.5 0 0017.5 4H15"></path><rect x="9" y="2.5" width="6" height="3.5" rx="1"></rect><path d="M8.5 13.5l2.5 2.5 4.5-5"></path>',
   save: '<path d="M5 3h11.5L20 6.5V19a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 011-2z"></path><path d="M8 3v5h7V3"></path><rect x="7.5" y="13" width="9" height="8"></rect>',
+  export: '<path d="M12 15V3M7.5 7.5L12 3l4.5 4.5"></path><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"></path>',
   keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"></path>',
   play: '<path d="M7 4l13 8-13 8z" fill="currentColor" stroke="none"></path>',
   "skip-back": '<path d="M18 5l-10 7 10 7z" fill="currentColor" stroke="none"></path><path d="M6 5v14"></path>',
@@ -88,6 +89,75 @@ function dateText(unix) {
   if (!unix) return "";
   return new Date(unix * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+
+/// How long ago, as "3h ago", for recent things; the date for older ones.
+function agoText(unix) {
+  if (!unix) return "";
+  const s = Date.now() / 1000 - unix;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d ago`;
+  return new Date(unix * 1000).toLocaleDateString(undefined, { dateStyle: "medium" });
+}
+
+/// A length in words: "45 seconds", "1 minute", "1 hour 5 minutes".
+function lengthText(seconds) {
+  if (seconds < 30) return `${Math.max(1, Math.round(seconds))} second${Math.round(seconds) === 1 ? "" : "s"}`;
+  const minutes = Math.round(seconds / 60);
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (minutes < 60) return plural(minutes, "minute");
+  return `${plural(Math.floor(minutes / 60), "hour")}${minutes % 60 ? ` ${plural(minutes % 60, "minute")}` : ""}`;
+}
+
+/// An Export button with a menu of `choices` ([format, label, detail]). `run(format)` writes the file and
+/// returns its path, which is then offered to show in File Explorer.
+function exportMenu(choices, run) {
+  const wrap = el("span", { class: "export-menu" });
+  const button = el("button", { class: "link export-button", type: "button", "aria-haspopup": "menu", "aria-expanded": "false", title: "Export" },
+    svg("export", 16), "Export");
+  const menu = el("div", { class: "menu", role: "menu", hidden: true });
+  const status = el("div", { class: "export-status", role: "status", "aria-live": "polite", hidden: true });
+  const close = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outside, true); };
+  const outside = (e) => { if (!wrap.contains(e.target)) close(); };
+  button.addEventListener("click", () => {
+    if (!menu.hidden) return close();
+    menu.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    document.addEventListener("click", outside, true);
+    menu.querySelector("button")?.focus();
+  });
+  menu.addEventListener("keydown", (e) => { if (e.key === "Escape") { close(); button.focus(); } });
+  for (const [format, label, detail] of choices) {
+    const item = el("button", { type: "button", role: "menuitem" }, el("strong", {}, label), detail ? el("small", {}, detail) : null);
+    item.addEventListener("click", async () => {
+      close();
+      status.hidden = false;
+      status.replaceChildren(el("span", { class: "spinner" }), "Exporting…");
+      try {
+        const path = await run(format);
+        const name = path.split(/[\\/]/).pop();
+        status.replaceChildren(svg("check", 14), ` Exported ${name}`,
+          platform === "windows" ? el("button", { class: "link inline", type: "button", onclick: () => invoke("reveal_export", { path }).catch(() => {}) }, "Show in folder") : ` to ${path}`,
+          el("button", { class: "icon-only", type: "button", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { status.hidden = true; } }, svg("close", 14)));
+      } catch (e) {
+        status.replaceChildren(el("span", { class: "danger" }, String(e)),
+          el("button", { class: "icon-only", type: "button", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { status.hidden = true; } }, svg("close", 14)));
+      }
+    });
+    menu.append(item);
+  }
+  wrap.append(button, menu);
+  wrap.status = status;
+  return wrap;
+}
+
+const TRANSCRIPT_EXPORTS = [
+  ["txt", "Transcript as text", ".txt, with bookmarks and action items"],
+  ["md", "Transcript as Markdown", ".md, for documents and wikis"],
+  ["srt", "Subtitles", ".srt, timed lines for video"],
+  ["vtt", "Web subtitles", ".vtt, timed lines with speakers"],
+];
 
 function timeText(unix) {
   return unix ? new Date(unix * 1000).toLocaleTimeString(undefined, { timeStyle: "short" }) : "";
@@ -514,8 +584,20 @@ function renderNote(data, dictate) {
   talk.addEventListener("mousedown", (e) => e.preventDefault());
   const live = el("div", { class: "dictating", id: "dictating", hidden: true, "aria-live": "polite" });
 
+  const exporter = exportMenu([
+    ["txt", "Text", ".txt"],
+    ["md", "Markdown", ".md"],
+    ["package", "With dictation audio", "The note and the audio of its dictations, while they are kept"],
+  ], async (format) => {
+    // What's on screen is saved first, so the export has it.
+    clearTimeout(noteTimer);
+    await saveNote(status);
+    if (!note.id) throw new Error("Write something in the note first.");
+    return invoke("export_note", { id: note.id, format });
+  });
   main.replaceChildren(
-    el("div", { class: "topbar" }, status, el("span", { class: "grow" }), picker, archive, remove),
+    el("div", { class: "topbar" }, status, el("span", { class: "grow" }), exporter, picker, archive, remove),
+    exporter.status,
     el("div", { class: "note" }, title, chip, body),
     el("div", { class: "toolbar" }, el("span", { class: "grow" }), talk, live));
   // The cursor always starts in the body; a new note starts dictating straight away.
@@ -1331,6 +1413,8 @@ async function openSession(id, processingError) {
 let sessionListeners = null;
 /// Whether the meeting page also shows the clips left out of the script as doubles.
 let showDoubles = false;
+/// Whether the meeting page's "?" notes are open.
+let helpOpen = false;
 /// What a meeting plays: "transcript", with each track muted where the script takes its words from another
 /// microphone, or "manual", every track unless muted by hand.
 let playMix = "transcript";
@@ -1375,12 +1459,13 @@ function renderSession(session, processingError, suggestion) {
     }
   });
 
-  const remove = el("button", { class: "link danger" }, "Delete");
+  const remove = el("button", { class: "icon-only danger", title: "Delete this meeting", "aria-label": "Delete this meeting" }, svg("trash", 18));
   remove.addEventListener("click", async () => {
     if (!remove.dataset.armed) {
       remove.dataset.armed = "1";
-      remove.textContent = platform === "android" ? "Tap again to delete permanently" : "Click again to move to the Recycle Bin";
-      setTimeout(() => { delete remove.dataset.armed; remove.textContent = "Delete"; }, 4000);
+      remove.classList.add("armed");
+      remove.replaceChildren(svg("trash", 16), platform === "android" ? "Tap again to delete permanently" : "Click again to move to the Recycle Bin");
+      setTimeout(() => { delete remove.dataset.armed; remove.classList.remove("armed"); remove.replaceChildren(svg("trash", 18)); }, 4000);
       return;
     }
     stopPlayback();
@@ -1397,15 +1482,18 @@ function renderSession(session, processingError, suggestion) {
     refreshItems();
     return true;
   });
+  const exporter = exportMenu([...TRANSCRIPT_EXPORTS,
+    ["package", "Edit package", "Every track and the transcript mix as audio, with an EDL, Premiere and Resolve XML and a REAPER project"]],
+    (format) => invoke("export_session", { id, title: meetingTitle(id, meta.title), format }));
   page.append(title, el("div", { class: "meta" },
     picker,
-    el("span", {}, dateText(meta.created)),
-    meta.duration_s ? el("span", {}, clock(meta.duration_s)) : null,
-    used.size ? el("span", {}, `${used.size} voice${used.size > 1 ? "s" : ""}`) : null,
-    streams.length ? el("span", {}, `${streams.length} track${streams.length > 1 ? "s" : ""}`) : null,
+    el("span", { title: dateText(meta.created) }, agoText(meta.created)),
+    meta.duration_s ? el("span", { title: clock(meta.duration_s) }, `Length: ${lengthText(meta.duration_s)}`) : null,
+    el("span", { class: "grow" }),
+    session.segments.length ? exporter : null,
     platform === "windows" ? el("button", { class: "link", onclick: () => invoke("open_folder", { id }) }, "Open folder") : null,
     session.model_ready && !session.needs_processing ? reprocess : null,
-    remove));
+    remove), exporter.status);
 
   const processNow = el("button", { class: "primary" }, "Process now");
   processNow.addEventListener("click", () => processAgain(id));
@@ -1422,13 +1510,13 @@ function renderSession(session, processingError, suggestion) {
       ? "This meeting has no transcript yet. Use Transcribe again above."
       : "This meeting has no transcript. Get the speech model in Settings, then use Transcribe again."));
   }
-  if (edits) {
-    page.append(el("div", { class: "legend" }, `${edits} line${edits > 1 ? "s" : ""} edited by hand. Transcribing again keeps them.`));
-  }
+  // Shown behind the "?" with the other notes on reading the transcript.
+  const extraHelp = [];
+  if (edits) extraHelp.push(el("p", {}, `${edits} line${edits > 1 ? "s" : ""} edited by hand. Transcribing again keeps them.`));
   if (doubles.length) {
-    const toggle = el("button", { class: "link", type: "button", "aria-pressed": String(showDoubles) }, showDoubles ? "Hide them" : "Show them");
-    toggle.addEventListener("click", () => { showDoubles = !showDoubles; renderSession(session, processingError); });
-    page.append(el("div", { class: "legend" },
+    const toggle = el("button", { class: "link inline", type: "button", "aria-pressed": String(showDoubles) }, showDoubles ? "Hide them" : "Show them");
+    toggle.addEventListener("click", () => { showDoubles = !showDoubles; helpOpen = true; renderSession(session, processingError); });
+    extraHelp.push(el("p", {},
       `${doubles.length} clip${doubles.length > 1 ? "s" : ""} heard again on another microphone ${doubles.length > 1 ? "are" : "is"} greyed out in the tracks and left out of the script. `, toggle));
   }
 
@@ -1454,12 +1542,13 @@ function renderSession(session, processingError, suggestion) {
   }
   if (used.size) {
     // How to read and fix the transcript, behind a "?" so it isn't in the way once known.
-    const help = el("div", { class: "legend", hidden: true, id: "transcript-help" }, "Rename a voice to update every line, or use ⋯ to merge voices or link a voice print. "
-      + "Dotted lines are less certain; a side bar means two people spoke at once.");
-    const helpButton = el("button", { class: "icon-only help-toggle", type: "button", title: "How to read and fix the transcript",
-      "aria-label": "How to read and fix the transcript", "aria-expanded": "false", "aria-controls": "transcript-help" }, "?");
+    const help = el("div", { class: "legend", hidden: !helpOpen, id: "transcript-help" }, el("p", {}, "Rename a voice to update every line, or use ⋯ to merge voices or link a voice print. "
+      + "Dotted lines are less certain; a side bar means two people spoke at once."), extraHelp);
+    const helpButton = el("button", { class: `icon-only help-toggle${helpOpen ? " on" : ""}`, type: "button", title: "How to read and fix the transcript",
+      "aria-label": "How to read and fix the transcript", "aria-expanded": String(helpOpen), "aria-controls": "transcript-help" }, "?");
     helpButton.addEventListener("click", () => {
       help.hidden = !help.hidden;
+      helpOpen = !help.hidden;
       helpButton.setAttribute("aria-expanded", String(!help.hidden));
       helpButton.classList.toggle("on", !help.hidden);
     });
@@ -1805,7 +1894,10 @@ function renderSession(session, processingError, suggestion) {
     player = makePlayer(session, duration, onTick);
     playButton.addEventListener("click", () => player?.toggle());
     // Clip starts, bookmarks and action items, for jumping to the previous or next in the timeline.
-    const starts = [...new Set([...scriptLines.map((s) => s.start_s), ...allMarkers.map((m) => m.at_s)])].sort((a, b) => a - b);
+    // Every clip the transcript mix plays, on every track (each clip of a stitched line too), and the marks.
+    const starts = [...scriptLines.flatMap((s) => clipSpans(s).map(([a]) => a)), ...allMarkers.map((m) => m.at_s)]
+      .sort((a, b) => a - b)
+      .filter((t, i, all) => i === 0 || t - all[i - 1] > 0.05);
     const prevClip = () => {
       // Within a moment of a clip's start, go to the one before, as a music player does.
       const t = (player?.t ?? 0) - 0.5;
@@ -1818,9 +1910,9 @@ function renderSession(session, processingError, suggestion) {
     };
     tracks.append(lanes, el("div", { class: "transport" },
       el("button", { class: "pill", "aria-label": "Previous clip or mark", title: "Start of the previous clip, bookmark or action item (←)", onclick: prevClip }, svg("skip-back", 16)),
-      el("button", { class: "pill", "aria-label": "Back 5 seconds", onclick: () => player?.seek(player.t - 5) }, "−5"),
+      el("button", { class: "pill", "aria-label": "Back 5 seconds", title: "Back 5 seconds (Alt + ←)", onclick: () => player?.seek(player.t - 5) }, "−5"),
       playButton,
-      el("button", { class: "pill", "aria-label": "Forward 5 seconds", onclick: () => player?.seek(player.t + 5) }, "+5"),
+      el("button", { class: "pill", "aria-label": "Forward 5 seconds", title: "Forward 5 seconds (Alt + →)", onclick: () => player?.seek(player.t + 5) }, "+5"),
       el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item (→)", onclick: nextClip }, svg("skip-forward", 16)),
       timeLabel, el("span", { class: "grow" }), mixLabel));
     player.prevClip = prevClip;
@@ -1889,6 +1981,7 @@ const SHORTCUTS = [
   ["Playing back a meeting, when not typing", [
     [["Space"], "Play or pause"],
     [["←", "→"], "Previous or next clip, bookmark or action item"],
+    [["Alt", "←", "→"], "Back or forward 5 seconds"],
     [["Shift", "←", "→"], "Back or forward 20 seconds"],
     [["Ctrl", "←", "→"], "Back or forward 1 second"],
   ]],
@@ -1933,10 +2026,11 @@ window.addEventListener("keydown", (e) => {
     if (t.tagName === "BUTTON" || t.getAttribute?.("role") === "button") return;
     e.preventDefault();
     player.toggle();
-  } else if ((key === "ArrowLeft" || key === "ArrowRight") && !e.altKey) {
+  } else if (key === "ArrowLeft" || key === "ArrowRight") {
     const back = key === "ArrowLeft";
     e.preventDefault();
-    if (e.shiftKey) player.seek(player.t + (back ? -20 : 20));
+    if (e.altKey) player.seek(player.t + (back ? -5 : 5));
+    else if (e.shiftKey) player.seek(player.t + (back ? -20 : 20));
     else if (e.ctrlKey) player.seek(player.t + (back ? -1 : 1));
     else back ? player.prevClip?.() : player.nextClip?.();
   }

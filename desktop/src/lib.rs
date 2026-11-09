@@ -2,6 +2,7 @@
 
 #[cfg(not(target_os = "android"))]
 pub mod capture;
+pub mod exports;
 pub mod keyphrases;
 pub mod library;
 pub mod listen;
@@ -1027,6 +1028,32 @@ fn keep_segment(state: State<AppState>, id: String, segment: usize) -> Result<()
     })
 }
 
+/// Exports a meeting as a transcript ("txt", "md", "srt", "vtt") or an edit package ("package"), named
+/// after `title` as the app shows it. Returns where it was written.
+#[tauri::command]
+async fn export_session(id: String, title: String, format: String) -> Result<String, String> {
+    blocking(move || {
+        let dir = library::session_dir(&id)?;
+        let meta = library::load_meta(&dir);
+        let segments = library::load_segments(&dir);
+        let heard = keyphrases::load_session(&dir);
+        let request = exports::MeetingExport { dir: &dir, title: &title, meta: &meta, segments: &segments, heard: &heard };
+        exports::export_meeting(&request, &format).map(|p| p.to_string_lossy().into_owned())
+    })
+    .await?
+}
+
+/// Exports a note as "txt" or "md", or with its kept dictation audio ("package").
+#[tauri::command]
+async fn export_note(id: String, format: String) -> Result<String, String> {
+    blocking(move || exports::export_note(&id, &format).map(|p| p.to_string_lossy().into_owned())).await?
+}
+
+#[tauri::command]
+fn reveal_export(path: String) -> Result<(), String> {
+    exports::reveal(std::path::Path::new(&path))
+}
+
 #[tauri::command]
 fn save_consent(state: State<AppState>, id: String, consent: library::Consent) -> Result<(), String> {
     edit_session(&state, &id, |meta, _| {
@@ -1285,6 +1312,9 @@ pub fn run() {
             save_markers,
             edit_marker,
             keep_segment,
+            export_session,
+            export_note,
+            reveal_export,
             save_consent,
             processing_queue,
             split_segment,

@@ -60,6 +60,20 @@ pub fn to_srt(lines: &[Line]) -> String {
         .collect()
 }
 
+/// WebVTT subtitles, with the speaker as the cue's voice.
+pub fn to_vtt(lines: &[Line]) -> String {
+    let cues: String = lines
+        .iter()
+        .map(|l| format!("{} --> {}
+<v {}>{}
+
+", clock(l.start_s, '.'), clock(l.end_s, '.'), l.speaker.replace('>', ""), l.text))
+        .collect();
+    format!("WEBVTT
+
+{cues}")
+}
+
 pub fn to_json(lines: &[Line]) -> String {
     serde_json::to_string_pretty(lines).expect("lines always serialise")
 }
@@ -174,6 +188,16 @@ mod tests {
     #[test]
     fn srt_uses_comma_timestamps() {
         assert_eq!(to_srt(&lines()), "1\n01:01:01,500 --> 01:01:02,250\nAlice: Hello\n\n");
+    }
+
+    #[test]
+    fn vtt_names_the_voice() {
+        assert_eq!(to_vtt(&lines()), "WEBVTT
+
+01:01:01.500 --> 01:01:02.250
+<v Alice>Hello
+
+");
     }
 
     #[test]

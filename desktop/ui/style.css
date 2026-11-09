@@ -186,6 +186,20 @@ h1 { font-size: 32px; line-height: 1.2; margin: 0 0 6px; outline: none; letter-s
 h1:empty::before { content: "Untitled"; color: var(--muted); }
 h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.meta .grow { flex: 1; }
+/* Export: a button with a menu of formats, and a line saying where it went. */
+.export-menu { position: relative; display: inline-flex; }
+.export-button { display: inline-flex; align-items: center; gap: 6px; }
+.topbar .export-button { padding: 4px 8px; }
+.export-menu .menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; width: 300px; display: flex; flex-direction: column; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25); }
+.export-menu .menu[hidden] { display: none; }
+.export-menu .menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; border: none; background: transparent; padding: 8px 10px; border-radius: 8px; min-height: 0; color: var(--text); }
+.export-menu .menu button:hover, .export-menu .menu button:focus-visible { background: var(--hover); }
+.export-menu .menu small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.export-status { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; color: var(--soft); }
+.export-status[hidden] { display: none; }
+.export-status .link.inline { margin-left: 4px; }
+#transcript-help p { margin: 0 0 6px; }
 .notice { background: var(--warn-bg); border-radius: 10px; padding: 10px 14px; margin: 16px 0; font-size: 14px; }
 .notice p { margin: 0 0 10px; }
 .error { color: var(--danger); margin: 10px 0; overflow-wrap: anywhere; }
