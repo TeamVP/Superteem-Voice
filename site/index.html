@@ -62,6 +62,14 @@
     /* "Voice by [Superteem]": the product name, a light italic "by", then the Superteem wordmark. */
     .logo { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
     .logo img { display: block; height: 30px; width: auto; }
+    /* Dark lettering on the light page, light lettering on the dark one, switched with the page's colours. */
+    .logo .on-dark { display: none; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) .logo .on-light { display: none; }
+      :root:not([data-theme="light"]) .logo .on-dark { display: block; }
+    }
+    :root[data-theme="dark"] .logo .on-light { display: none; }
+    :root[data-theme="dark"] .logo .on-dark { display: block; }
     .logo .product { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
     .logo .by { font: italic 500 24px/1 "Playfair Display", Georgia, serif; color: var(--muted); margin: 0 1px; transform: translateY(1px); }
     @media (max-width: 600px) {
@@ -135,10 +143,8 @@
       <a class="logo" href="./" aria-label="Voice by Superteem">
         <span class="product">Voice</span>
         <span class="by">by</span>
-        <picture>
-          <source srcset="brand/Superteem-only-light.png" media="(prefers-color-scheme: dark)">
-          <img src="brand/Superteem-only-dark.png" alt="">
-        </picture>
+        <img class="on-light" src="brand/Superteem-only-dark.png" alt="">
+        <img class="on-dark" src="brand/Superteem-only-light.png" alt="">
       </a>
       <a class="source" href="https://github.com/TeamVP/Superteem-Voice">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 6l-6 6 6 6M16 6l6 6-6 6"/></svg>
