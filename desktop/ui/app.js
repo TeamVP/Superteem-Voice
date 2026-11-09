@@ -2484,6 +2484,7 @@ async function sayHello(page, next, skip, rerun) {
   };
   const stop = () => {
     practiceHandler = null;
+    circles.forEach((c) => c.classList.remove("checking"));
     if (setupPractising) {
       setupPractising = false;
       invoke("stop_wake_practice", { print: null }).catch(() => {});
@@ -2530,6 +2531,13 @@ async function sayHello(page, next, skip, rerun) {
     mic.classList.replace("off", "on");
     practiceHandler = async (p) => {
       if (!practiceHandler) return;
+      // Something was heard: the circle it would tick spins while it's checked.
+      circles.forEach((c) => c.classList.remove("checking"));
+      if (p.checking) {
+        circles[Math.min(p.good, PRACTICE_GOAL - 1)].classList.add("checking");
+        state.textContent = "Heard you. Checking…";
+        return;
+      }
       if (p.ok) {
         good = p.good;
         fill(Math.min(good, PRACTICE_GOAL));

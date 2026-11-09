@@ -39,6 +39,8 @@ pub struct Practice {
     pub heard: String,
     /// Why it didn't count.
     pub reason: String,
+    /// Something was said and is being checked; the result follows in another event.
+    pub checking: bool,
 }
 
 pub fn on_practice(f: impl Fn(Practice) + Send + Sync + 'static) {
@@ -48,14 +50,19 @@ pub fn on_practice(f: impl Fn(Practice) + Send + Sync + 'static) {
 /// Checks one thing said while practising, and keeps it if it was the wake word.
 fn practise(pcm: &[i16]) {
     let spec = keyphrases::spec(keyphrases::WAKE).unwrap();
+    // Checking takes a moment, as speech to text runs on it, so the page shows that it heard something.
+    if let Some(f) = ON_PRACTICE.get() {
+        let good = PRACTICE.lock().unwrap().len();
+        f(Practice { ok: false, good, heard: String::new(), reason: String::new(), checking: true });
+    }
     let result = keyphrases::take_from_utterance(spec, pcm);
     let mut takes = PRACTICE.lock().unwrap();
     let report = match result {
         Ok((t, heard)) => {
             takes.push(t);
-            Practice { ok: true, good: takes.len(), heard, reason: String::new() }
+            Practice { ok: true, good: takes.len(), heard, reason: String::new(), checking: false }
         }
-        Err(reason) => Practice { ok: false, good: takes.len(), heard: String::new(), reason },
+        Err(reason) => Practice { ok: false, good: takes.len(), heard: String::new(), reason, checking: false },
     };
     drop(takes);
     if let Some(f) = ON_PRACTICE.get() {

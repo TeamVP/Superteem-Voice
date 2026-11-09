@@ -590,3 +590,17 @@ button.more-link:hover { color: var(--text); text-decoration: underline; }
   .welcome:not(.all-set) .lead { font-size: 18px; margin-bottom: 64px; }
 }
 .hello-listen { max-width: 520px; margin: 18px auto 0; text-align: left; }
+/* While a "Hey Superteem" is being checked, a dark green arc runs round the circle it would tick. */
+.ticks span { position: relative; }
+.ticks span.checking { border-color: transparent; }
+.ticks span.checking::after {
+  content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  border: 3px solid rgb(46 160 90 / 0.25); border-top-color: #1f7a45;
+  animation: tick-check 0.8s linear infinite;
+}
+@keyframes tick-check { to { transform: rotate(360deg); } }
+@keyframes tick-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  /* Without spinning, the ring still shows it is busy by slowly brightening and fading. */
+  .ticks span.checking::after { animation: tick-pulse 1.6s ease-in-out infinite; border-color: #1f7a45; }
+}
