@@ -21,9 +21,33 @@ class StartArgs {
     var pins: Boolean = false
 }
 
+@InvokeArg
+class PermissionArgs {
+    var ids: Array<String> = arrayOf()
+}
+
 /** The bridge between the shared app (src/recorder.rs) and CaptureService. */
 @TauriPlugin
 class CapturePlugin(private val activity: Activity) : Plugin(activity) {
+    /** The access the app asks for, by the name the page uses, with the Android permissions behind each. */
+    private fun groups(): Map<String, List<String>> {
+        val map = linkedMapOf("microphone" to listOf(Manifest.permission.RECORD_AUDIO))
+        map["nearby"] = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
+        } else {
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            map["notifications"] = listOf(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        return map
+    }
+
+    private fun granted(permission: String) = activity.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
+    private val asked get() = activity.getSharedPreferences("permissions", Activity.MODE_PRIVATE)
+
+    /** Recording needs the microphone, and Bluetooth for a headset or pins. Notifications are optional. */
     private fun missingPermissions(pins: Boolean, headset: Boolean): List<String> {
         val needed = mutableListOf(Manifest.permission.RECORD_AUDIO)
         if (pins || headset) {
@@ -34,10 +58,51 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
                 needed += Manifest.permission.ACCESS_FINE_LOCATION
             }
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            needed += Manifest.permission.POST_NOTIFICATIONS
+        return needed.filter { !granted(it) }
+    }
+
+    /**
+     * Each kind of access: whether it is allowed, and whether Android will still ask. Once someone has said
+     * no and Android stops showing the question, it can only be allowed in the app's Android settings.
+     */
+    @Command
+    fun permissions(invoke: Invoke) {
+        val list = JSArray()
+        for ((id, perms) in groups()) {
+            val allowed = perms.all { granted(it) }
+            val wasAsked = perms.any { asked.getBoolean(it, false) }
+            val canAsk = !wasAsked || perms.any { !granted(it) && activity.shouldShowRequestPermissionRationale(it) }
+            val item = JSObject()
+            item.put("id", id)
+            item.put("allowed", allowed)
+            item.put("blocked", !allowed && !canAsk)
+            list.put(item)
         }
-        return needed.filter { activity.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        val result = JSObject()
+        result.put("permissions", list)
+        invoke.resolve(result)
+    }
+
+    /** Shows Android's question for each kind of access asked for. The page checks again once it returns. */
+    @Command
+    fun askPermissions(invoke: Invoke) {
+        val args = invoke.parseArgs(PermissionArgs::class.java)
+        val all = groups()
+        val perms = args.ids.flatMap { all[it].orEmpty() }.filter { !granted(it) }
+        if (perms.isNotEmpty()) {
+            asked.edit().apply { perms.forEach { putBoolean(it, true) } }.apply()
+            activity.requestPermissions(perms.toTypedArray(), 2)
+        }
+        invoke.resolve(JSObject())
+    }
+
+    /** The app's page in Android settings, where access refused for good can be allowed. */
+    @Command
+    fun openAppSettings(invoke: Invoke) {
+        val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(android.net.Uri.fromParts("package", activity.packageName, null))
+        activity.startActivity(intent)
+        invoke.resolve(JSObject())
     }
 
     @Command
@@ -54,8 +119,9 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         if (CaptureService.running) return invoke.reject("Already recording.")
         val missing = missingPermissions(args.pins, INPUT_HEADSET in args.inputs)
         if (missing.isNotEmpty()) {
+            asked.edit().apply { missing.forEach { putBoolean(it, true) } }.apply()
             activity.requestPermissions(missing.toTypedArray(), 1)
-            return invoke.reject("Allow the requested access, then press Start recording again.")
+            return invoke.reject("Superteem needs access to the microphone. Allow it, then try again.")
         }
         val intent = Intent(activity, CaptureService::class.java)
             .putExtra(CaptureService.EXTRA_DIR, args.dir)

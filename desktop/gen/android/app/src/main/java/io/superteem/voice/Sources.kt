@@ -8,6 +8,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
+import android.media.AudioRecordingConfiguration
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.SystemClock
@@ -15,11 +16,16 @@ import android.util.Log
 import java.io.File
 import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 const val AUDIO_PSM = 0x0080
 private const val TAG = "StvSource"
 private const val SYNC_INTERVAL_MS = 1000L
 private const val RECONNECT_DELAY_MS = 2000L
+/** Two seconds of 20 ms frames of exact zeros: a microphone that is switched off, not a quiet room. */
+private const val SILENT_FRAMES = 100
+const val SILENCED_DETAIL = "Android is giving Superteem silence. Check that Microphone access is on in Quick Settings, " +
+    "and that no call or voice assistant is using the microphone."
 
 data class SourceStats(
     val state: String = "starting",
@@ -157,15 +163,34 @@ class MicSource(
             source, rate, AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, samples * 8),
         )
+        // Android gives an app silence, without an error, when the microphone switch in Quick Settings is off
+        // or another app (a call, a voice assistant) has the microphone. That is told apart from a quiet room.
+        val silencedByAndroid = AtomicBoolean(false)
+        val watch = object : AudioManager.AudioRecordingCallback() {
+            override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
+                configs.firstOrNull { it.clientAudioSessionId == record.audioSessionId }?.let { silencedByAndroid.set(it.isClientSilenced) }
+            }
+        }
         try {
+            if (record.state != AudioRecord.STATE_INITIALIZED) {
+                throw IllegalStateException("The microphone could not be opened. Another app may be using it.")
+            }
             device?.let { record.setPreferredDevice(it) }
+            record.registerAudioRecordingCallback(context.mainExecutor, watch)
             record.startRecording()
+            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                throw IllegalStateException("The microphone did not start. Another app may be using it.")
+            }
+            audio.activeRecordingConfigurations.firstOrNull { it.clientAudioSessionId == record.audioSessionId }
+                ?.let { silencedByAndroid.set(it.isClientSilenced) }
             val actual = "${record.sampleRate} Hz via ${record.routedDevice?.productName ?: "unknown"}"
             Stats.update(label) { it.copy(state = "recording", detail = actual) }
             JournalWriter(File(dir, "$label.stvj")).use { journal ->
                 val buffer = ByteArray(samples * 2)
                 var sequence = 0
                 var lastSync = SystemClock.elapsedRealtime()
+                // Frames in a row of exact digital silence, which a working microphone never gives.
+                var zeroRun = 0
                 while (running) {
                     var at = 0
                     while (at < buffer.size && running) {
@@ -177,7 +202,16 @@ class MicSource(
                     journal.append(nowUs(), encodeFrame(1, sequence, sequence * samples, CODEC_RAW_PCM16, buffer, buffer.size))
                     sequence++
                     val level = meterLevel(buffer, buffer.size)
-                    Stats.update(label) { it.copy(frames = it.frames + 1, level = level) }
+                    zeroRun = if (buffer.all { it == 0.toByte() }) zeroRun + 1 else 0
+                    val silenced = silencedByAndroid.get() || zeroRun >= SILENT_FRAMES
+                    Stats.update(label) {
+                        it.copy(
+                            frames = it.frames + 1,
+                            level = level,
+                            state = if (silenced) "silenced" else "recording",
+                            detail = if (silenced) SILENCED_DETAIL else actual,
+                        )
+                    }
                     if (SystemClock.elapsedRealtime() - lastSync >= SYNC_INTERVAL_MS) {
                         journal.sync()
                         lastSync = SystemClock.elapsedRealtime()
@@ -189,6 +223,7 @@ class MicSource(
             Log.e(TAG, "headset capture failed", e)
             Stats.update(label) { it.copy(state = "failed", detail = e.message ?: "") }
         } finally {
+            runCatching { record.unregisterAudioRecordingCallback(watch) }
             runCatching { record.stop() }
             record.release()
             if (headset) {

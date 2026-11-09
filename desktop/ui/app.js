@@ -92,7 +92,14 @@ function timeText(unix) {
 
 function showError(target, error) {
   target.querySelector(".error")?.remove();
-  target.append(el("div", { class: "error", role: "alert" }, String(error)));
+  target.append(el("div", { class: "error", role: "alert" }, String(error), micHelp(error)));
+}
+
+/// When a microphone problem may be the app's Android permissions or the system's microphone switch,
+/// a button to the permissions page.
+function micHelp(problem) {
+  if (platform !== "android" || !/microphone|silence|access/i.test(String(problem))) return "";
+  return el("div", { class: "actions" }, el("button", { class: "pill", onclick: () => showPermissions() }, "Check app permissions"));
 }
 
 /// On a phone the list and the page take turns filling the screen.
@@ -376,7 +383,7 @@ function showHome() {
       onclick: () => { homeMode = mode; showHome(); } }, label));
   }
   const mic = el("button", { class: "big-mic", "aria-label": homeMode === "note" ? "New note" : "Record a meeting",
-    onclick: () => (homeMode === "note" ? openNote(null, { dictate: platform !== "android" }) : showMeeting()) }, svg("mic", 36));
+    onclick: () => (homeMode === "note" ? openNote(null, { dictate: true }) : showMeeting()) }, svg("mic", 36));
   main.replaceChildren(el("div", { class: "home" },
     el("h1", {}, homeMode === "note" ? "Capture a thought" : "Capture a meeting"),
     modes, mic,
@@ -465,7 +472,9 @@ function renderNote(data, dictate) {
   });
   const title = el("input", { class: "note-title", placeholder: "Title", value: data.title, "aria-label": "Title" });
   // An editable div rather than a textarea, so a dictation can hold its place in the text.
-  const body = el("div", { class: "note-body", id: "note-body", contenteditable: "plaintext-only", role: "textbox", "aria-multiline": "true", "data-placeholder": "Start typing, or press Dictate (Ctrl + Space) to speak up to 2 minutes at a time. The words go where the cursor is when you press the tick.", "aria-label": "Note" });
+  const body = el("div", { class: "note-body", id: "note-body", contenteditable: "plaintext-only", role: "textbox", "aria-multiline": "true", "data-placeholder": platform === "android"
+    ? "Start typing, or press Dictate to speak up to 2 minutes at a time. The words go where the cursor is when you press the tick."
+    : "Start typing, or press Dictate (Ctrl + Space) to speak up to 2 minutes at a time. The words go where the cursor is when you press the tick.", "aria-label": "Note" });
   body.textContent = data.body;
   const chip = el("div", { class: "dictation-chip", id: "dictation-chip", hidden: true, "aria-live": "polite" });
   const changed = () => {
@@ -481,7 +490,7 @@ function renderNote(data, dictate) {
   body.addEventListener("input", changed);
   title.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); body.focus(); } });
 
-  const talk = el("button", { class: "talk windows-only", id: "talk", onclick: () => startDictation() }, svg("mic", 18), "Dictate");
+  const talk = el("button", { class: "talk", id: "talk", onclick: () => startDictation() }, svg("mic", 18), "Dictate");
   // Pressing Dictate leaves the cursor where it was, so the words can go there.
   talk.addEventListener("mousedown", (e) => e.preventDefault());
   const live = el("div", { class: "dictating", id: "dictating", hidden: true, "aria-live": "polite" });
@@ -495,7 +504,7 @@ function renderNote(data, dictate) {
   body.focus();
   getSelection().selectAllChildren(body);
   getSelection().collapseToEnd();
-  if (dictate ?? (!data.id && platform !== "android")) startDictation();
+  if (dictate ?? !data.id) startDictation();
 }
 
 async function saveNote(status) {
@@ -656,7 +665,18 @@ async function startDictation() {
   if (!dictation) return;
   syncWake().catch(() => {});
   const bars = [...wave.children];
+  let ticks = 0;
   dictation.levelTimer = setInterval(async () => {
+    // Once a second, whether the system is giving the microphone silence, which is said rather than left
+    // to look like a quiet room.
+    if (platform === "android" && ++ticks % 10 === 0) {
+      const problem = await invoke("dictation_problem").catch(() => null);
+      const chip = document.getElementById("dictation-chip");
+      if (problem && chip && chip.hidden) {
+        chip.hidden = false;
+        chip.replaceChildren(el("span", { class: "danger" }, problem), micHelp(problem));
+      }
+    }
     const level = await invoke("listen_level").catch(() => 0);
     bars.forEach((b, i) => { b.style.height = `${4 + Math.round(level * 16 * (0.6 + 0.4 * Math.sin(Date.now() / 90 + i)))}px`; });
   }, 100);
@@ -732,7 +752,7 @@ function showDictationError(e) {
   if (!chip) return;
   chip.hidden = false;
   chip.replaceChildren(el("span", { class: "danger" }, String(e)), " ",
-    String(e).includes("model") ? el("button", { class: "pill", onclick: () => showSettings() }, "Open Settings") : null);
+    String(e).includes("model") ? el("button", { class: "pill", onclick: () => showSettings() }, "Open Settings") : micHelp(e));
 }
 
 // Ctrl + Space starts dictation in a note, and finishes it; Esc cancels it.
@@ -1047,6 +1067,7 @@ function renderRecording(status) {
   // The clock shows once consent is given; until then the question is what matters.
   const time = el("div", { class: "timecode mono", id: "live-time", "aria-live": "off", hidden: !recording.consent }, longClock(status.elapsed_s));
   const lanes = el("div", { class: "lanes", "aria-label": "Tracks" });
+  const problem = el("div", { "aria-live": "polite" });
   // Press the bookmark or Enter to mark now, or the tick for an action item, with whatever note is typed.
   const pinned = el("input", { placeholder: "Mark now, with a note if you like: Enter bookmarks it", "aria-label": "Note pinned to the current time" });
   const at = el("span", { class: "mono" }, `@${clock(status.elapsed_s)}`);
@@ -1067,7 +1088,7 @@ function renderRecording(status) {
     el("div", { class: "live-head" }, el("span", { class: "rec" }, el("span", { class: "dot" }), recLabel),
       el("span", { class: "hint" }, hint)),
     recording.consent ? null : consentChallenge(recLabel),
-    time, lanes, el("div", { class: "markers", id: "live-markers" }),
+    problem, time, lanes, el("div", { class: "markers", id: "live-markers" }),
     el("div", { class: "pinned" }, bookmark, actionItem, at, pinned),
     el("div", { class: "live-controls" }, stop)));
   drawMarkers();
@@ -1080,13 +1101,20 @@ function renderRecording(status) {
       history.push(st.level);
       if (history.length > 80) history.shift();
       const colour = TRACK_COLOURS[i % TRACK_COLOURS.length];
-      const failing = st.state === "failed" || st.state === "disconnected";
+      const failing = ["failed", "disconnected", "silenced", "no headset"].includes(st.state);
       return el("div", { class: "lane" },
         el("span", { class: "name", style: `color:${colour}` }, streamName(st.name),
           el("small", { class: failing ? "danger" : "" }, failing ? st.detail || st.state : st.state)),
         el("span", { class: "spark" }, history.map((l) => el("span", { style: `height:${Math.max(2, Math.round(l * 24))}px;background:${l > 0.35 ? colour : "var(--line)"}` }))));
     }));
     if (!s.streams.length) lanes.replaceChildren(el("div", { class: "legend" }, "Starting the inputs…"));
+    // Every microphone silent because of the system, not the room: say so, with the way to fix it.
+    const blocked = s.streams.length && s.streams.every((st) => ["failed", "silenced", "no headset"].includes(st.state));
+    if (!blocked) problem.replaceChildren();
+    else if (!problem.firstChild) {
+      problem.replaceChildren(el("div", { class: "notice", role: "alert" },
+        el("strong", {}, "Nothing is being recorded. "), s.streams[0].detail || "The microphone isn't working.", micHelp("microphone")));
+    }
   };
   draw(status);
   pollTimer = setInterval(async () => {
@@ -2155,6 +2183,10 @@ async function showSettings() {
     model));
   if (platform === "android") page.append(el("div", { class: "group" }, model));
 
+  if (platform === "android") {
+    page.append(el("h2", {}, "This phone"), el("div", { class: "group" },
+      linkRow("App permissions", "Microphone, Bluetooth, notifications", () => showPermissions())));
+  }
   page.append(el("h2", {}, "Voices"), el("div", { class: "group" },
     linkRow("Voice prints", prints.length ? `${prints.length} saved` : "None yet", () => showVoicePrints()),
     linkRow("Default microphone and voice print", prefs.enrol_input ?? "Not set up", () => showOnboarding(SETUP.voice)),
@@ -2238,7 +2270,8 @@ function cancelOnboardReading() {
 
 /// Setup's pages, in order. Android can't listen for the wake word yet, so it skips saying hello. The
 /// speech model page only shows while the model isn't there yet.
-const SETUP = { welcome: 0, voice: 1, model: 2, hello: 3, done: 4 };
+/// The numbers are what is saved to resume setup, so new pages get new numbers rather than renumbering.
+const SETUP = { welcome: 0, voice: 1, model: 2, hello: 3, done: 4, permissions: 5 };
 
 /// What the person agrees to by pressing "Agree and get started". Kept short on purpose.
 const TERMS = [
@@ -2307,10 +2340,72 @@ function downloadText() {
 
 /// The thin bar of steps at the top of setup. "The speech model" shares a step with saying hello, as it
 /// is usually ready by then and skipped.
+/// On Android, permissions come first.
 function setupSteps(step) {
-  const at = { [SETUP.voice]: 0, [SETUP.model]: 1, [SETUP.hello]: 1, [SETUP.done]: 2 }[step] ?? 0;
-  return el("div", { class: "steps", "aria-label": `Step ${at + 1} of 3` },
-    Array.from({ length: 3 }, (_, i) => el("span", { class: i < at ? "done" : i === at ? "now" : "" })));
+  const order = platform === "android"
+    ? { [SETUP.permissions]: 0, [SETUP.voice]: 1, [SETUP.model]: 2, [SETUP.hello]: 2, [SETUP.done]: 3 }
+    : { [SETUP.voice]: 0, [SETUP.model]: 1, [SETUP.hello]: 1, [SETUP.done]: 2 };
+  const count = platform === "android" ? 4 : 3;
+  const at = order[step] ?? 0;
+  return el("div", { class: "steps", "aria-label": `Step ${at + 1} of ${count}` },
+    Array.from({ length: count }, (_, i) => el("span", { class: i < at ? "done" : i === at ? "now" : "" })));
+}
+
+/// What each kind of Android access is for. The microphone is the one the app can't work without.
+const PERMISSIONS = {
+  microphone: ["Microphone", "Needed to record meetings, notes and your voice print.", true],
+  nearby: ["Nearby devices", "For a Bluetooth headset microphone and Superteem Voice Pins.", false],
+  notifications: ["Notifications", "Shows that recording is on while you use other apps, with a tap back to Superteem.", false],
+};
+
+/// A live list of the app's Android permissions, each with its state and the way to allow it. Checked again
+/// every couple of seconds and whenever the app comes back from Android's settings. `changed` gets whether
+/// the microphone is allowed.
+function permissionsPanel(changed) {
+  const holder = el("div", { class: "group permissions" });
+  const tips = el("div", { class: "legend permission-tips" },
+    "If the microphone is allowed but recordings are silent, open Quick Settings (swipe down from the top) and check ",
+    el("b", {}, "Microphone access"), " is on, and that no call or voice assistant is using the microphone.");
+  let timer = null;
+  const refresh = async () => {
+    if (!holder.isConnected && timer) {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      return;
+    }
+    const { permissions = [] } = await invoke("app_permissions").catch(() => ({}));
+    holder.replaceChildren(...permissions.filter((p) => PERMISSIONS[p.id]).map((p) => {
+      const [name, why, required] = PERMISSIONS[p.id];
+      const state = el("span", { class: p.allowed ? "permission-state ok" : "permission-state" }, p.allowed ? "Allowed" : required ? "Needed" : "Not allowed");
+      const action = p.allowed ? ""
+        : p.blocked
+          ? el("button", { class: "pill", onclick: () => invoke("open_app_settings").catch(() => {}) }, "Open Android settings")
+          : el("button", { class: required ? "primary pill" : "pill", onclick: async () => {
+            await invoke("request_app_permissions", { ids: [p.id] }).catch(() => {});
+            setTimeout(refresh, 800);
+          } }, "Allow");
+      return el("div", { class: "row" }, el("span", { class: "label" }, name, el("small", {}, why),
+        p.blocked && !p.allowed ? el("small", {}, "Android won't ask again: allow it under Permissions in the app's settings.") : ""),
+        el("span", { class: "permission-action" }, state, action));
+    }));
+    changed?.(permissions.find((p) => p.id === "microphone")?.allowed ?? true);
+  };
+  refresh();
+  timer = setInterval(refresh, 2000);
+  document.addEventListener("visibilitychange", refresh);
+  return el("div", {}, holder, tips);
+}
+
+/// The permissions page in Settings.
+function showPermissions() {
+  leave();
+  showPage();
+  view = { kind: "permissions" };
+  main.replaceChildren(el("div", { class: "page" },
+    el("button", { class: "link back-link", onclick: () => showSettings() }, "‹ Settings"),
+    el("h1", {}, "App permissions"),
+    el("p", {}, "What Superteem may use on this phone. Everything stays on the phone."),
+    permissionsPanel()));
 }
 
 /// A setup page's heading, with "Skip this step" (or, run again from Settings, the way back) on the right.
@@ -2351,7 +2446,7 @@ async function showOnboarding(step = SETUP.welcome) {
       agree.disabled = true;
       await invoke("save_prefs", { acceptTerms: true }).catch(() => {});
       prefs.terms_accepted = Math.floor(Date.now() / 1000);
-      rerun ? showHome() : showOnboarding(SETUP.voice);
+      rerun ? showHome() : showOnboarding(platform === "android" ? SETUP.permissions : SETUP.voice);
     });
     page.classList.add("welcome");
     page.append(
@@ -2364,6 +2459,17 @@ async function showOnboarding(step = SETUP.welcome) {
       el("p", { class: "legend" }, "By continuing you agree to the ",
         el("button", { class: "link inline", onclick: showTerms }, "terms of use and privacy"), "."),
       el("div", { class: "actions" }, agree));
+  } else if (step === SETUP.permissions) {
+    // Android asks before an app may use the microphone; without it nothing records, silently.
+    const next = el("button", { class: "primary pill" }, "Continue");
+    next.addEventListener("click", () => showOnboarding(SETUP.voice));
+    page.append(setupHeading("Permissions", skipTo(SETUP.voice)),
+      el("p", {}, "Allow Superteem to use the microphone so it can record. The others are optional."),
+      permissionsPanel((microphone) => {
+        next.textContent = microphone ? "Continue" : "Continue without the microphone";
+        next.className = microphone ? "primary pill" : "pill";
+      }),
+      el("div", { class: "actions" }, next));
   } else if (step === SETUP.voice) {
     // The model downloads while the voice print is made, so it's usually ready by the next page.
     if (!ready && !modelDownload) downloadModel().catch(() => {});
@@ -2658,9 +2764,16 @@ function voiceReading(holder, next, device) {
     const s = await invoke("recording_status").catch(() => null);
     const stream = s?.streams?.[0];
     if (!s?.recording || !stream || !onboardEnrolling) return;
-    if (stream.state === "failed") {
+    if (stream.state === "failed" || stream.state === "no headset") {
       await stopReading(false).catch(() => {});
       return voiceSetup(holder, next, `${device} could not be used: ${stream.detail || "it did not start"}. Try another microphone.`);
+    }
+    // Android is handing the app silence: the room isn't quiet, the microphone is switched off for it.
+    if (stream.state === "silenced") {
+      if (!status.querySelector(".mic-blocked")) {
+        status.replaceChildren(el("span", { class: "danger mic-blocked" }, stream.detail), micHelp("microphone"));
+      }
+      return;
     }
     meter.style.width = `${Math.round(stream.level * 100)}%`;
     const loud = stream.level > 0.35;
@@ -3112,7 +3225,7 @@ async function doCommand(id) {
 /// A note asked for by voice opens with dictation running, as the mic button does, and the tick writes it
 /// down. Once phrases are trained, "Hey Superteem, stop note" writes it down too.
 async function noteByVoice(id, intro) {
-  const dictate = platform !== "android";
+  const dictate = true;
   const done = phrasesTrained ? "press the tick or say “Hey Superteem, stop note”" : "press the tick";
   say(dictate ? `${intro} Go ahead, and ${done} when you're done.` : intro);
   closeAgent();
@@ -3144,7 +3257,7 @@ async function noteByVoice(id, intro) {
     setTimeout(() => syncWake().catch(() => {}), 1000);
   } else if (!prefs.onboarded) {
     // Back to the page setup was on when the app closed. The terms are agreed before anything else.
-    showOnboarding(prefs.terms_accepted ? Math.min(prefs.setup_step ?? 0, SETUP.done) : SETUP.welcome);
+    showOnboarding(prefs.terms_accepted && Object.values(SETUP).includes(prefs.setup_step) ? prefs.setup_step : SETUP.welcome);
   } else if (!prefs.terms_accepted) {
     showOnboarding(SETUP.welcome);
   } else {

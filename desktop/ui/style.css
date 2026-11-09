@@ -604,3 +604,24 @@ button.more-link:hover { color: var(--text); text-decoration: underline; }
   /* Without spinning, the ring still shows it is busy by slowly brightening and fading. */
   .ticks span.checking::after { animation: tick-pulse 1.6s ease-in-out infinite; border-color: #1f7a45; }
 }
+
+/* Every setup page fills the window with its content in the middle: the step bar stays at the top, and
+   the rest sits halfway down the space below it. A page taller than the window simply scrolls. */
+.setup-page { display: flex; flex-direction: column; flex: 1 0 auto; padding-bottom: 48px; }
+.setup-page > * { flex: none; }
+.setup-page > .steps + *, .setup-page > :first-child:not(.steps) { margin-top: auto; }
+.setup-page > :last-child { margin-bottom: auto; }
+
+/* The app's Android permissions, each with its state and the way to allow it. */
+.permissions .row { gap: 14px; }
+.permission-action { display: flex; align-items: center; gap: 10px; flex: none; }
+.permission-state { font-size: 13px; color: var(--danger); }
+.permission-state.ok { color: var(--ok); }
+.permission-tips { margin-top: 12px; }
+@media (max-width: 720px) {
+  .permissions .row { flex-wrap: wrap; }
+  .permission-action { width: 100%; justify-content: space-between; }
+  /* On a phone the dictation bar spans the screen, just above the keyboard when it is open. */
+  .toolbar { padding: 8px 12px; }
+  .dictating { flex: 1; justify-content: space-between; gap: 8px; }
+}

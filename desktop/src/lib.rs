@@ -1060,9 +1060,32 @@ fn listen_attentive(on: bool) {
     listen::set_attentive(on);
 }
 
+/// The access the app needs from Android, for the setup and Settings pages. Empty on Windows.
 #[tauri::command]
-fn listen_level() -> f32 {
-    listen::level()
+async fn app_permissions() -> Result<serde_json::Value, String> {
+    blocking(recorder::permissions).await?
+}
+
+#[tauri::command]
+async fn request_app_permissions(ids: Vec<String>) -> Result<(), String> {
+    blocking(move || recorder::request_permissions(&ids)).await?
+}
+
+#[tauri::command]
+async fn open_app_settings() -> Result<(), String> {
+    blocking(recorder::open_app_settings).await?
+}
+
+/// Why the dictation microphone hears nothing, when the system is the reason.
+#[tauri::command]
+async fn dictation_problem() -> Result<Option<String>, String> {
+    blocking(listen::problem).await
+}
+
+/// Off the UI thread, as on Android it asks the capture service.
+#[tauri::command]
+async fn listen_level() -> Result<f32, String> {
+    blocking(listen::level).await
 }
 
 #[tauri::command]
@@ -1184,6 +1207,10 @@ pub fn run() {
             probe_stop,
             listen_level,
             listen_mute,
+            app_permissions,
+            request_app_permissions,
+            open_app_settings,
+            dictation_problem,
         ])
         .run(tauri::generate_context!())
         .expect("the app failed to start");

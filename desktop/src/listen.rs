@@ -561,6 +561,11 @@ mod imp {
     pub fn level() -> f32 {
         ((EAR.lock().unwrap().level_db + 70.0) / 70.0).clamp(0.0, 1.0)
     }
+
+    /// Windows doesn't silence an app's microphone without saying so.
+    pub fn problem() -> Option<String> {
+        None
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -589,20 +594,86 @@ mod imp {
         }
     }
 
+    // Dictation records through the capture service, like a meeting with one microphone, into a folder of
+    // its own that is deleted once the words are written down.
+    use super::{transcribe, transcribe_all, RATE};
+    use crate::recorder::{self, Recorder};
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    static DICTATION: Mutex<Option<Recorder>> = Mutex::new(None);
+    const PHONE: &str = "Phone microphone";
+
     pub fn dictate_start() -> Result<(), String> {
-        Err(NOT_YET.into())
+        if !transcribe::model_ready() {
+            return Err("Download the speech model first, in Settings.".into());
+        }
+        let mut slot = DICTATION.lock().unwrap();
+        if slot.is_some() {
+            return Err("Already dictating.".into());
+        }
+        let dir = crate::library::data_dir().join(format!("dictation-{}", crate::library::now()));
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        // The microphone chosen when the voice print was made, as on Windows.
+        let device = crate::prefs::load().enrol_input.unwrap_or_else(|| PHONE.into());
+        match recorder::start(dir.clone(), &[device], false) {
+            Ok(r) => {
+                *slot = Some(r);
+                Ok(())
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                Err(e)
+            }
+        }
+    }
+
+    /// Stops recording and returns the folder it wrote to.
+    fn stop() -> Result<std::path::PathBuf, String> {
+        let r = DICTATION.lock().unwrap().take().ok_or("Not dictating.")?;
+        let dir = r.dir().to_path_buf();
+        r.stop()?;
+        Ok(dir)
+    }
+
+    fn recorded(dir: &Path) -> Result<Vec<i16>, String> {
+        let journal = std::fs::read_dir(dir)
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "stvj"))
+            .ok_or("Nothing was recorded. Check Superteem may use the microphone, in Settings.")?;
+        Ok(stv_core::pipeline::load_source(&journal, RATE).map_err(|e| e.to_string())?.pcm)
     }
 
     pub fn dictate_cancel() -> Result<(), String> {
+        if let Ok(dir) = stop() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
         Ok(())
     }
 
     pub fn dictate_stop() -> Result<(String, Vec<i16>), String> {
-        Err(NOT_YET.into())
+        let dir = stop()?;
+        let pcm = recorded(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        let pcm = pcm?;
+        if pcm.len() < RATE as usize / 4 {
+            return Ok((String::new(), pcm));
+        }
+        Ok((transcribe_all(&pcm)?, pcm))
     }
 
     pub fn level() -> f32 {
-        0.0
+        let slot = DICTATION.lock().unwrap();
+        slot.as_ref().and_then(|r| r.status().ok()).and_then(|s| s.streams.first().map(|s| s.level)).unwrap_or(0.0)
+    }
+
+    /// Why a dictation hears nothing, when Android is the reason, for the page to say.
+    pub fn problem() -> Option<String> {
+        let slot = DICTATION.lock().unwrap();
+        let status = slot.as_ref()?.status().ok()?;
+        status.streams.into_iter().find(|s| s.state == "silenced" || s.state == "failed" || s.state == "no headset").map(|s| s.detail)
     }
 }
 

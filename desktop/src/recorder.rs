@@ -62,6 +62,19 @@ mod imp {
         Ok(Inputs { default: chosen.or_else(capture::default_input), devices })
     }
 
+    /// Windows asks for nothing up front: the microphone is used as it is.
+    pub fn permissions() -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({ "permissions": [] }))
+    }
+
+    pub fn request_permissions(_ids: &[String]) -> Result<(), String> {
+        Ok(())
+    }
+
+    pub fn open_app_settings() -> Result<(), String> {
+        Err("There are no app permissions to change on Windows.".into())
+    }
+
     pub fn start(dir: PathBuf, devices: &[String], pins: bool) -> Result<Recorder, String> {
         let shared = Shared::new(dir);
         let mut workers = Vec::new();
@@ -147,6 +160,24 @@ mod imp {
 
     pub fn inputs() -> Result<Inputs, String> {
         call("inputs", Empty {})
+    }
+
+    #[derive(Serialize)]
+    struct Ids<'a> {
+        ids: &'a [String],
+    }
+
+    /// Each kind of access the app asks Android for, and whether it is allowed.
+    pub fn permissions() -> Result<serde_json::Value, String> {
+        call("permissions", Empty {})
+    }
+
+    pub fn request_permissions(ids: &[String]) -> Result<(), String> {
+        call::<Done>("askPermissions", Ids { ids }).map(|_| ())
+    }
+
+    pub fn open_app_settings() -> Result<(), String> {
+        call::<Done>("openAppSettings", Empty {}).map(|_| ())
     }
 
     pub fn start(dir: PathBuf, devices: &[String], pins: bool) -> Result<Recorder, String> {
