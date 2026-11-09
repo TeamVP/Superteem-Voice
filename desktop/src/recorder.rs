@@ -75,6 +75,11 @@ mod imp {
         Err("There are no app permissions to change on Windows.".into())
     }
 
+    /// Opens a web page in the default browser.
+    pub fn open_url(url: &str) -> Result<(), String> {
+        std::process::Command::new("explorer").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    }
+
     pub fn start(dir: PathBuf, devices: &[String], pins: bool) -> Result<Recorder, String> {
         let shared = Shared::new(dir);
         let mut workers = Vec::new();
@@ -178,6 +183,16 @@ mod imp {
 
     pub fn open_app_settings() -> Result<(), String> {
         call::<Done>("openAppSettings", Empty {}).map(|_| ())
+    }
+
+    #[derive(Serialize)]
+    struct Url<'a> {
+        url: &'a str,
+    }
+
+    /// Opens a web page in the browser.
+    pub fn open_url(url: &str) -> Result<(), String> {
+        call::<Done>("openUrl", Url { url }).map(|_| ())
     }
 
     pub fn start(dir: PathBuf, devices: &[String], pins: bool) -> Result<Recorder, String> {

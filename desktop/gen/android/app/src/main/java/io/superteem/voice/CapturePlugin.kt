@@ -22,6 +22,11 @@ class StartArgs {
 }
 
 @InvokeArg
+class UrlArgs {
+    var url: String = ""
+}
+
+@InvokeArg
 class PermissionArgs {
     var ids: Array<String> = arrayOf()
 }
@@ -94,6 +99,18 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             activity.requestPermissions(perms.toTypedArray(), 2)
         }
         invoke.resolve(JSObject())
+    }
+
+    /** Opens a web page in the browser, such as the download for a newer version. */
+    @Command
+    fun openUrl(invoke: Invoke) {
+        val args = invoke.parseArgs(UrlArgs::class.java)
+        try {
+            activity.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(args.url)))
+            invoke.resolve(JSObject())
+        } catch (e: Exception) {
+            invoke.reject("No browser could open ${args.url}")
+        }
     }
 
     /** The app's page in Android settings, where access refused for good can be allowed. */

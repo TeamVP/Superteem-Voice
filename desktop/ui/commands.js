@@ -21,6 +21,10 @@ const COMMANDS = [
   { id: "action", offer: "mark an action item", say: "Action item", groups: [["action", "todo", "task"], ["item", "items", "point"]] },
   { id: "help", offer: "hear what you can say", say: "What can I say?", alone: ["help", "commands"], phrases: ["what can i say", "what can you do", "what do you do", "what are my options"],
     groups: [["what", "how"], ["say", "can", "do", "works"]] },
+  { id: "update", offer: "update the app to the newest version", say: "Update the app", alone: ["update", "upgrade"],
+    phrases: ["new version", "newer version", "latest version", "check for updates"] },
+  // Only offered once a newer version is found, never matched from words.
+  { id: "install-update", offer: "install it now", say: "Install the update" },
   { id: "settings", offer: "open settings", say: "Open settings", alone: ["settings", "preferences"] },
   { id: "home", offer: "show your notes and meetings", say: "Show my notes", alone: ["home"], groups: [["show", "open", "go", "list", "see"], ["notes", "meetings", "everything"]] },
 ];

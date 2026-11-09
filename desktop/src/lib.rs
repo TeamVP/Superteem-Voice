@@ -11,6 +11,7 @@ pub mod probe;
 pub mod process;
 pub mod recorder;
 pub mod transcribe;
+pub mod update;
 pub mod voices;
 
 use library::{Meta, PrintLink, Segment};
@@ -1072,6 +1073,41 @@ async fn request_app_permissions(ids: Vec<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn app_version() -> &'static str {
+    update::current()
+}
+
+/// Whether a newer version has been released.
+#[tauri::command]
+async fn check_update() -> Result<update::Update, String> {
+    blocking(update::check).await?
+}
+
+/// Gets the newer version. On Windows the installer starts and the app closes so it can be replaced.
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    let update = blocking(update::check).await??;
+    if !update.newer {
+        return Err(format!("Version {} is the latest.", update.current));
+    }
+    let progress = app.clone();
+    blocking(move || update::install(&update, |f| drop(progress.emit("update-progress", f)))).await??;
+    if cfg!(not(target_os = "android")) {
+        app.exit(0);
+    }
+    Ok(())
+}
+
+/// Opens one of the app's own web pages, such as what changed in a release.
+#[tauri::command]
+async fn open_link(url: String) -> Result<(), String> {
+    if !url.starts_with(update::SITE) && !url.starts_with("https://github.com/TeamVP/Superteem-Voice") {
+        return Err("Only the app's own pages can be opened.".into());
+    }
+    blocking(move || recorder::open_url(&url)).await?
+}
+
+#[tauri::command]
 async fn open_app_settings() -> Result<(), String> {
     blocking(recorder::open_app_settings).await?
 }
@@ -1210,6 +1246,10 @@ pub fn run() {
             app_permissions,
             request_app_permissions,
             open_app_settings,
+            check_update,
+            app_version,
+            install_update,
+            open_link,
             dictation_problem,
         ])
         .run(tauri::generate_context!())

@@ -176,7 +176,7 @@ fn tls() -> Result<std::sync::Arc<rustls::ClientConfig>, String> {
     Ok(std::sync::Arc::new(config))
 }
 
-fn agent() -> Result<ureq::Agent, String> {
+pub(crate) fn agent() -> Result<ureq::Agent, String> {
     let mut builder = ureq::AgentBuilder::new().tls_config(tls()?);
     if let Some(p) = proxy() {
         let proxy = ureq::Proxy::new(&p.url).map_err(|e| format!("The proxy {} isn't usable: {e}", p.shown))?;

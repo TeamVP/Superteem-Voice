@@ -634,3 +634,9 @@ button.more-link:hover { color: var(--text); text-decoration: underline; }
   /* While dictating, the bar takes the whole row rather than sharing it with the spacer. */
   .toolbar:has(.dictating:not([hidden])) .grow { display: none; }
 }
+
+/* A newer version, in the sidebar so it shows on phones too. */
+.update-bar:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px; padding: 10px 12px;
+  border-radius: 12px; background: var(--warn-bg); font-size: 13px; }
+.update-bar .label { flex: 1 1 100%; }
+.update-bar .label small { display: block; color: var(--muted); }

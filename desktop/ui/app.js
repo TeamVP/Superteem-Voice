@@ -2222,6 +2222,23 @@ async function showSettings() {
   }
   page.append(el("h2", {}, "Appearance"), el("div", { class: "group" }, el("div", { class: "row" }, el("span", { class: "label" }, "Theme"), theme)));
 
+  const version = el("span", { class: "value" }, update ? `Version ${update.current}` : "");
+  if (!update) invoke("app_version").then((v) => (version.textContent = `Version ${v}`)).catch(() => {});
+  const checkButton = el("button", { class: "pill" }, "Check for updates");
+  const checkResult = el("small", { role: "status" });
+  checkButton.addEventListener("click", async () => {
+    checkButton.disabled = true;
+    checkResult.textContent = "Checking…";
+    const found = await checkForUpdate(true);
+    checkButton.disabled = false;
+    checkResult.textContent = !found ? "Couldn't check. Check this device is online."
+      : found.newer ? `Version ${found.latest} is available. Use the button in the sidebar to get it.`
+      : `This is the latest version.`;
+    if (found?.newer) speak(`Version ${found.latest} is available.`);
+  });
+  page.append(el("h2", {}, "About"), el("div", { class: "group" },
+    el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult), checkButton)));
+
   page.append(el("h2", {}, "Storage"), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, "Recordings and notes", el("small", {}, "Kept on this device only.")),
       platform === "windows" ? el("button", { class: "pill", onclick: () => invoke("open_folder", { id: null }) }, "Open folder") : null)));
@@ -3402,8 +3419,34 @@ async function doCommand(id) {
   if (id === "help") {
     say(recording
       ? "You can say: bookmark that, action item, stop recording, or cancel."
-      : "You can say: start meeting, take a note or start dictation, add to last note, read back my last note, open settings, or cancel.");
+      : "You can say: start meeting, take a note or start dictation, add to last note, read back my last note, update the app, open settings, or cancel.");
     return refreshAgentControls();
+  }
+  if (id === "update") {
+    if (recording || dictation) {
+      say("I can't update while recording. Finish first, then ask again.");
+      return refreshAgentControls();
+    }
+    say("Checking for a new version.");
+    const found = await checkForUpdate();
+    if (!found) {
+      say("I couldn't check for updates. Check this device is online, then try again.");
+    } else if (!found.newer) {
+      say(`You have the latest version, ${found.current}.`);
+    } else {
+      agent.pending = "install-update";
+      return ask("confirm", `Version ${found.latest} is available. ${offerLine("install-update")}`);
+    }
+    return refreshAgentControls();
+  }
+  if (id === "install-update") {
+    if (!update?.newer) return doCommand("update");
+    await say(platform === "android"
+      ? `I'm opening the download in your browser. When it has downloaded, open it to install.`
+      : `Updating to version ${update.latest}. The app will close, install the update, and open again in about a minute.`);
+    closeAgent();
+    installUpdate();
+    return;
   }
   if (id === "settings") {
     say("Opening settings.");
@@ -3431,6 +3474,66 @@ async function noteByVoice(id, intro) {
     await new Promise((r) => setTimeout(r, 300));
   }
   await openNote(id, { dictate: true });
+}
+
+// ---------- Updates ----------
+
+/// The latest release, once checked; `newer` says whether it's newer than this app.
+let update = null;
+const updateBar = document.getElementById("update-bar");
+/// Releases put off with "Later", and announced aloud, so neither happens twice for one version.
+const remembered = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+const remember = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
+
+/// Asks whether a newer version is out. Returns the release, or null when it couldn't be checked.
+/// `asked` shows the bar even for a version put off before.
+async function checkForUpdate(asked = false) {
+  try {
+    update = await invoke("check_update");
+  } catch {
+    return null;
+  }
+  if (asked && update.newer) remember("update-later", "");
+  showUpdateBar();
+  // Someone using the app by voice hears about it once, as they may never see the bar.
+  if (update.newer && prefs.wake && !prefs.quiet && remembered("update-announced") !== update.latest && !recording && !dictation && !agent.open) {
+    remember("update-announced", update.latest);
+    speak(`A new version of Voice is available. Say Hey Superteem, update the app, to install it.`);
+  }
+  return update;
+}
+
+function showUpdateBar(message) {
+  const show = !!update?.newer && remembered("update-later") !== update.latest;
+  updateBar.hidden = !show;
+  if (!show) return;
+  const get = el("button", { class: "primary pill", onclick: () => installUpdate() }, platform === "android" ? "Download" : "Update now");
+  updateBar.replaceChildren(
+    el("span", { class: "label" }, `Version ${update.latest} is available`, el("small", {}, message ?? `You have ${update.current}.`)),
+    get,
+    el("button", { class: "link", onclick: () => invoke("open_link", { url: update.notes }).catch(() => {}) }, "What's new"),
+    el("button", { class: "link", onclick: () => { remember("update-later", update.latest); showUpdateBar(); } }, "Later"));
+  return get;
+}
+
+/// Gets the newer version: on Windows the installer runs and the app closes, then opens again once it's
+/// installed; on Android the download opens in the browser.
+async function installUpdate() {
+  if (recording || dictation) return showUpdateBar("Finish the recording first, then update.");
+  const button = showUpdateBar(platform === "android" ? "Opening the download in your browser…" : "Downloading…");
+  if (button) button.disabled = true;
+  const progress = await listen("update-progress", (e) => {
+    const label = updateBar.querySelector("small");
+    if (label) label.textContent = `Downloading… ${Math.round(e.payload * 100)}%`;
+  });
+  try {
+    await invoke("install_update");
+    showUpdateBar(platform === "android" ? "When the download finishes, open it to install." : "Installing. The app opens again when it's done.");
+  } catch (e) {
+    showUpdateBar(String(e));
+  } finally {
+    progress();
+  }
 }
 
 // ---------- Start ----------
@@ -3466,4 +3569,7 @@ async function noteByVoice(id, intro) {
     // On a phone the list is home.
     if (matchMedia("(max-width: 720px)").matches) document.body.classList.add("show-list");
   }
+  // Checked a little after starting, so it doesn't slow the first page, and then twice a day.
+  setTimeout(checkForUpdate, 8000);
+  setInterval(checkForUpdate, 12 * 60 * 60 * 1000);
 })();
