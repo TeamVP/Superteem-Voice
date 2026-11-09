@@ -2491,12 +2491,22 @@ async function sayHello(page, next, skip, rerun) {
     mic.classList.replace("on", "off");
   };
 
+  // Listening for the wake word stays off until the person turns it on, here or in Settings.
   const finished = (message) => {
     stop();
     fill(PRACTICE_GOAL);
-    lead.textContent = "Superteem knows how you say “Hey Superteem”. Say it whenever you need it while the app is open. Nothing is recorded until you ask.";
+    lead.textContent = "Superteem knows how you say “Hey Superteem”. Turn listening on to use it now, or later in Settings. "
+      + "Nothing is recorded until you ask.";
     state.textContent = message ?? "";
-    help.replaceChildren();
+    const listening = toggleRow("Listen for “Hey Superteem”", "While the app is open.", prefs.wake, async (on, box) => {
+      try {
+        await setWake(on);
+      } catch (e) {
+        box.checked = !on;
+        state.textContent = String(e);
+      }
+    });
+    help.replaceChildren(el("div", { class: "group hello-listen" }, listening));
     actions.replaceChildren(el("button", { class: "primary pill", onclick: next }, "Continue"),
       el("button", { class: "pill", onclick: practise }, "Practise again"));
   };
@@ -2531,10 +2541,9 @@ async function sayHello(page, next, skip, rerun) {
         state.replaceChildren(el("span", { class: "spinner" }), "Learning your voice…");
         try {
           await invoke("stop_wake_practice", { print: print.id });
-          await setWake(true).catch(() => {});
           await refreshPhrasesTrained();
-          speak("Hi. Say Hey Superteem whenever you need me.");
-          finished("All five heard. Superteem will answer to “Hey Superteem”.");
+          speak("Got it. I know how you say it now.");
+          finished("All five heard.");
         } catch (e) {
           state.textContent = `That didn't save: ${e}`;
           actions.replaceChildren(el("button", { class: "primary pill", onclick: practise }, "Try again"),
@@ -2553,12 +2562,8 @@ async function sayHello(page, next, skip, rerun) {
     };
   }
 
-  if (known) {
-    finished();
-    if (!prefs.wake) setWake(true).catch(() => {});
-  } else {
-    practise();
-  }
+  if (known) finished();
+  else practise();
 }
 
 /// Seconds of speech a good voice print needs, and the least that is accepted.
