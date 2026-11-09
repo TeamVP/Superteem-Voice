@@ -191,6 +191,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -203,3 +204,9 @@ jobs:
           ls -l dist
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
             --title "Superteem Voice ${GITHUB_REF_NAME#v}" --generate-notes
+      # The download page serves its own copy of the release's files. A release made with this workflow's
+      # token doesn't start other workflows, so the page is republished here.
+      - name: Republish the download page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main

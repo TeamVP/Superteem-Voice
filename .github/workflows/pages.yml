@@ -1,10 +1,13 @@
-# Publishes the download page in site/ to GitHub Pages, served at voice.superteem.com.
-# The page reads the latest release from GitHub as it loads, so new releases need no redeploy.
+# Publishes the download page in site/ to GitHub Pages, served at voice.superteem.com, with a copy of the
+# latest release's files in download/. GitHub's release download links have timed out for hours at a
+# time, so the page offers these copies first. The release workflow runs this once it publishes.
 name: Pages
 on:
   push:
     branches: [main]
     paths: ["site/**", "public/**", ".github/workflows/pages.yml"]
+  release:
+    types: [published, edited]
   workflow_dispatch:
 
 permissions:
@@ -29,6 +32,26 @@ jobs:
           mkdir -p _site/brand
           cp -r site/. _site/
           cp public/Superteem-only-dark.png public/Superteem-only-light.png public/favicon.svg public/appicon.png _site/brand/
+      # Through the API, which kept working while the release download links returned 504.
+      - name: Copy the latest release's files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p _site/download
+          if ! gh api "repos/$GITHUB_REPOSITORY/releases/latest" > latest.json; then
+            echo "::warning::No release to copy yet."
+            exit 0
+          fi
+          jq -c '.assets[] | {id, name, size}' latest.json | while read -r asset; do
+            id=$(jq -r .id <<< "$asset"); name=$(jq -r .name <<< "$asset"); size=$(jq -r .size <<< "$asset")
+            curl -sSfL --retry 8 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/assets/$id" -o "_site/download/$name"
+            actual=$(stat -c %s "_site/download/$name")
+            if [ "$actual" != "$size" ]; then echo "::error::$name is $actual bytes, expected $size"; exit 1; fi
+          done
+          # What the page shows: the version, when it came out, and the files beside it.
+          jq '{tag_name, published_at, html_url, assets: [.assets[] | {name, size}]}' latest.json > _site/download/release.json
+          ls -l _site/download
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

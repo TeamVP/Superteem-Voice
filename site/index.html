@@ -238,7 +238,8 @@
     const megabytes =(bytes) => `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`;
     const release = document.getElementById("release");
 
-    function showRelease(data) {
+    /// `local` is the copy of the release published with this page, whose files are served from here.
+    function showRelease(data, local = false) {
       const date = new Date(data.published_at).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
       release.innerHTML = "";
       const badge = Object.assign(document.createElement("span"), { className: "badge", textContent: `Version ${data.tag_name.replace(/^v/, "")}` });
@@ -253,12 +254,21 @@
           continue;
         }
         link.textContent = link.dataset.label;
-        link.href = asset.browser_download_url;
+        link.href = local ? `download/${encodeURIComponent(asset.name)}` : asset.browser_download_url;
+        if (local) link.setAttribute("download", asset.name);
         link.removeAttribute("aria-disabled");
         link.append(" ", Object.assign(document.createElement("span"), { className: "size", textContent: `· ${megabytes(asset.size)}` }));
       }
     }
 
+    // The release copied here when the page was published, so downloads don't depend on GitHub's release
+    // links, which have timed out for hours at a time. Without it, the page asks GitHub.
+    fetch("download/release.json", { cache: "no-cache" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((data) => showRelease(data, true))
+      .catch(() => fetchFromGitHub());
+
+    function fetchFromGitHub() {
     fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: "application/vnd.github+json" } })
       .then((r) => (r.status === 404 ? null : r.ok ? r.json() : Promise.reject(r.status)))
       .then((data) => {
@@ -274,6 +284,7 @@
           link.removeAttribute("aria-disabled");
         }
       });
+    }
   </script>
 </body>
 </html>
