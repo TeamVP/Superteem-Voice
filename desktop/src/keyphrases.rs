@@ -21,6 +21,9 @@ pub struct Spec {
     pub how: &'static [&'static str],
     /// Parts of the words that speech to text must hear in a take, lower case, for it to count.
     pub sounds: &'static [&'static str],
+    /// A one-word answer to a question the app asks. It is short, so a take needs less voiced sound and is
+    /// matched as a whole word; it is only acted on while a question waits, and meetings aren't scanned for it.
+    pub answer: bool,
 }
 
 pub const WAKE: &str = "wake";
@@ -44,6 +47,7 @@ pub const PHRASES: &[Spec] = &[
             "As \"Hi Superteem\" or \"Okay Superteem\", if you might say that",
         ],
         sounds: &["super t", "supert", "super st", "superst", "souper t"],
+        answer: false,
     },
     Spec {
         id: "bookmark",
@@ -52,6 +56,7 @@ pub const PHRASES: &[Spec] = &[
         requires: None,
         how: &["Normally", "Quickly", "Slowly and clearly", "Quietly"],
         sounds: &["book"],
+        answer: false,
     },
     Spec {
         id: "action",
@@ -60,6 +65,7 @@ pub const PHRASES: &[Spec] = &[
         requires: None,
         how: &["Normally", "Quickly, as in \"action item for Raj\"", "Slowly and clearly", "Quietly"],
         sounds: &["action", "acting"],
+        answer: false,
     },
     Spec {
         id: "stop",
@@ -68,8 +74,32 @@ pub const PHRASES: &[Spec] = &[
         requires: Some(WAKE),
         how: &["Normally", "Quickly", "Slowly and clearly", "Quietly"],
         sounds: &["stop"],
+        answer: false,
+    },
+    Spec {
+        id: "yes",
+        text: "Yes",
+        does: "Answers yes when the app asks a question, such as \"Do you want to do something with a note?\"",
+        requires: None,
+        how: &["Normally", "Quickly", "Slowly and clearly", "Quietly", "As \"Yeah\" or \"Yep\", if you might say that"],
+        sounds: &["yes", "yeah", "yep", "yup", "ya", "yeh", "yea"],
+        answer: true,
+    },
+    Spec {
+        id: "no",
+        text: "No",
+        does: "Answers no when the app asks a question.",
+        requires: None,
+        how: &["Normally", "Quickly", "Slowly and clearly", "Quietly", "As \"Nope\", if you might say that"],
+        sounds: &["no", "nope", "nah", "know"],
+        answer: true,
     },
 ];
+
+/// Whether a phrase is a one-word answer, only acted on while the app waits for one.
+pub fn is_answer(id: &str) -> bool {
+    spec(id).is_some_and(|s| s.answer)
+}
 
 /// Up to this many takes of one phrase are kept.
 pub const MAX_TAKES: usize = 12;
@@ -81,6 +111,9 @@ const SAME_HIT_S: f64 = 1.0;
 /// A take, and a hit heard live, must have at least this much voiced sound. "Hey Superteem" has about
 /// half a second of it; keyboard taps, clicks and knocks have next to none.
 const MIN_VOICED_S: f32 = 0.18;
+/// "Yes" has about a tenth of a second of voiced sound, and an answer may be as short as a quarter second.
+const MIN_VOICED_ANSWER_S: f32 = 0.08;
+const MIN_TAKE_ANSWER_S: f32 = 0.25;
 /// A take is a phrase of a few words, not a click or a sentence.
 const MIN_TAKE_S: f32 = 0.35;
 const MAX_TAKE_S: f32 = 2.5;
@@ -162,6 +195,10 @@ pub fn sounds_like(spec: &Spec, text: &str) -> bool {
     let joined = words.replace(' ', "");
     let count = words.split(' ').filter(|w| !w.is_empty()).count();
     let expected = spec.text.split_whitespace().count();
+    if spec.answer {
+        // "no" is in "now" and "nothing", so an answer's word must be said whole.
+        return count <= expected + 2 && words.split(' ').any(|w| spec.sounds.contains(&w));
+    }
     count <= expected + 3 && spec.sounds.iter().any(|s| words.contains(s) || joined.contains(&s.replace(' ', "")))
 }
 
@@ -169,13 +206,14 @@ pub fn sounds_like(spec: &Spec, text: &str) -> bool {
 /// clicks, and, when the speech model is there, heard as the phrase's words. Returns the words heard.
 pub fn check_take(spec: &Spec, pcm: &[i16]) -> Result<String, String> {
     let seconds = pcm.len() as f32 / RATE as f32;
-    if seconds < MIN_TAKE_S {
+    let (min_take, min_voiced) = if spec.answer { (MIN_TAKE_ANSWER_S, MIN_VOICED_ANSWER_S) } else { (MIN_TAKE_S, MIN_VOICED_S) };
+    if seconds < min_take {
         return Err("That was too short to be speech.".into());
     }
     if seconds > MAX_TAKE_S {
         return Err(format!("That was too long. Say just “{}”, then pause.", spec.text));
     }
-    if kws::voiced_seconds(pcm) < MIN_VOICED_S {
+    if kws::voiced_seconds(pcm) < min_voiced {
         return Err("That didn't sound like a voice. Taps, clicks and other noises aren't counted.".into());
     }
     match crate::listen::transcribe_phrase(pcm) {
@@ -311,7 +349,8 @@ pub struct Heard {
 pub fn describe(hit: &kws::Hit, stream: &str, prints: &[VoicePrint], verify: bool) -> Heard {
     let print = prints.iter().find(|p| p.id == hit.owner);
     let speaker = print.and_then(|p| embed::voice(&hit.audio, RATE).map(|v| embed::similarity(&v, &p.voice)));
-    let voiced = kws::voiced_seconds(&hit.audio) >= MIN_VOICED_S;
+    let min_voiced = if is_answer(&hit.phrase) { MIN_VOICED_ANSWER_S } else { MIN_VOICED_S };
+    let voiced = kws::voiced_seconds(&hit.audio) >= min_voiced;
     Heard {
         phrase: hit.phrase.clone(),
         text: spec(&hit.phrase).map_or(hit.phrase.as_str(), |s| s.text).to_string(),
@@ -334,7 +373,9 @@ fn already_heard(earlier: &[Heard], heard: &Heard) -> bool {
 
 /// Every phrase heard in a processed session's streams, in time order.
 pub fn scan_session(streams: &[(String, &[i16])]) -> Vec<Heard> {
-    let (models, prints) = models();
+    let (mut models, prints) = models();
+    // Yes and no are said all through a meeting and mean nothing to it.
+    models.retain(|m| !is_answer(&m.id));
     if models.is_empty() {
         return Vec::new();
     }
@@ -397,6 +438,18 @@ mod tests {
         }
         assert!(sounds_like(spec("bookmark").unwrap(), "Book mark that."));
         assert!(!sounds_like(spec("stop").unwrap(), "Start recording"));
+        let (yes, no) = (spec("yes").unwrap(), spec("no").unwrap());
+        for said in ["Yes.", "Yeah!", "Oh, yes.", "Yep"] {
+            assert!(sounds_like(yes, said), "{said}");
+        }
+        for said in ["No.", "Nope.", "Know."] {
+            assert!(sounds_like(no, said), "{said}");
+        }
+        for said in ["Now.", "Nothing.", "Yesterday", "No, I really don't think we should do that"] {
+            assert!(!sounds_like(no, said), "{said}");
+            assert!(!sounds_like(yes, said), "{said}");
+        }
+        assert!(is_answer("yes") && is_answer("no") && !is_answer(WAKE));
     }
 
     #[test]

@@ -2037,7 +2037,7 @@ async function showKeyphrases(printId, message) {
         chime();
         return show(`“Hey Superteem” · ${timing}. Now say a command.`);
       }
-      const command = commandName(KEYPHRASE_COMMANDS[h.phrase]);
+      const command = commandName(KEYPHRASE_COMMANDS[h.phrase]) ?? `the answer “${h.text}”`;
       show(`Understood: ${command} · ${timing}`, `“${h.text}” → ${command}`);
     },
     // Words from speech to text: a command after "Hey Superteem", or a phrase not trained yet.
@@ -2826,8 +2826,16 @@ const agentState = document.getElementById("agent-state");
 const agentActions = document.getElementById("agent-actions");
 const agent = {
   open: false,
-  mode: "idle", // idle | confirm
-  pending: null, // the command a "Did you mean…?" asks about
+  // idle, or waiting for an answer: confirm ("Did you mean…?"), topic ("…something with a note?"),
+  // offer (one command at a time: "To record a new note, say yes") or choose (numbered choices).
+  mode: "idle",
+  pending: null, // the command a confirm or offer asks about
+  topic: null, // the subject of a topic question, then of its offers
+  offers: [], // commands still to offer after the pending one
+  choices: [], // the commands a choose question numbers
+  question: "", // what was last asked, to say again
+  tries: 0, // answers not understood since it was asked
+  answerTimer: null,
   forcedWake: false,
   levelTimer: null,
   closedAt: 0,
@@ -2871,18 +2879,28 @@ function stepBackSoon() {
   agent.quietTimer = setTimeout(() => { if (agent.open && agent.mode === "idle") closeAgent(); }, 2500);
 }
 
+/// Counts utterances, so one cut short by the next doesn't unmute the microphone while the next is spoken.
+let speechCount = 0;
+
+/// Says `text` aloud. Resolves once it has been said, or at once when nothing is said.
 function speak(text) {
   // The app's voice would be on the recording, so in a meeting it answers on screen only.
-  if (prefs.quiet || !window.speechSynthesis || recording) return;
+  if (prefs.quiet || !window.speechSynthesis || recording) return Promise.resolve();
   speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text.replace(/[“”]/g, ""));
+  const mine = ++speechCount;
   speaking = true;
   invoke("listen_mute", { muted: true }).catch(() => {});
-  utterance.onend = utterance.onerror = () => setTimeout(() => {
-    speaking = false;
-    invoke("listen_mute", { muted: false }).catch(() => {});
-  }, 300);
-  speechSynthesis.speak(utterance);
+  return new Promise((resolve) => {
+    utterance.onend = utterance.onerror = () => setTimeout(() => {
+      if (mine === speechCount) {
+        speaking = false;
+        invoke("listen_mute", { muted: false }).catch(() => {});
+      }
+      resolve();
+    }, 300);
+    speechSynthesis.speak(utterance);
+  });
 }
 
 /// While the panel waits for an answer everything said is transcribed; otherwise only what follows "Hey Superteem".
@@ -2913,7 +2931,7 @@ function chime() {
 function say(text, big = false) {
   agentLog.append(el("div", { class: big ? "bot big" : "bot" }, text));
   agentLog.scrollTop = agentLog.scrollHeight;
-  speak(text);
+  return speak(text);
 }
 
 function heardLine(text) {
@@ -2972,8 +2990,10 @@ function closeAgent(byUser = false) {
   agent.open = false;
   agentEl.hidden = true;
   clearInterval(agent.levelTimer);
-  speechSynthesis?.cancel();
-  if (agent.mode === "confirm") agent.mode = "idle";
+  clearTimeout(agent.quietTimer);
+  // The last reply ("Opening settings.") is said to the end, unless the person closed the panel.
+  if (byUser) speechSynthesis?.cancel();
+  endDialogue();
   syncAttentive();
   if (agent.forcedWake) {
     agent.forcedWake = false;
@@ -2992,10 +3012,16 @@ function refreshAgentControls() {
   if (recording) {
     setAgentState(`Recording · ${clock(nowInRecording())}`);
     agentButtons(["Bookmark", () => run("bookmark that")], ["Action item", () => run("action item")], ["Stop recording", () => run("stop recording"), true]);
-  } else if (agent.mode === "confirm") {
-    const pending = COMMANDS.find((c) => c.id === agent.pending);
-    setAgentState("Waiting for your answer");
+  }
+  if (agent.mode === "confirm" || agent.mode === "offer" || agent.mode === "topic") {
+    const pending = commandById(agent.pending);
+    setAgentState("Waiting for your answer: yes or no");
     agentButtons(["No", () => run("no")], [pending ? `Yes: “${pending.say}”` : "Yes", () => run("yes"), true]);
+  } else if (agent.mode === "choose") {
+    setAgentState("Say a number, or pick one");
+    agentButtons(...agent.choices.map((id, n) => [`${n + 1}. ${commandById(id).say}`, () => run(String(n + 1)), n === 0]));
+  } else if (recording) {
+    // Meeting controls, set above.
   } else {
     setAgentState("Listening");
     agentButtons(["Close", () => closeAgent(true)]);
@@ -3062,6 +3088,14 @@ function onKeyphrase(h) {
     }
     return;
   }
+  // "Yes" and "No" answer a question the panel is waiting on, and mean nothing otherwise.
+  if (h.phrase === "yes" || h.phrase === "no") {
+    if (!agent.open || agent.mode === "idle") return;
+    answeredAt = Date.now();
+    heardLine(h.text);
+    run(h.phrase, true);
+    return;
+  }
   if (h.phrase === "wake") {
     if (!agent.open && !wakeMayOpen()) return;
     chime();
@@ -3079,6 +3113,10 @@ function onKeyphrase(h) {
     doCommand(command);
   }
 }
+
+/// When a trained "Yes" or "No" was last heard, so its words from speech to text aren't taken as the
+/// answer to the next question too.
+let answeredAt = 0;
 
 /// Ends a dictation when told to by voice.
 function stopNoteByVoice() {
@@ -3099,6 +3137,7 @@ function onHeard(text) {
     return;
   }
   if (!agent.open && !wake) return;
+  if (agent.open && Date.now() - answeredAt < 3000 && answerOf(text) !== null) return;
   // A phrase is transcribed a moment after it ends, so the sound of closing the panel arrives once it's shut.
   if (!agent.open && Date.now() - agent.closedAt < 2500) return;
   if (!agent.open && !wakeMayOpen()) return;
@@ -3122,42 +3161,182 @@ async function run(raw, alreadyShown = false) {
   agent.asked = true;
   if (!agent.open) await openAgent(false);
   if (!alreadyShown) heardLine(raw);
-  const t = raw.toLowerCase().replace(/[^\w\s']/g, " ").replace(/\s+/g, " ").trim();
-  const has = (re) => re.test(t);
-
-  if (agent.mode === "confirm") {
-    const pending = agent.pending;
-    agent.mode = "idle";
-    agent.pending = null;
-    if (has(/^(yes|yeah|yep|yup|sure|please|do it|go ahead|correct|right|ok|okay)\b/)) return doCommand(pending);
-    if (has(/^(no|nope|not|cancel|never ?mind|wrong)\b/)) {
-      say("Okay. What would you like to do?");
-      return refreshAgentControls();
-    }
-    // Anything else is taken as a new request.
-  }
+  if (agent.mode !== "idle" && answer(raw)) return;
 
   const [best, ...others] = interpret(raw);
   if (best.score >= 1) return doCommand(best.id);
   const close = [best, ...others].filter((c) => c.score >= 0.5).slice(0, 3);
-  if (close.length === 1) {
-    agent.mode = "confirm";
-    agent.pending = best.id;
-    say(`Did you mean “${best.say}”?`);
-    return refreshAgentControls();
+  if (close.length === 1) return confirm(best.id);
+  // Half heard, but about one subject: ask about that, then offer its commands one at a time.
+  const topic = topicOf(raw, !!recording);
+  if (topic?.commands.length === 1) return confirm(topic.commands[0]);
+  if (topic) {
+    // The commands the words came closest to are offered first, then the most usual.
+    const score = (id) => [best, ...others].find((c) => c.id === id)?.score ?? 0;
+    agent.topic = topic;
+    agent.offers = [...topic.commands].sort((a, b) => score(b) - score(a));
+    return ask("topic", `Do you want to do something with ${topic.name}?`);
   }
-  const offer = close.length ? close : (recording ? SUGGESTED_RECORDING : SUGGESTED).map((id) => COMMANDS.find((c) => c.id === id));
-  say(close.length ? "Did you mean one of these?" : "I'm not sure how to help with that yet. Here are some things I can do.");
-  setAgentState("Pick one, or say it another way");
-  agentButtons(...offer.map((c, n) => [c.say, () => { heardLine(c.say); doCommand(c.id); }, n === 0]));
+  if (close.length) return choose(close.map((c) => c.id), "Did you mean one of these?");
+  choose(recording ? SUGGESTED_RECORDING : SUGGESTED, "Sorry, I didn't understand that. Here are some things I can do.");
+}
+
+const commandById = (id) => COMMANDS.find((c) => c.id === id);
+/// How long to wait for an answer before asking again, and then giving up.
+const ANSWER_WAIT_MS = 12_000;
+/// Answers not understood before the app stops asking.
+const MAX_TRIES = 3;
+
+/// Asks a question and waits for the answer. Every question can be answered by voice alone. `lead` is
+/// said first but not when the question is asked again.
+function ask(mode, question, lead = "") {
+  agent.mode = mode;
+  agent.question = question;
+  agent.tries = 0;
+  refreshAgentControls();
+  return say(lead + question).then(waitForAnswer);
+}
+
+/// Says the question again, more simply, after an answer that wasn't understood or no answer at all.
+function askAgain(why) {
+  if (++agent.tries >= MAX_TRIES) {
+    endDialogue();
+    refreshAgentControls();
+    say("Sorry, I'm having trouble understanding. I'll stop listening for now. Say Hey Superteem when you need me.")
+      .then(() => { if (agent.open && agent.mode === "idle") closeAgent(); });
+    return;
+  }
+  const simple = agent.tries >= 2;
+  const answers = agent.mode === "choose" ? `Say a number from 1 to ${agent.choices.length}, or say cancel.` : "Please say just yes, or no.";
+  const text = agent.mode === "topic" ? `${why} Do you want to do something with ${agent.topic.name}? ${answers}`
+    : agent.mode === "choose" ? `${why} ${numbered(agent.choices)}`
+    : simple ? `${why} ${answers} ${offerLine(agent.pending, false)}`
+    : `${why} ${agent.question}`;
+  refreshAgentControls();
+  say(text).then(waitForAnswer);
+}
+
+/// Asks again when nothing is said for a while; the question isn't lost to a pause.
+function waitForAnswer() {
+  clearTimeout(agent.answerTimer);
+  if (agent.mode === "idle" || !agent.open) return;
+  const asked = agent.question;
+  agent.answerTimer = setTimeout(() => {
+    if (agent.open && agent.mode !== "idle" && agent.question === asked) askAgain("I didn't hear an answer.");
+  }, ANSWER_WAIT_MS);
+}
+
+function endDialogue() {
+  clearTimeout(agent.answerTimer);
+  Object.assign(agent, { mode: "idle", pending: null, topic: null, offers: [], choices: [], question: "", tries: 0 });
+}
+
+/// "Did you mean…?" for one command.
+function confirm(id) {
+  agent.pending = id;
+  return ask("confirm", `Did you mean ${commandById(id).say}? ${offerLine(id, false)}`);
+}
+
+/// "To record a new note, say yes. Otherwise, say no."
+function offerLine(id, otherwise = true) {
+  return `To ${commandById(id).offer}, say yes.${otherwise ? " Otherwise, say no." : ""}`;
+}
+
+/// Offers the next command of the topic, or says there are no more.
+function nextOffer(lead = "") {
+  const id = agent.offers.shift();
+  if (!id) {
+    const name = agent.topic?.name ?? "that";
+    endDialogue();
+    refreshAgentControls();
+    say(`${lead}That's everything I can do with ${name}. Say what you'd like, or say help.`).then(stepBackIfQuiet);
+    return;
+  }
+  agent.pending = id;
+  ask("offer", offerLine(id), lead);
+}
+
+/// "Say 1 for Take a note, 2 for…".
+function numbered(ids) {
+  const parts = ids.map((id, n) => `${n + 1} for ${commandById(id).say.replace(/[?.]$/, "")}`);
+  return `Say ${parts.length > 1 ? `${parts.slice(0, -1).join(", ")}, or ${parts.at(-1)}` : parts[0]}.`;
+}
+
+function choose(ids, lead) {
+  agent.choices = ids;
+  return ask("choose", `${lead} ${numbered(ids)}`);
+}
+
+/// Takes `raw` as the answer to the question asked. Returns false when it's a new request instead.
+function answer(raw) {
+  clearTimeout(agent.answerTimer);
+  const reply = answerOf(raw);
+  if (reply === "cancel") {
+    endDialogue();
+    doCommand("cancel");
+    return true;
+  }
+  if (reply === "repeat") {
+    say(agent.question).then(waitForAnswer);
+    return true;
+  }
+  const mode = agent.mode;
+  if (reply === "yes" || reply === "no") {
+    const pending = agent.pending;
+    if (mode === "topic") {
+      if (reply === "yes") return nextOffer("Okay. "), true;
+    } else if (mode === "offer") {
+      if (reply === "yes") return endDialogue(), doCommand(pending), true;
+      return nextOffer(), true;
+    } else if (mode === "confirm") {
+      if (reply === "yes") return endDialogue(), doCommand(pending), true;
+    } else if (mode === "choose" && reply === "yes" && agent.choices.length === 1) {
+      return doCommand(agent.choices[0]), true;
+    } else if (mode === "choose" && reply === "yes") {
+      return askAgain("Which one?"), true;
+    }
+    if (reply === "no") {
+      endDialogue();
+      refreshAgentControls();
+      say("Okay. What would you like to do?").then(stepBackIfQuiet);
+      return true;
+    }
+  }
+  if (typeof reply === "number") {
+    if (mode === "choose" && reply <= agent.choices.length) {
+      const id = agent.choices[reply - 1];
+      endDialogue();
+      heardLine(commandById(id).say);
+      doCommand(id);
+      return true;
+    }
+    if (mode === "choose") return askAgain(`There are only ${agent.choices.length}.`), true;
+  }
+  // A whole request said instead of an answer is done; one half heard or not heard at all is asked again,
+  // more simply, rather than losing the question.
+  const [best] = interpret(raw);
+  if (best.score >= 1) {
+    endDialogue();
+    doCommand(best.id);
+    return true;
+  }
+  if (mode === "choose") {
+    const named = agent.choices.find((id) => interpret(raw).find((c) => c.id === id)?.score >= 0.5);
+    if (named && interpret(raw).filter((c) => agent.choices.includes(c.id) && c.score >= 0.5).length === 1) {
+      endDialogue();
+      doCommand(named);
+      return true;
+    }
+  }
+  askAgain(reply === "unsure" ? "That's okay." : "Sorry, I didn't catch that.");
+  return true;
 }
 
 /// Carries out one command, by its id in COMMANDS.
 async function doCommand(id) {
   agent.asked = true;
-  if (agent.mode === "confirm") agent.mode = "idle";
+  endDialogue();
   if (id === "cancel") {
-    agent.mode = "idle";
     say("Okay.");
     setTimeout(closeAgent, 900);
     return;
@@ -3201,10 +3380,10 @@ async function doCommand(id) {
   }
   if (id === "add-note") {
     const [latest] = await invoke("list_notes", { query: "" });
-    return latest ? noteByVoice(latest.id, `Adding to ${latest.title}.`) : noteByVoice(null, "There are no notes yet. Starting a new one.");
+    return latest ? noteByVoice(latest.id, `Okay, adding to your note ${latest.title}.`) : noteByVoice(null, "There are no notes yet. Starting a new one.");
   }
   if (id === "note") {
-    return noteByVoice(null, "New note.");
+    return noteByVoice(null, "Okay, I'm creating a new note for you now.");
   }
   if (id === "stop-note") {
     say("No note is being dictated. Say “take a note” to start one.");
@@ -3240,12 +3419,18 @@ async function doCommand(id) {
 
 /// A note asked for by voice opens with dictation running, as the mic button does, and the tick writes it
 /// down. Once phrases are trained, "Hey Superteem, stop note" writes it down too.
+/// The prompt is said to the end before dictation starts, then a tone says it's ready, so someone who
+/// can't see the screen knows when to speak, and the app's own voice isn't written into the note.
 async function noteByVoice(id, intro) {
-  const dictate = true;
-  const done = phrasesTrained ? "press the tick or say “Hey Superteem, stop note”" : "press the tick";
-  say(dictate ? `${intro} Go ahead, and ${done} when you're done.` : intro);
+  const done = phrasesTrained ? "say “Hey Superteem, stop note”, or press the tick," : "press the tick";
+  const ready = prefs.quiet || recording ? "" : " Start speaking after the tone.";
+  await say(`${intro} When you've finished, ${done}.${ready}`);
   closeAgent();
-  await openNote(id, { dictate });
+  if (ready) {
+    chime();
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  await openNote(id, { dictate: true });
 }
 
 // ---------- Start ----------

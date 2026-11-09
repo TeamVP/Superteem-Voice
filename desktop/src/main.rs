@@ -30,12 +30,14 @@ fn read_wav(path: &str) -> Result<Vec<i16>, String> {
 fn kws_check(data: &str, train: &str, test: &str) -> Result<(), String> {
     library::init(std::path::Path::new(data).join("sessions"), data.into());
     let mut all = Vec::new();
-    for spec in keyphrases::PHRASES {
+    // Phrases with no recording, such as ones added since the recordings were made, are left out.
+    let specs: Vec<_> = keyphrases::PHRASES.iter().filter(|s| std::path::Path::new(&format!("{train}/train_{}.wav", s.id)).exists()).collect();
+    for spec in &specs {
         all.extend(read_wav(&format!("{train}/train_{}.wav", spec.id))?);
     }
     let voice = stv_core::embed::voice(&all, process::RATE).ok_or("no speech in the training audio")?;
     let print = voices::add_sample(None, "Check", voice, "script")?;
-    for spec in keyphrases::PHRASES {
+    for spec in &specs {
         let result = keyphrases::train(&print, spec.id, &read_wav(&format!("{train}/train_{}.wav", spec.id))?, true)?;
         println!("{:16} {:?}", spec.text, result);
     }

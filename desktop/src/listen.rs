@@ -209,7 +209,9 @@ impl Hearing {
         {
             for (heard, hit) in hits {
                 if !heard.rejected {
-                    if heard.phrase == keyphrases::WAKE {
+                    if keyphrases::is_answer(&heard.phrase) {
+                        // Only the page knows whether a question waits, so the words still go to speech to text.
+                    } else if heard.phrase == keyphrases::WAKE {
                         // The command starts where the wake word ended, even if it was said without a pause.
                         let after = (self.samples.saturating_sub(hit.end) as usize).min(self.recent.len());
                         self.phrase = self.recent.range(self.recent.len() - after..).copied().collect();

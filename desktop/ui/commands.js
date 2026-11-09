@@ -5,23 +5,24 @@
 /// down", "could you open my settings please"). A near miss comes back with a lower score, so the app can ask
 /// "Did you mean…?" instead of refusing.
 
+/// `offer`: what it does, as in "To record a new note, say yes".
 /// `groups`: one word from each group says the command. `alone`: any of these words says it by itself.
 /// `phrases`: any of these anywhere says it. `start`: the whole request starts like this.
 const COMMANDS = [
-  { id: "cancel", say: "Cancel", start: /^(cancel|never ?mind|nevermind|stop listening|close|go away|that's all|that is all|nothing|no thanks)\b/ },
-  { id: "stop-recording", say: "Stop recording", groups: [["stop", "end", "finish", "halt", "wrap"], ["record", "recording", "meeting", "recorder", "call"]] },
-  { id: "record", say: "Record a meeting", groups: [["start", "begin", "record", "new", "kick"], ["record", "recording", "meeting", "call"]] },
-  { id: "stop-note", say: "Stop the note", groups: [["stop", "end", "finish", "done"], ["note", "dictation", "dictating", "writing"]] },
-  { id: "add-note", say: "Add to last note", groups: [["add", "append", "continue", "resume", "carry", "reopen"], ["last", "latest", "previous", "recent"], ["note", "notes"]] },
-  { id: "read-note", say: "Read back my last note", groups: [["read", "play", "tell", "repeat"], ["note", "notes"]] },
-  { id: "note", say: "Take a note", alone: ["dictate", "dictation", "dictating", "memo"], phrases: ["note this", "write this down", "write that down", "jot this down", "jot that down"],
+  { id: "cancel", offer: "stop listening", say: "Cancel", start: /^(cancel|never ?mind|nevermind|stop listening|close|go away|that's all|that is all|nothing|no thanks)\b/ },
+  { id: "stop-recording", offer: "stop the recording", say: "Stop recording", groups: [["stop", "end", "finish", "halt", "wrap"], ["record", "recording", "meeting", "recorder", "call"]] },
+  { id: "record", offer: "start recording a meeting", say: "Record a meeting", groups: [["start", "begin", "record", "new", "kick"], ["record", "recording", "meeting", "call"]] },
+  { id: "stop-note", offer: "stop the note", say: "Stop the note", groups: [["stop", "end", "finish", "done"], ["note", "dictation", "dictating", "writing"]] },
+  { id: "add-note", offer: "add more to your last note", say: "Add to last note", groups: [["add", "append", "continue", "resume", "carry", "reopen"], ["last", "latest", "previous", "recent"], ["note", "notes"]] },
+  { id: "read-note", offer: "hear your last note read back", say: "Read back my last note", groups: [["read", "play", "tell", "repeat"], ["note", "notes"]] },
+  { id: "note", offer: "record a new note", say: "Take a note", alone: ["dictate", "dictation", "dictating", "memo"], phrases: ["note this", "write this down", "write that down", "jot this down", "jot that down"],
     groups: [["take", "start", "new", "make", "write", "create", "begin", "open", "jot"], ["note", "dictation", "memo"]] },
-  { id: "bookmark", say: "Bookmark that", alone: ["bookmark", "bookmarked"], groups: [["mark", "flag", "remember", "highlight"], ["that", "this", "it", "moment"]] },
-  { id: "action", say: "Action item", groups: [["action", "todo", "task"], ["item", "items", "point"]] },
-  { id: "help", say: "What can I say?", alone: ["help", "commands"], phrases: ["what can i say", "what can you do", "what do you do", "what are my options"],
+  { id: "bookmark", offer: "bookmark this moment", say: "Bookmark that", alone: ["bookmark", "bookmarked"], groups: [["mark", "flag", "remember", "highlight"], ["that", "this", "it", "moment"]] },
+  { id: "action", offer: "mark an action item", say: "Action item", groups: [["action", "todo", "task"], ["item", "items", "point"]] },
+  { id: "help", offer: "hear what you can say", say: "What can I say?", alone: ["help", "commands"], phrases: ["what can i say", "what can you do", "what do you do", "what are my options"],
     groups: [["what", "how"], ["say", "can", "do", "works"]] },
-  { id: "settings", say: "Open settings", alone: ["settings", "preferences"] },
-  { id: "home", say: "Show my notes", alone: ["home"], groups: [["show", "open", "go", "list", "see"], ["notes", "meetings", "everything"]] },
+  { id: "settings", offer: "open settings", say: "Open settings", alone: ["settings", "preferences"] },
+  { id: "home", offer: "show your notes and meetings", say: "Show my notes", alone: ["home"], groups: [["show", "open", "go", "list", "see"], ["notes", "meetings", "everything"]] },
 ];
 
 /// What is suggested when nothing comes close: meeting controls while recording, otherwise ways to start.
@@ -93,4 +94,54 @@ function interpret(raw) {
     .sort((a, b) => b.score - a.score || b.specific - a.specific);
 }
 
-if (typeof module !== "undefined") module.exports = { interpret, normalise, wordMatches, COMMANDS, SUGGESTED, SUGGESTED_RECORDING };
+/// Subjects a half-heard request can be about, so the app can ask "Do you want to do something with a
+/// note?" and then offer that subject's commands one at a time. `words` include ways whisper mishears them.
+const TOPICS = [
+  { id: "note", name: "a note", words: ["note", "notes", "noted", "node", "nodes", "dictate", "dictation", "memo", "jot", "write", "writing"],
+    commands: ["note", "add-note", "read-note"] },
+  { id: "meeting", name: "a meeting", words: ["record", "recording", "recorder", "meeting", "meetings", "call"],
+    commands: ["record", "home"], recording: ["stop-recording", "bookmark", "action"] },
+];
+
+/// The one subject `raw` is about, with the commands that fit now, or null when it's about none or several.
+function topicOf(raw, recording = false) {
+  const words = normalise(raw).split(" ").filter(Boolean);
+  const found = TOPICS.filter((t) => words.some((w) => t.words.some((k) => wordMatches(w, k))));
+  if (found.length !== 1) return null;
+  const t = found[0];
+  return { id: t.id, name: t.name, commands: (recording && t.recording) || t.commands };
+}
+
+const YES = ["yes", "yeah", "yea", "yeh", "yep", "yup", "ya", "yah", "yas", "yess", "yet", "jess", "sure", "ok", "okay", "alright",
+  "correct", "right", "please", "affirmative", "definitely", "absolutely", "certainly", "exactly"];
+const YES_PHRASES = ["go ahead", "do it", "do that", "that one", "uh huh", "sounds good", "let's do it"];
+const NO = ["no", "nope", "nah", "know", "negative", "wrong", "next", "neither", "other", "don't", "dont"];
+const UNSURE = /\b(not sure|don't know|dont know|no idea|unsure|maybe)\b/;
+const REPEAT = /^(repeat|say (that|it) again|again|pardon|sorry|what|come again|what was (that|the question))\b/;
+const NUMBERS = { one: 1, won: 1, first: 1, 1: 1, two: 2, second: 2, 2: 2, three: 3, tree: 3, third: 3, 3: 3,
+  four: 4, fourth: 4, 4: 4, five: 5, fifth: 5, 5: 5 };
+/// Sound-alikes of numbers that are only taken as one when said by themselves.
+const NUMBERS_ALONE = { to: 2, too: 2, free: 3, for: 4, fore: 4 };
+
+/// A short answer to a question the app asked: "yes", "no", "cancel", "repeat", "unsure", a number from 1,
+/// or null when it isn't one (a new request, or nothing understood). Generous, as answers are often misheard.
+function answerOf(raw) {
+  const text = normalise(raw);
+  if (!text) return null;
+  if (COMMANDS[0].start.test(text) || /^stop\b/.test(text)) return "cancel";
+  if (REPEAT.test(text)) return "repeat";
+  if (UNSURE.test(text)) return "unsure";
+  const words = text.split(" ");
+  if (words.length > 6) return null;
+  if (words.length === 1 && words[0] in NUMBERS_ALONE) return NUMBERS_ALONE[words[0]];
+  if (words.length <= 3 && !words.includes("not")) {
+    const number = words.find((w) => w in NUMBERS);
+    if (number) return NUMBERS[number];
+  }
+  const yes = words.some((w) => YES.includes(w)) || YES_PHRASES.some((p) => text.includes(p));
+  const no = words.some((w) => NO.includes(w)) || /\bnot\b/.test(text);
+  if (yes !== no) return yes ? "yes" : "no";
+  return null;
+}
+
+if (typeof module !== "undefined") module.exports = { interpret, normalise, wordMatches, topicOf, answerOf, COMMANDS, TOPICS, SUGGESTED, SUGGESTED_RECORDING };
