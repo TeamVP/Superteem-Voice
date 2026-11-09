@@ -93,14 +93,15 @@
     /* Each card's four parts share rows with the other cards, so the buttons line up. */
     .card {
       display: grid; grid-row: span 4; grid-template-rows: subgrid; gap: 14px; padding: 24px; border-radius: 18px;
-      background: var(--panel); border: 1px solid var(--line);
+      background: var(--panel); border: 1px solid var(--line); position: relative;
     }
     .card.yours { border-color: var(--key); box-shadow: 0 0 0 3px color-mix(in srgb, var(--key) 18%, transparent); }
     .card-head { display: flex; align-items: center; gap: 12px; }
     .icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--tint); color: var(--accent-text); flex: none; }
     .card h2 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
     .needs { margin: 0; font-size: 14px; color: var(--muted); }
-    .yours-tag { margin-left: auto; align-self: flex-start; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--accent-text); display: none; }
+    /* In the card's corner, so the device and what it needs keep the whole width of the row. */
+    .yours-tag { position: absolute; top: 14px; right: 18px; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--accent-text); display: none; }
     .card.yours .yours-tag { display: block; }
     .card p.what { margin: 0; color: var(--soft); font-size: 15px; }
     .download {
@@ -165,7 +166,7 @@
           <div><h2>Windows</h2><p class="needs">Windows 10 or 11, 64-bit</p></div>
           <span class="yours-tag">Your device</span>
         </div>
-        <p class="what">The full app: notes, meetings recorded from several microphones at once, and “Hey Superteem” voice commands.</p>
+        <p class="what">Notes, meetings recorded from several microphones at once, and the option of voice commands.</p>
         <a class="download" data-file="Voice-by-Superteem-Setup-x64.exe" data-was="Superteem-Voice-Setup-x64.exe" aria-disabled="true">Download for Windows</a>
         <p class="how">Run the installer. While the app is unsigned, Windows may say the publisher is unknown: choose <b>More info</b>, then <b>Run anyway</b>.</p>
       </article>
@@ -186,7 +187,7 @@
           <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v5M9.5 11a2.5 2.5 0 0 0 5 0"/></svg></div>
           <div><h2>Voice Pin</h2><p class="needs">Seeed reSpeaker Clip</p></div>
         </div>
-        <p class="what">Support for Seeed’s wearable reSpeaker Clip is in development. The Clip runs Seeed’s own open-source firmware, so there is nothing to install from us.</p>
+        <p class="what">Support for Seeed’s wearable reSpeaker Clip is in development. The Clip runs Seeed’s own open-source firmware, so it’s easy to inspect.</p>
         <a class="download outbound" href="https://github.com/Seeed-Studio/reSpeaker_Clip">Seeed’s Clip firmware</a>
         <p class="how">Firmware and updates for the Clip come from Seeed.</p>
       </article>
