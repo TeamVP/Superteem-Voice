@@ -39,6 +39,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
+          # Changed when how whisper.cpp is compiled changes, so an old build of it isn't reused.
+          prefix-key: v1-portable-cpu
       - name: Build the installer
         shell: pwsh
         run: |
@@ -48,6 +50,14 @@ jobs:
           npm run tauri -- build --bundles nsis
           if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
           Pop-Location
+          # whisper.cpp built for this machine's processor uses AVX-512 and crashes most PCs when speech is
+          # turned into text, so the release stops if that happened.
+          $cache = Get-ChildItem desktop/target/release/build -Recurse -Filter CMakeCache.txt | Where-Object { $_.FullName -match 'whisper-rs-sys' }
+          if (-not $cache) { throw 'whisper.cpp build settings not found' }
+          foreach ($c in $cache) {
+            $text = Get-Content $c.FullName -Raw
+            if ($text -notmatch 'GGML_NATIVE:BOOL=OFF' -or $text -notmatch 'GGML_AVX512:BOOL=OFF') { throw "whisper.cpp was built for this machine's processor: $($c.FullName)" }
+          }
           $setup = Get-ChildItem desktop/target/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item $setup.FullName "dist/$env:WINDOWS_FILE"
@@ -71,6 +81,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
+          # Changed when how whisper.cpp is compiled changes, so an old build of it isn't reused.
+          prefix-key: v1-portable-cpu
       - run: rustup target add aarch64-linux-android
       - name: Build the APK
         shell: pwsh

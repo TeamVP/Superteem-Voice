@@ -47,6 +47,18 @@ if (-not (Test-Path (Join-Path $vendor 'build.rs'))) {
     Set-Content $build $fixed -NoNewline
 }
 
+# The build script passes GGML_* variables to whisper.cpp's CMake but doesn't rebuild when they change, so
+# a copy built for the wrong processor would be kept. This makes cargo rebuild it when they change.
+$build = Join-Path $vendor 'build.rs'
+$text = Get-Content $build -Raw
+if (-not $text.Contains('rerun-if-env-changed=GGML_NATIVE')) {
+    $marker = '    // Allow passing any WHISPER or CMAKE compile flags'
+    if (-not $text.Contains($marker)) { throw 'The whisper-rs-sys build script changed; update build-env.ps1' }
+    $watch = ('GGML_NATIVE', 'GGML_AVX', 'GGML_AVX2', 'GGML_FMA', 'GGML_F16C', 'GGML_AVX512') |
+        ForEach-Object { "    println!(`"cargo:rerun-if-env-changed=$_`");`n" }
+    Set-Content $build $text.Replace($marker, ($watch -join '') + $marker) -NoNewline
+}
+
 if ($Android) {
     # Android Studio's SDK, unless ANDROID_HOME already points at one (as on GitHub's runners).
     $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
@@ -80,4 +92,13 @@ if ($Android) {
     $ucrt = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' | Where-Object { Test-Path "$($_.FullName)\ucrt\stdio.h" } | Sort-Object Name | Select-Object -Last 1
     if (-not $stdbool -or -not $ucrt) { throw 'Visual Studio C++ tools and the Windows SDK are required' }
     $env:BINDGEN_EXTRA_CLANG_ARGS = "-I`"$(Split-Path $stdbool)`" -I`"$($ucrt.FullName)\ucrt`""
+    # whisper.cpp is otherwise built for the build machine's own processor. GitHub's machines have AVX-512,
+    # which most PCs (Intel 12th gen and later desktops included) don't, so speech to text crashed the app
+    # there with an illegal instruction. AVX2, from 2013 on, runs on practically every Windows PC in use.
+    $env:GGML_NATIVE = 'OFF'
+    $env:GGML_AVX = 'ON'
+    $env:GGML_AVX2 = 'ON'
+    $env:GGML_FMA = 'ON'
+    $env:GGML_F16C = 'ON'
+    $env:GGML_AVX512 = 'OFF'
 }

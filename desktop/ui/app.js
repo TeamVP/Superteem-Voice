@@ -1906,7 +1906,8 @@ async function showKeyphrases(printId, message) {
     el("h1", {}, "Wake word and commands"),
     el("p", { class: "legend" }, "Say each phrase a few times so Superteem hears it the moment it's said, without waiting "
       + "for speech to text. It learns how you say them, so it answers you rather than anyone in the room. Only a "
-      + "description of the sound is kept with your voice print; the recordings are deleted."));
+      + "description of the sound is kept with your voice print; the recordings are deleted. Record again throws "
+      + "away every take kept for that phrase and starts it fresh."));
   if (!print) {
     page.append(el("div", { class: "notice" }, "Make your voice print first: the phrases are kept with it."),
       el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showOnboarding(SETUP.voice) }, "Make my voice print")));
@@ -1938,7 +1939,7 @@ async function showKeyphrases(printId, message) {
       ? `${phrase.takes} take${phrase.takes > 1 ? "s" : ""} · ${phraseQuality(phrase.separation)}`
       : "Not trained yet";
     const actions = phrase.takes
-      ? [el("button", { class: "pill", onclick: () => record(phrase, true) }, "Record again"),
+      ? [el("button", { class: "pill", title: "Replaces all the takes kept now", onclick: () => record(phrase, true) }, "Record again"),
         phrase.takes < 12 ? el("button", { class: "pill", onclick: () => record(phrase, false) }, "Add takes") : null,
         el("button", { class: "link danger", onclick: async () => {
           try { await invoke("clear_keyphrase", { print: print.id, phrase: phrase.id }); showKeyphrases(print.id); } catch (e) { showError(page, e); }
@@ -2115,11 +2116,23 @@ async function showSettings() {
   prefs = fresh;
   const page = el("div", { class: "page" }, el("h1", {}, "Settings"));
 
-  const model = el("div", { class: "row" }, el("span", { class: "label" }, "Speech model",
-    el("small", {}, "Used for dictation, voice commands and transcripts. Runs on this device. English only.")));
-  if (ready) model.append(el("span", { class: "value", style: "color:var(--ok)" }, "Ready"));
-  else model.append(modelDownloadButton(() => showSettings()));
-  const download = el("div", { class: "group model-group" }, await modelHelp());
+  // The proxy and the model folder are only needed when the download doesn't work, so they sit behind a
+  // link in the row, opened already when the download has failed.
+  const more = el("div", { class: "model-more", hidden: true }, await modelHelp());
+  const toggle = el("button", { class: "link more-link", "aria-expanded": "false" });
+  const showMore = (open) => {
+    more.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.replaceChildren(ready ? "Model folder and download settings" : "Download problems? Proxy and adding it yourself",
+      el("span", { class: "more-caret", "aria-hidden": "true" }, open ? "▴" : "▾"));
+  };
+  toggle.addEventListener("click", () => showMore(more.hidden));
+  showMore(!ready && !!modelError);
+  const row = el("div", { class: "row" }, el("span", { class: "label" }, "Speech model",
+    el("small", {}, "Used for dictation, voice commands and transcripts. Runs on this device. English only."), toggle));
+  if (ready) row.append(el("span", { class: "value", style: "color:var(--ok)" }, "Ready"));
+  else row.append(modelDownloadButton(() => showSettings()));
+  const model = el("div", { class: "model-block" }, row, more);
 
   page.append(el("h2", {}, "Listening"), el("div", { class: "group windows-only" },
     toggleRow("“Hey Superteem”", "Listen for the wake word while the app is open. Nothing is recorded until you ask.", prefs.wake,
@@ -2141,7 +2154,6 @@ async function showSettings() {
     }),
     model));
   if (platform === "android") page.append(el("div", { class: "group" }, model));
-  page.append(el("h2", {}, "Speech model download"), download);
 
   page.append(el("h2", {}, "Voices"), el("div", { class: "group" },
     linkRow("Voice prints", prints.length ? `${prints.length} saved` : "None yet", () => showVoicePrints()),

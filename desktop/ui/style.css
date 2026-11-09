@@ -561,8 +561,11 @@ dialog.terms p { margin: 0; font-size: 14px; color: var(--soft); }
 .hello-struggle { max-width: 520px; margin: 16px auto; text-align: center; }
 .all-set h1 { margin-top: 8px; }
 .all-set .actions { margin-top: 24px; }
-.model-group { padding: 0 18px 16px; }
-.model-help h2 { margin-top: 18px; }
+button.more-link { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 13px; color: var(--accent-text); }
+button.more-link:hover { color: var(--text); text-decoration: underline; }
+.more-caret { font-size: 10px; }
+.model-more { padding: 0 18px 16px; border-top: 1px dashed var(--line); }
+.model-help h2 { margin-top: 16px; }
 .model-help .field input { flex: 1; max-width: 420px; }
 .model-help code { font-size: 12px; background: var(--raised); padding: 1px 5px; border-radius: 5px; }
 .model-help code.path { word-break: break-all; }
