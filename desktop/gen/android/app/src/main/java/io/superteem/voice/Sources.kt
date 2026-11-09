@@ -51,14 +51,20 @@ fun meterLevel(pcm: ByteArray, length: Int): Float {
     return ((db + 70) / 70).toFloat().coerceIn(0f, 1f)
 }
 
-/** Live per-stream health, read by the session screen. */
-object Stats {
+/** Live per-stream health, read by a screen. */
+class StatsTable {
     val sources = ConcurrentHashMap<String, SourceStats>()
 
     fun update(name: String, change: (SourceStats) -> SourceStats) {
         sources.compute(name) { _, old -> change(old ?: SourceStats()) }
     }
 }
+
+/** The recording's streams, read by the session screen. */
+val Stats = StatsTable()
+
+/** Microphones being listened to before a meeting, so the New meeting page can show their meters. */
+val ProbeStats = StatsTable()
 
 private fun nowUs() = SystemClock.elapsedRealtimeNanos() / 1000
 
@@ -132,14 +138,16 @@ class PinSource(private val device: BluetoothDevice, private val dir: File, priv
 
 /**
  * Records the Bluetooth headset mic, or the phone's own mic when `headset` is false.
- * The phone's own sequence numbers fill the frame header.
+ * The phone's own sequence numbers fill the frame header. Without `dir` nothing is written: the microphone is
+ * only listened to, for its meter.
  */
 @SuppressLint("MissingPermission")
 class MicSource(
     private val context: Context,
-    private val dir: File,
+    private val dir: File?,
     val label: String,
     private val headset: Boolean,
+    private val stats: StatsTable = Stats,
 ) : Thread(label) {
     @Volatile private var running = true
 
@@ -150,7 +158,7 @@ class MicSource(
             audio.mode = AudioManager.MODE_IN_COMMUNICATION
             device = routeToHeadset(audio)
             if (device == null) {
-                Stats.update(label) { it.copy(state = "no headset", detail = "Connect a Bluetooth headset and start again") }
+                stats.update(label) { it.copy(state = "no headset", detail = "Connect a Bluetooth headset and start again") }
                 audio.mode = AudioManager.MODE_NORMAL
                 return
             }
@@ -184,8 +192,9 @@ class MicSource(
             audio.activeRecordingConfigurations.firstOrNull { it.clientAudioSessionId == record.audioSessionId }
                 ?.let { silencedByAndroid.set(it.isClientSilenced) }
             val actual = "${record.sampleRate} Hz via ${record.routedDevice?.productName ?: "unknown"}"
-            Stats.update(label) { it.copy(state = "recording", detail = actual) }
-            JournalWriter(File(dir, "$label.stvj")).use { journal ->
+            stats.update(label) { it.copy(state = "recording", detail = actual) }
+            val journal = dir?.let { JournalWriter(File(it, "$label.stvj")) }
+            try {
                 val buffer = ByteArray(samples * 2)
                 var sequence = 0
                 var lastSync = SystemClock.elapsedRealtime()
@@ -199,12 +208,12 @@ class MicSource(
                         at += n
                     }
                     if (at < buffer.size) break
-                    journal.append(nowUs(), encodeFrame(1, sequence, sequence * samples, CODEC_RAW_PCM16, buffer, buffer.size))
+                    journal?.append(nowUs(), encodeFrame(1, sequence, sequence * samples, CODEC_RAW_PCM16, buffer, buffer.size))
                     sequence++
                     val level = meterLevel(buffer, buffer.size)
                     zeroRun = if (buffer.all { it == 0.toByte() }) zeroRun + 1 else 0
                     val silenced = silencedByAndroid.get() || zeroRun >= SILENT_FRAMES
-                    Stats.update(label) {
+                    stats.update(label) {
                         it.copy(
                             frames = it.frames + 1,
                             level = level,
@@ -212,16 +221,18 @@ class MicSource(
                             detail = if (silenced) SILENCED_DETAIL else actual,
                         )
                     }
-                    if (SystemClock.elapsedRealtime() - lastSync >= SYNC_INTERVAL_MS) {
+                    if (journal != null && SystemClock.elapsedRealtime() - lastSync >= SYNC_INTERVAL_MS) {
                         journal.sync()
                         lastSync = SystemClock.elapsedRealtime()
                     }
                 }
+            } finally {
+                journal?.close()
             }
-            Stats.update(label) { it.copy(state = "stopped") }
+            stats.update(label) { it.copy(state = "stopped") }
         } catch (e: Exception) {
             Log.e(TAG, "headset capture failed", e)
-            Stats.update(label) { it.copy(state = "failed", detail = e.message ?: "") }
+            stats.update(label) { it.copy(state = "failed", detail = e.message ?: "") }
         } finally {
             runCatching { record.unregisterAudioRecordingCallback(watch) }
             runCatching { record.stop() }

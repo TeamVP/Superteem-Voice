@@ -128,19 +128,20 @@ button.pill:has(> span[aria-hidden="true"]:only-child) { min-height: calc(1.55em
   display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 2px 10px;
   border-radius: 999px; font-size: 12px; color: var(--muted); white-space: nowrap;
 }
-.listen-chip { padding: 2px 10px 2px 8px; }
+.listen-chip { padding: 0; width: 30px; justify-content: center; flex: none; }
+.listen-chip .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .listen-chip.on { background: var(--key-2); border-color: var(--key-2); color: #fff; }
 .quick { display: flex; gap: 6px; }
 .quick button { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 8px; white-space: nowrap; }
 .quick .home-btn { flex: none; width: 40px; padding: 0; color: var(--muted); }
 .quick .home-btn.on, .quick .home-btn.on:hover:not(:disabled) { background: var(--key); border-color: var(--key); color: #fff; }
-/* A narrow sidebar keeps the icons: first the buttons drop their words, then Listening does. */
+/* A narrow sidebar keeps the icons: the buttons drop their words, and the name gets a little smaller so
+   the Listening button stays inside the column. */
 @container (max-width: 262px) {
   .quick .label { display: none; }
-}
-@container (max-width: 250px) {
-  .listen-chip .label { display: none; }
-  .listen-chip { padding: 2px 7px; }
+  .sidebar .brand .product { font-size: 16px; }
+  .sidebar .brand .by { font-size: 13px; }
+  .sidebar .brand img { height: 14px; }
 }
 /* Dragged to resize the sidebar, within limits. */
 .splitter { flex: none; width: 6px; margin: 0 -3px; position: relative; z-index: 2; cursor: col-resize; touch-action: none; }
@@ -438,10 +439,13 @@ body[data-platform="android"] .windows-only { display: none !important; }
 .brand:hover img { opacity: 0.85; }
 .help-toggle { width: 26px; height: 26px; font-weight: 700; font-size: 13px; border: 1px solid var(--line); }
 /* The wordmark has a version for each theme, following the same choice as the colours. */
-.brand img { display: block; height: 22px; width: auto; }
+/* "Voice by [Superteem]", as on the download page. */
+.brand img { display: block; height: 16.5px; width: auto; }
 /* The product name sits after the Superteem wordmark: "[Superteem] Voice". */
 .brand { display: inline-flex; align-items: center; gap: 7px; }
 .brand .product { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; line-height: 1; color: var(--text); }
+.brand .by, .welcome-title .by { font: italic 500 0.8em/1 "Playfair Display", Georgia, serif; color: var(--muted); }
+.brand .by { font-size: 15px; margin: 0 -2px; transform: translateY(1px); }
 .welcome-title .product { font-weight: 700; }
 .brand .logo-dark-mode, .welcome-logo .logo-dark-mode { display: none; }
 @media (prefers-color-scheme: dark) {

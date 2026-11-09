@@ -195,6 +195,37 @@ mod imp {
         call::<Done>("openUrl", Url { url }).map(|_| ())
     }
 
+    #[derive(Serialize)]
+    struct ProbeArgs<'a> {
+        inputs: &'a [String],
+    }
+
+    #[derive(Deserialize)]
+    pub struct ProbeLevel {
+        pub name: String,
+        pub state: String,
+        pub detail: String,
+        pub level: f32,
+    }
+
+    #[derive(Deserialize)]
+    struct ProbeLevels {
+        probes: Vec<ProbeLevel>,
+    }
+
+    /// Listens to microphones before a meeting, without recording, for their meters.
+    pub fn probe_start(inputs: &[String]) -> Result<(), String> {
+        call::<Done>("probeStart", ProbeArgs { inputs }).map(|_| ())
+    }
+
+    pub fn probe_status() -> Result<Vec<ProbeLevel>, String> {
+        call::<ProbeLevels>("probeStatus", Empty {}).map(|p| p.probes)
+    }
+
+    pub fn probe_stop() -> Result<(), String> {
+        call::<Done>("probeStop", Empty {}).map(|_| ())
+    }
+
     pub fn start(dir: PathBuf, devices: &[String], pins: bool) -> Result<Recorder, String> {
         let path = dir.to_str().ok_or("The session path is not valid text.")?;
         call::<Done>("start", StartArgs { dir: path, inputs: devices, pins })?;

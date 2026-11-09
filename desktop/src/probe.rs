@@ -161,15 +161,31 @@ mod imp {
 #[cfg(target_os = "android")]
 mod imp {
     use super::Probe;
+    use crate::recorder;
 
-    /// Android records through its own service, so microphones are not tested here.
-    pub fn start(_devices: Vec<String>) {}
-
-    pub fn status() -> Vec<Probe> {
-        Vec::new()
+    /// Android listens through the capture plugin, which opens each microphone without recording it.
+    pub fn start(devices: Vec<String>) {
+        let _ = recorder::probe_start(&devices);
     }
 
-    pub fn stop() {}
+    pub fn status() -> Vec<Probe> {
+        recorder::probe_status()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| {
+                let state = match p.state.as_str() {
+                    "recording" => "listening",
+                    "starting" | "stopped" => "opening",
+                    _ => "failed",
+                };
+                Probe { heard: p.level > 0.35, name: p.name, state: state.into(), level: p.level, detail: p.detail }
+            })
+            .collect()
+    }
+
+    pub fn stop() {
+        let _ = recorder::probe_stop();
+    }
 }
 
 pub use imp::*;

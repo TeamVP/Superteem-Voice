@@ -22,6 +22,11 @@ class StartArgs {
 }
 
 @InvokeArg
+class ProbeArgs {
+    var inputs: Array<String> = arrayOf()
+}
+
+@InvokeArg
 class UrlArgs {
     var url: String = ""
 }
@@ -130,10 +135,66 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve(result)
     }
 
+    /** Microphones listened to for their meters on the New meeting page, by the names `inputs` gives. */
+    private val probes = mutableMapOf<String, MicSource>()
+
+    private fun stopProbes() {
+        probes.values.forEach { it.shutdown() }
+        probes.values.forEach { runCatching { it.join(1000) } }
+        probes.clear()
+        ProbeStats.sources.clear()
+    }
+
+    /** Listens to each microphone without recording, so its meter moves. Ones not yet allowed are left alone. */
+    @Command
+    fun probeStart(invoke: Invoke) {
+        val args = invoke.parseArgs(ProbeArgs::class.java)
+        stopProbes()
+        if (!CaptureService.running) {
+            for (name in args.inputs) {
+                if (missingPermissions(false, name == INPUT_HEADSET).isNotEmpty()) continue
+                val source = when (name) {
+                    INPUT_HEADSET -> MicSource(activity, null, name, headset = true, stats = ProbeStats)
+                    INPUT_PHONE -> MicSource(activity, null, name, headset = false, stats = ProbeStats)
+                    else -> continue
+                }
+                probes[name] = source
+                source.start()
+            }
+        }
+        invoke.resolve(JSObject())
+    }
+
+    @Command
+    fun probeStatus(invoke: Invoke) {
+        val list = JSArray()
+        for ((name, s) in ProbeStats.sources.toSortedMap()) {
+            val probe = JSObject()
+            probe.put("name", name)
+            probe.put("state", s.state)
+            probe.put("detail", s.detail)
+            probe.put("level", s.level.toDouble())
+            list.put(probe)
+        }
+        val result = JSObject()
+        result.put("probes", list)
+        invoke.resolve(result)
+    }
+
+    @Command
+    fun probeStop(invoke: Invoke) {
+        Thread {
+            stopProbes()
+            invoke.resolve(JSObject())
+        }.start()
+    }
+
     @Command
     fun start(invoke: Invoke) {
         val args = invoke.parseArgs(StartArgs::class.java)
         if (CaptureService.running) return invoke.reject("Already recording.")
+        // The microphones are let go by the meters before the recording opens them.
+        stopProbes()
         val missing = missingPermissions(args.pins, INPUT_HEADSET in args.inputs)
         if (missing.isNotEmpty()) {
             asked.edit().apply { missing.forEach { putBoolean(it, true) } }.apply()

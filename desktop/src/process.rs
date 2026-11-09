@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use serde_json::json;
 use std::fs;
 use std::path::Path;
-use stv_core::attribute::Config;
+use stv_core::attribute::{self, Config};
+use stv_core::merge::{self, Utterance};
 use stv_core::{export, pipeline};
 
 /// Every source is processed at this rate, whatever it was captured at.
@@ -108,7 +109,11 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
 
     progress("Aligning and finding speakers", 0.05);
     pipeline::align_sources(&mut sources, RATE);
-    let attribution = pipeline::attribute_sources(&sources, RATE, &Config::default());
+    let window = RATE as usize * pipeline::WINDOW_MS / 1000;
+    let levels: Vec<Vec<f32>> = sources.iter().map(|s| attribute::window_db(&s.pcm, window)).collect();
+    let attribution = attribute::attribute(&levels, &Config::default());
+    // One voice heard on several microphones is one line, transcribed from the clearest of them.
+    let utterances: Vec<Utterance> = merge::utterances(&attribution.segments, &levels);
     for (name, source) in names.iter().zip(&sources) {
         export::write_wav(&dir.join(format!("{name}.wav")), &source.pcm, RATE).map_err(|e| e.to_string())?;
     }
@@ -117,13 +122,26 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
 
     // The audio is already saved, so a transcription failure is reported without losing the session.
     let samples = |window: usize| window * pipeline::WINDOW_MS * RATE as usize / 1000;
-    let mut texts = vec![String::new(); attribution.segments.len()];
+    let mut texts = vec![String::new(); utterances.len()];
+    let mut confidences: Vec<f32> = utterances.iter().map(|u| u.confidence).collect();
     let transcription = if transcribe::model_ready() {
         transcribe::Transcriber::load().and_then(|t| {
-            let count = attribution.segments.len().max(1) as f32;
-            for (i, (text, s)) in texts.iter_mut().zip(&attribution.segments).enumerate() {
-                progress("Transcribing", 0.1 + 0.85 * i as f32 / count);
-                *text = t.transcribe(&sources[s.audio_source].pcm, samples(s.start_window), samples(s.end_window))?;
+            let readings: Vec<usize> = utterances.iter().map(|u| u.sources.len().min(merge::MAX_READINGS)).collect();
+            let count = readings.iter().sum::<usize>().max(1) as f32;
+            let mut done = 0;
+            for (i, u) in utterances.iter().enumerate() {
+                // Each microphone that heard it reads it, clearest first; they then vote on the words.
+                let mut heard = Vec::new();
+                for &(source, clarity) in &u.sources[..readings[i]] {
+                    progress("Transcribing", 0.1 + 0.85 * done as f32 / count);
+                    done += 1;
+                    heard.push((t.transcribe(&sources[source].pcm, samples(u.start_window), samples(u.end_window))?, clarity));
+                }
+                let combined = merge::combine(&heard);
+                texts[i] = combined.text;
+                if let Some(agreement) = combined.agreement {
+                    confidences[i] = merge::boosted(u.confidence, agreement);
+                }
             }
             Ok("transcript saved")
         })
@@ -141,41 +159,38 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
             "lost_frames": s.lost_frames,
             "drift_ppm": s.clock.map(|c| c.drift_ppm),
         })).collect::<Vec<_>>(),
-        "segments": attribution.segments.iter().zip(&texts).map(|(s, text)| json!({
+        "segments": utterances.iter().zip(&texts).zip(&confidences).map(|((u, text), confidence)| json!({
             "text": text,
-            "speaker": name_of(s.speaker_source),
-            "audio": names[s.audio_source],
-            "start_s": seconds(s.start_window),
-            "end_s": seconds(s.end_window),
-            "confidence": s.confidence,
+            "speaker": name_of(u.speaker_source),
+            "audio": names[u.best()],
+            "heard_on": u.sources.iter().map(|(s, clarity)| json!({ "stream": names[*s], "clarity_db": clarity })).collect::<Vec<_>>(),
+            "start_s": seconds(u.start_window),
+            "end_s": seconds(u.end_window),
+            "confidence": confidence,
         })).collect::<Vec<_>>(),
     });
     let text = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
     fs::write(dir.join("session.json"), text).map_err(|e| e.to_string())?;
 
     progress("Recognising voices", 0.95);
-    let mut lines: Vec<(Segment, voices::Line)> = attribution
-        .segments
+    let mut lines: Vec<(Segment, f32)> = utterances
         .iter()
         .zip(texts)
-        .map(|(s, text)| {
-            let speaker = s.speaker_source.map_or(library::UNKNOWN.to_string(), |i| names[i].clone());
-            let pcm = &sources[s.audio_source].pcm;
-            let span = &pcm[samples(s.start_window).min(pcm.len())..samples(s.end_window).min(pcm.len())];
+        .zip(confidences)
+        .map(|((u, text), confidence)| {
+            let speaker = u.speaker_source.map_or(library::UNKNOWN.to_string(), |i| names[i].clone());
             let segment = Segment {
                 id: 0,
-                speaker: speaker.clone(),
-                stream: names[s.audio_source].clone(),
-                start_s: seconds(s.start_window),
-                end_s: seconds(s.end_window),
+                speaker,
+                stream: names[u.best()].clone(),
+                start_s: seconds(u.start_window),
+                end_s: seconds(u.end_window),
                 text,
-                confidence: s.confidence,
+                confidence,
                 edited: false,
                 overlap: false,
             };
-            let power = span.iter().map(|&x| (x as f64).powi(2)).sum::<f64>() / span.len().max(1) as f64;
-            let level_db = (10.0 * (power.max(1.0) / (32768.0f64 * 32768.0)).log10()) as f32;
-            (segment, voices::Line { speaker, voice: stv_core::embed::voice(span, RATE), level_db })
+            (segment, u.sources[0].1)
         })
         .collect();
     // Only people talking matter: with a transcript, lines where nothing was said are silence or noise,
@@ -183,6 +198,20 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     if transcribed {
         lines.retain(|(s, _)| !is_silence(&s.text));
     }
+    let joined = join_same_words(&mut lines);
+    let stream_index = |name: &str| names.iter().position(|n| n == name).unwrap_or(0);
+    let mut lines: Vec<(Segment, voices::Line)> = lines
+        .into_iter()
+        .map(|(segment, _)| {
+            let pcm = &sources[stream_index(&segment.stream)].pcm;
+            let at = |s: f64| ((s * RATE as f64) as usize).min(pcm.len());
+            let span = &pcm[at(segment.start_s)..at(segment.end_s)];
+            let power = span.iter().map(|&x| (x as f64).powi(2)).sum::<f64>() / span.len().max(1) as f64;
+            let level_db = (10.0 * (power.max(1.0) / (32768.0f64 * 32768.0)).log10()) as f32;
+            let line = voices::Line { speaker: segment.speaker.clone(), voice: stv_core::embed::voice(span, RATE), level_db };
+            (segment, line)
+        })
+        .collect();
     lines.sort_by(|a, b| a.0.start_s.total_cmp(&b.0.start_s));
     let (segments, lines): (Vec<Segment>, Vec<voices::Line>) = lines.into_iter().unzip();
     let speakers = voices::assign(&lines, names.len());
@@ -215,7 +244,49 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     let streams: Vec<(String, &[i16])> = names.iter().cloned().zip(sources.iter().map(|s| s.pcm.as_slice())).collect();
     library::write_json(&dir.join(keyphrases::SESSION_FILE), &keyphrases::scan_session(&streams))?;
     let outcome = transcription.map_or_else(|e| format!("transcription failed: {e}"), str::to_string);
-    Ok(format!("{} stream(s), {} speech segment(s), {outcome}", names.len(), attribution.segments.len()))
+    let shared = attribution.segments.len() - utterances.len() + joined;
+    Ok(format!("{} stream(s), {} speech segment(s), {shared} joined from more than one microphone, {outcome}", names.len(), utterances.len() - joined))
+}
+
+/// The last check against the same words twice: lines on different microphones at the same time that say
+/// mostly the same thing are one line, kept from the microphone that heard it more clearly and made more
+/// certain by the other. `lines` pairs each line with how clearly it was heard. Returns how many were joined.
+fn join_same_words(lines: &mut Vec<(Segment, f32)>) -> usize {
+    /// Fewer words than this are too common ("yes", "okay") to say two lines are the same.
+    const MIN_WORDS: usize = 3;
+    let mut joined = 0;
+    let mut i = 0;
+    while i < lines.len() {
+        let mut j = i + 1;
+        while j < lines.len() {
+            let (a, b) = (&lines[i].0, &lines[j].0);
+            let overlap = a.end_s.min(b.end_s) - a.start_s.max(b.start_s);
+            let shorter = a.text.split_whitespace().count().min(b.text.split_whitespace().count());
+            if a.stream == b.stream || overlap <= 0.0 || shorter < MIN_WORDS {
+                j += 1;
+                continue;
+            }
+            let shared = merge::shared_words(&a.text, &b.text);
+            if shared < merge::SAME_WORDS {
+                j += 1;
+                continue;
+            }
+            // The clearer line is moved to i, and the other is taken out; lines are sorted by time later.
+            if lines[j].1 > lines[i].1 {
+                lines.swap(i, j);
+            }
+            let gone = lines.remove(j).0;
+            let kept = &mut lines[i].0;
+            kept.start_s = kept.start_s.min(gone.start_s);
+            kept.end_s = kept.end_s.max(gone.end_s);
+            kept.confidence = merge::boosted(kept.confidence.max(gone.confidence), shared);
+            joined += 1;
+            // Line i is now whichever was kept; compare it with the rest again from the next one.
+            j = i + 1;
+        }
+        i += 1;
+    }
+    joined
 }
 
 #[cfg(test)]
@@ -256,6 +327,23 @@ mod tests {
         let mut new = vec![line("input2", 1.0, "a", false), line("input1", 2.0, "b", false)];
         carry_over_edits(&old, &mut new);
         assert_eq!((new[0].text.as_str(), new[1].text.as_str()), ("a", "b"));
+    }
+
+    #[test]
+    fn the_same_words_on_two_microphones_are_one_line() {
+        let mut lines = vec![
+            (line("input1", 1.0, "Let's ship the new version on Friday", false), 18.0),
+            (line("input2", 1.2, "let's ship the new version on Friday", false), 12.0),
+            (line("input2", 3.0, "Sounds good to me", false), 20.0),
+            (line("input1", 3.1, "Okay", false), 5.0),
+        ];
+        assert_eq!(join_same_words(&mut lines), 1);
+        assert_eq!(lines.len(), 3);
+        assert_eq!((lines[0].0.stream.as_str(), lines[0].0.end_s), ("input1", 2.2));
+        assert!(lines[0].0.confidence > 0.9);
+        // Different words at the same time are two people talking at once, and both are kept.
+        let mut talking = vec![(line("input1", 1.0, "I think we should wait", false), 18.0), (line("input2", 1.0, "can we ship it today", false), 18.0)];
+        assert_eq!(join_same_words(&mut talking), 0);
     }
 
     #[test]
@@ -342,6 +430,86 @@ mod tests {
         assert_eq!(speakers.first(), Some(&"input1"));
         assert!(speakers.contains(&"input2"));
         assert!(!speakers.contains(&library::UNKNOWN), "{speakers:?}");
+    }
+
+    /// Two people sitting side by side, each with a microphone that hears the other almost as loudly (2 dB
+    /// down, a fraction of a millisecond later), taking turns. Every thing said must appear once.
+    /// Needs the model and two 16 kHz mono WAVs in STV_TEST_WAV and STV_TEST_WAV2.
+    #[test]
+    #[ignore]
+    fn side_by_side_microphones_write_each_thing_once() {
+        let (a, b) = (read_wav(&std::env::var("STV_TEST_WAV").unwrap()), read_wav(&std::env::var("STV_TEST_WAV2").unwrap()));
+        let gap = RATE as usize / 2;
+        let total = gap + a.len() + gap + b.len() + gap + a.len() + gap;
+        let (mut voice_a, mut voice_b) = (vec![0i32; total], vec![0i32; total]);
+        let b_at = gap + a.len() + gap;
+        let a2_at = b_at + b.len() + gap;
+        for (i, &s) in a.iter().enumerate() {
+            voice_a[gap + i] = s as i32;
+            voice_a[a2_at + i] = s as i32;
+        }
+        for (i, &s) in b.iter().enumerate() {
+            voice_b[b_at + i] = s as i32;
+        }
+        let noise = |i: usize| ((i.wrapping_mul(2_654_435_761) >> 7) % 61) as i32 - 30;
+        // 2 dB down and 5 samples late on the other microphone.
+        let mic = |own: &[i32], other: &[i32]| -> Vec<i16> {
+            (0..total).map(|i| (own[i] + other[i.saturating_sub(5)] * 79 / 100 + noise(i)).clamp(-32768, 32767) as i16).collect()
+        };
+        let dir = std::env::temp_dir().join(format!("stv-side-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        write_journal(&dir.join("input1.stvj"), &mic(&voice_a, &voice_b));
+        write_journal(&dir.join("input2.stvj"), &mic(&voice_b, &voice_a));
+        println!("{}", process_session(&dir, &|_, _| {}).unwrap());
+        let segments = library::load_segments(&dir);
+        for s in &segments {
+            println!("{:>6.2}-{:>6.2} {:<8} {:<8} {:.2} {}", s.start_s, s.end_s, s.speaker, s.stream, s.confidence, s.text);
+        }
+        let _ = fs::remove_dir_all(&dir);
+        for (i, x) in segments.iter().enumerate() {
+            for y in &segments[i + 1..] {
+                let overlap = x.end_s.min(y.end_s) - x.start_s.max(y.start_s);
+                assert!(!(overlap > 0.0 && merge::shared_words(&x.text, &y.text) >= 0.5), "said twice:\n{x:?}\n{y:?}");
+            }
+        }
+        let all: String = segments.iter().map(|s| s.text.to_lowercase()).collect::<Vec<_>>().join(" ");
+        assert_eq!(all.matches("friday").count(), 2, "{all}");
+        assert_eq!(all.matches("thursday").count(), 1, "{all}");
+    }
+
+    /// Two people side by side talking over each other, each heard 6 dB down on the other's microphone:
+    /// both must be written down, once each. Needs the same as the test above.
+    #[test]
+    #[ignore]
+    fn side_by_side_microphones_keep_people_talking_at_once() {
+        let (a, b) = (read_wav(&std::env::var("STV_TEST_WAV").unwrap()), read_wav(&std::env::var("STV_TEST_WAV2").unwrap()));
+        let gap = RATE as usize / 2;
+        let b_at = gap + a.len() / 2;
+        let total = (gap + a.len()).max(b_at + b.len()) + gap;
+        let (mut voice_a, mut voice_b) = (vec![0i32; total], vec![0i32; total]);
+        for (i, &s) in a.iter().enumerate() {
+            voice_a[gap + i] = s as i32;
+        }
+        for (i, &s) in b.iter().enumerate() {
+            voice_b[b_at + i] = s as i32;
+        }
+        let noise = |i: usize| ((i.wrapping_mul(2_654_435_761) >> 7) % 61) as i32 - 30;
+        let mic = |own: &[i32], other: &[i32]| -> Vec<i16> {
+            (0..total).map(|i| (own[i] + other[i.saturating_sub(5)] / 2 + noise(i)).clamp(-32768, 32767) as i16).collect()
+        };
+        let dir = std::env::temp_dir().join(format!("stv-at-once-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        write_journal(&dir.join("input1.stvj"), &mic(&voice_a, &voice_b));
+        write_journal(&dir.join("input2.stvj"), &mic(&voice_b, &voice_a));
+        println!("{}", process_session(&dir, &|_, _| {}).unwrap());
+        let segments = library::load_segments(&dir);
+        for s in &segments {
+            println!("{:>6.2}-{:>6.2} {:<8} {:.2} {}", s.start_s, s.end_s, s.stream, s.confidence, s.text);
+        }
+        let _ = fs::remove_dir_all(&dir);
+        let all: String = segments.iter().map(|s| s.text.to_lowercase()).collect::<Vec<_>>().join(" ");
+        assert_eq!(all.matches("friday").count(), 1, "{all}");
+        assert_eq!(all.matches("thursday").count(), 1, "{all}");
     }
 
     /// One microphone hearing two people take turns: voices alone must tell them apart.

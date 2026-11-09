@@ -907,7 +907,8 @@ async function showMeeting() {
   page.append(el("div", { class: "actions" }, start));
   main.replaceChildren(page);
   const live = boxes.filter((b) => b.connected);
-  if (!testing || !live.length) return;
+  // Android listens to its microphones too, so their meters show they work before recording starts.
+  if (!live.length) return;
 
   // Watches each connected track: still connected, picking up sound, or failed.
   await invoke("probe_start", { devices: live.map((b) => b.name) });
@@ -2279,6 +2280,8 @@ function showListening() {
   const on = prefs.wake;
   document.getElementById("listen-chip").classList.toggle("on", on);
   document.getElementById("listen-label").textContent = on ? "Listening" : "Voice off";
+  // The button is only an icon, so its tooltip says the state.
+  document.getElementById("listen-chip").title = on ? "Listening for “Hey Superteem”. Click to talk." : "Voice off. Click to talk.";
 }
 
 // ---------- First run ----------
@@ -2482,11 +2485,10 @@ async function showOnboarding(step = SETUP.welcome) {
     });
     page.classList.add("welcome");
     page.append(
-      el("h1", { class: "welcome-title" }, "Welcome to ",
+      el("h1", { class: "welcome-title" }, "Welcome to ", el("span", { class: "product" }, "Voice"), " ", el("span", { class: "by" }, "by"), " ",
         el("span", { class: "welcome-logo", role: "img", "aria-label": "Superteem" },
           el("img", { class: "logo-light-mode", src: "logo-light-mode.png", alt: "" }),
-          el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" })),
-        " ", el("span", { class: "product" }, "Voice")),
+          el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" }))),
       el("p", { class: "lead" }, "Voice notes, meetings and commands, transcribed on your own device. No cloud."),
       rerun ? el("p", {}, "There are now terms of use. Agree to them to carry on.") : "",
       el("p", { class: "legend" }, "By continuing you agree to the ",

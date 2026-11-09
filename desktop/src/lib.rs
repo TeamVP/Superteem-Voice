@@ -1035,19 +1035,20 @@ async fn dictate_cancel() -> Result<(), String> {
     blocking(listen::dictate_cancel).await?
 }
 
+// Off the main thread, as on Android these call the capture plugin and wait for its answer.
 #[tauri::command]
-fn probe_start(devices: Vec<String>) {
-    probe::start(devices);
+async fn probe_start(devices: Vec<String>) -> Result<(), String> {
+    blocking(move || probe::start(devices)).await
 }
 
 #[tauri::command]
-fn probe_status() -> Vec<probe::Probe> {
-    probe::status()
+async fn probe_status() -> Result<Vec<probe::Probe>, String> {
+    blocking(probe::status).await
 }
 
 #[tauri::command]
-fn probe_stop() {
-    probe::stop();
+async fn probe_stop() -> Result<(), String> {
+    blocking(probe::stop).await
 }
 
 #[tauri::command]

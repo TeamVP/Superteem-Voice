@@ -5,6 +5,7 @@ pub mod embed;
 pub mod export;
 pub mod journal;
 pub mod kws;
+pub mod merge;
 pub mod pipeline;
 pub mod protocol;
 pub mod session;
