@@ -124,11 +124,12 @@ const MAX_PHRASE_FRAMES: usize = 8_000 / FRAME_MS;
 const SPEECH_ABOVE_DB: f32 = 12.0;
 const SPEECH_MIN_DB: f32 = -52.0;
 /// Audio kept so the words straight after the wake word can be taken from where it ended.
-const RECENT_SAMPLES: usize = RATE as usize;
+/// Also the audio around a spotted phrase, to check its words: long enough for the longest phrase.
+const RECENT_SAMPLES: usize = 3 * RATE as usize;
 
 pub enum Event {
-    /// A trained phrase, heard by the spotter.
-    Phrase(Heard),
+    /// A trained phrase, heard by the spotter, with the audio around it to check its words.
+    Phrase(Heard, Vec<i16>),
     /// Speech for whisper: a command after the wake word, or any phrase while listening closely.
     Speech(Vec<i16>),
 }
@@ -202,6 +203,12 @@ impl Hearing {
         let excess = self.recent.len().saturating_sub(RECENT_SAMPLES);
         self.recent.drain(..excess);
 
+        // The audio from a little before a hit's start to now, for checking its words.
+        let around = |recent: &VecDeque<i16>, samples: u64, start: u64| -> Vec<i16> {
+            let pad = (keyphrases::CONFIRM_PAD_S * RATE as f64) as u64;
+            let back = (samples.saturating_sub(start.saturating_sub(pad)) as usize).min(recent.len());
+            recent.range(recent.len() - back..).copied().collect()
+        };
         let hits = match self.trained.as_mut() {
             Some(t) => t.spotter.push(frame).into_iter().map(|hit| (keyphrases::describe(&hit, "listen", &t.prints, t.verify), hit)).collect(),
             None => Vec::new(),
@@ -230,7 +237,8 @@ impl Hearing {
                         self.preroll.clear();
                     }
                 }
-                out.push(Event::Phrase(heard));
+                let clip = around(&self.recent, self.samples, hit.start);
+                out.push(Event::Phrase(heard, clip));
             }
         }
 
@@ -366,14 +374,25 @@ mod imp {
         let stop = Arc::new(AtomicBool::new(false));
         let (phrases_tx, phrases_rx) = mpsc::channel::<(Vec<i16>, bool)>();
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
+        let (check_tx, check_rx) = mpsc::channel::<(Heard, Vec<i16>)>();
         let mic = {
             let stop = stop.clone();
             thread::spawn(move || {
-                if let Err(e) = run_microphone(&stop, phrases_tx, &ready_tx) {
+                if let Err(e) = run_microphone(&stop, phrases_tx, check_tx, &ready_tx) {
                     let _ = ready_tx.send(Err(e));
                 }
             })
         };
+        // Spotted phrases are checked against their words on their own thread, ahead of other speech, so
+        // listening never stalls behind whisper and a phrase isn't kept waiting behind a long sentence.
+        let checker = thread::spawn(move || {
+            for (mut heard, clip) in check_rx {
+                keyphrases::confirm(&mut heard, &clip);
+                if let Some(on_phrase) = ON_PHRASE.get() {
+                    on_phrase(heard);
+                }
+            }
+        });
         // Phrases are transcribed on their own thread so listening never stalls behind whisper.
         let words = thread::spawn(move || {
             for (phrase, practice) in phrases_rx {
@@ -391,13 +410,18 @@ mod imp {
             }
         });
         match ready_rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(Ok(())) => Ok(Running { stop, workers: vec![mic, words] }),
+            Ok(Ok(())) => Ok(Running { stop, workers: vec![mic, words, checker] }),
             Ok(Err(e)) => Err(format!("The microphone could not be opened: {e}")),
             Err(_) => Err("The microphone did not respond.".into()),
         }
     }
 
-    fn run_microphone(stop: &AtomicBool, phrases: mpsc::Sender<(Vec<i16>, bool)>, ready: &mpsc::Sender<Result<(), String>>) -> Result<(), String> {
+    fn run_microphone(
+        stop: &AtomicBool,
+        phrases: mpsc::Sender<(Vec<i16>, bool)>,
+        checks: mpsc::Sender<(Heard, Vec<i16>)>,
+        ready: &mpsc::Sender<Result<(), String>>,
+    ) -> Result<(), String> {
         // The microphone chosen when the person's voice print was made, while it is still connected.
         let host = cpal::default_host();
         let chosen = crate::prefs::load().enrol_input;
@@ -479,10 +503,14 @@ mod imp {
                 hearing.push(&frame, attentive, &mut events);
                 for event in events.drain(..) {
                     match event {
-                        Event::Phrase(heard) => {
+                        // Rejected already, as taps or another voice: said straight away, for the Try it page.
+                        Event::Phrase(heard, _) if heard.rejected => {
                             if let Some(on_phrase) = ON_PHRASE.get() {
                                 on_phrase(heard);
                             }
+                        }
+                        Event::Phrase(heard, clip) => {
+                            let _ = checks.send((heard, clip));
                         }
                         Event::Speech(pcm) => {
                             let _ = phrases.send((pcm, false));

@@ -21,6 +21,19 @@ Say 'train_wake.wav' (Takes 'Hey Superteem')
 Say 'train_bookmark.wav' (Takes 'Bookmark that')
 Say 'train_action.wav' (Takes 'Action item')
 Say 'train_stop.wav' (Takes 'Stop recording')
+Say 'train_yes.wav' (Takes 'Yes')
+Say 'train_no.wav' (Takes 'No')
+# Ordinary talk full of syllables like "no" and "yes", with the answers said on their own twice. Only those
+# two should be heard as answers.
+$answers = @(
+  "So, I know what you mean. Go on, though, now is not the time.",
+  "No.",
+  "Nobody said it was easy, and no one knows the new note's owner. Oh, so slow.",
+  "Yes is what we told them; yesterday's notes say so too. Nothing, nope, never mind.",
+  "Yes.",
+  "Let's go over the snow report, then the notice board. Is that so? I suppose so."
+) -join "<break time='900ms'/>"
+Say 'test_answers.wav' $answers
 # Expected hits are marked in the eval with their order: wake, bookmark, action, wake, stop, wake.
 $test = @(
   "Morning everyone, thanks for joining. We have a super team this quarter and the numbers show it.",

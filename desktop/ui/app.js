@@ -48,6 +48,7 @@ const icon = {
   trash: '<path d="M4 7h16M10 3h4M6 7l1 13h10l1-13M10 11v5M14 11v5"></path>',
   home: '<path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"></path>',
   chevron: '<path d="M9 6l6 6-6 6"></path>',
+  down: '<path d="M6 9l6 6 6-6"></path>',
 };
 
 function svg(name, size = 18) {
@@ -2064,7 +2065,8 @@ function speakerMenu(sp, speakers, onPick) {
     menu.value = "";
     if (value) onPick(value);
   });
-  return menu;
+  // The list opens from a plain arrow; the select itself is invisible over it, so no "⋯" shows cut short.
+  return el("span", { class: "chip-menu" }, svg("down", 14), menu);
 }
 
 /// An inline name box beside the dropdown, because the webview has no prompt dialog.
@@ -2372,6 +2374,9 @@ async function showKeyphrases(printId, message) {
       if (phraseTraining || !this.trying) return;
       keepListening();
       const timing = `heard ${Math.round(h.delay_ms)} ms after you finished · score ${h.score.toFixed(2)}`;
+      if (h.unconfirmed) {
+        return show(h.words ? `Ignored: it sounded a little like “${h.text}”, but the words were “${h.words}”` : `Ignored: it sounded a little like “${h.text}”, but no words were heard`);
+      }
       if (h.rejected) return show(`“${h.text}” didn't sound like ${h.who || "you"}, so it would be ignored · ${timing}`);
       if (h.phrase === "wake") {
         chime();

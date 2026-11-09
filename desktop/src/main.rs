@@ -48,7 +48,11 @@ fn kws_check(data: &str, train: &str, test: &str) -> Result<(), String> {
         let at = (i + 1) as f32 * process::FRAME_SAMPLES as f32 / process::RATE as f32;
         for event in events.drain(..) {
             match event {
-                listen::Event::Phrase(h) => println!("{at:7.2}s  heard {:16} score {:.2} ({:.0} ms after it ended)", h.text, h.score, h.delay_ms),
+                listen::Event::Phrase(mut h, clip) => {
+                    keyphrases::confirm(&mut h, &clip);
+                    let verdict = if h.unconfirmed { "ignored, the words were" } else if h.rejected { "rejected" } else { "confirmed by" };
+                    println!("{at:7.2}s  heard {:16} score {:.2} ({:.0} ms after it ended), {verdict} {:?}", h.text, h.score, h.delay_ms, h.words.unwrap_or_default());
+                }
                 listen::Event::Speech(pcm) => {
                     let started = std::time::Instant::now();
                     let words = listen::transcribe_phrase(&pcm)?;

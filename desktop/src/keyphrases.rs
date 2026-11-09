@@ -342,8 +342,14 @@ pub struct Heard {
     /// How much the phrase sounded like the print's owner, when it was long enough to tell.
     pub speaker: Option<f32>,
     /// Checking the speaker is on and this didn't sound like them, or it wasn't a voice at all (taps and
-    /// clicks), so nothing was done.
+    /// clicks), or speech to text heard other words, so nothing was done.
     pub rejected: bool,
+    /// What speech to text heard where the phrase was spotted, when it was checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<String>,
+    /// Speech to text heard other words there, so it was ignored.
+    #[serde(default)]
+    pub unconfirmed: bool,
 }
 
 pub fn describe(hit: &kws::Hit, stream: &str, prints: &[VoicePrint], verify: bool) -> Heard {
@@ -363,6 +369,52 @@ pub fn describe(hit: &kws::Hit, stream: &str, prints: &[VoicePrint], verify: boo
         delay_ms: hit.delay_ms(),
         speaker,
         rejected: !voiced || (verify && speaker.is_some_and(|s| s < VERIFY_MIN)),
+        words: None,
+        unconfirmed: false,
+    }
+}
+
+/// Speech kept either side of a spotted phrase when checking its words, so whisper hears whole words.
+pub const CONFIRM_PAD_S: f64 = 0.25;
+
+/// Whether the words speech to text heard where a phrase was spotted are that phrase. Unlike a take, the
+/// phrase may be said mid-sentence, so other words around it are fine; an answer must be the word itself.
+pub fn confirms(spec: &Spec, text: &str) -> bool {
+    let words = plain_words(text);
+    if spec.answer {
+        // "I know" and "no one" aren't the answer no, and "yes" in a sentence isn't one either.
+        let count = words.split(' ').filter(|w| !w.is_empty()).count();
+        return count <= 2 && words.split(' ').any(|w| w != "know" && spec.sounds.contains(&w));
+    }
+    if spec.id == WAKE {
+        // "Hey" is what tells the wake word from "we have a super team": a greeting just before "super",
+        // or "super" opening what was heard.
+        let list: Vec<&str> = words.split(' ').filter(|w| !w.is_empty()).collect();
+        return list.iter().enumerate().any(|(i, w)| {
+            let next = list.get(i + 1).copied().unwrap_or("");
+            let rest = format!("{w}{next}");
+            let sounds_super = ["supert", "superst", "soupert"].iter().any(|s| rest.starts_with(s));
+            sounds_super && (i == 0 || ["hey", "hi", "hay", "okay", "ok", "heh"].contains(&list[i - 1]))
+        });
+    }
+    let joined = words.replace(' ', "");
+    spec.sounds.iter().any(|s| words.contains(s) || joined.contains(&s.replace(' ', "")))
+}
+
+/// Checks a spotted phrase against what speech to text hears in `clip`, the audio around it. The spotter
+/// matches sounds, and short phrases sound like many other syllables, so a phrase is only acted on when its
+/// words are heard too. Without the speech model only the spotter is trusted.
+pub fn confirm(heard: &mut Heard, clip: &[i16]) {
+    let Some(spec) = spec(&heard.phrase) else { return };
+    if heard.rejected {
+        return;
+    }
+    if let Ok(text) = crate::listen::transcribe_phrase(clip) {
+        if !confirms(spec, &text) {
+            heard.rejected = true;
+            heard.unconfirmed = true;
+        }
+        heard.words = Some(text.trim().to_string());
     }
 }
 
@@ -391,6 +443,13 @@ pub fn scan_session(streams: &[(String, &[i16])]) -> Vec<Heard> {
         }
     }
     kept.sort_by(|a, b| a.start_s.total_cmp(&b.start_s));
+    // Each phrase is checked against the words said there, so a cough or a "so" isn't a bookmark.
+    for heard in kept.iter_mut() {
+        if let Some((_, pcm)) = streams.iter().find(|(name, _)| *name == heard.stream) {
+            let at = |s: f64| ((s.max(0.0) * RATE as f64) as usize).min(pcm.len());
+            confirm(heard, &pcm[at(heard.start_s - CONFIRM_PAD_S)..at(heard.end_s + CONFIRM_PAD_S)]);
+        }
+    }
     kept
 }
 
@@ -415,7 +474,31 @@ mod tests {
             delay_ms: 120.0,
             speaker: None,
             rejected: false,
+            words: None,
+            unconfirmed: false,
         }
+    }
+
+    #[test]
+    fn spotted_phrases_need_their_words() {
+        let no = spec("no").unwrap();
+        assert!(confirms(no, "No."));
+        assert!(confirms(no, "Nope"));
+        assert!(!confirms(no, "So."));
+        assert!(!confirms(no, "I know."));
+        assert!(!confirms(no, "no one was there"));
+        assert!(!confirms(no, ""));
+        let bookmark = spec("bookmark").unwrap();
+        assert!(confirms(bookmark, "So, bookmark that."));
+        assert!(confirms(bookmark, "Book mark that"));
+        assert!(!confirms(bookmark, "Look at that."));
+        let wake = spec(WAKE).unwrap();
+        assert!(confirms(wake, "...so, hey Superteem"));
+        assert!(confirms(wake, "Hey Super Team"));
+        assert!(confirms(wake, "Okay, Superteam, stop recording"));
+        assert!(confirms(wake, "Superteem"));
+        assert!(!confirms(wake, "We have a super team this year."));
+        assert!(!confirms(wake, "Hey, see you then."));
     }
 
     #[test]
