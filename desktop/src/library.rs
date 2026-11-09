@@ -97,6 +97,9 @@ pub struct Segment {
     /// The clips a line was stitched together from, when it is more than one: (start_s, end_s) each.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<(f64, f64)>,
+    /// Words the vocabulary changed or suggests changing, so each can be undone or accepted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixes: Vec<stv_core::vocab::Fix>,
 }
 
 impl Segment {

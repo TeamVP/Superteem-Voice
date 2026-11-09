@@ -187,6 +187,8 @@ h1:empty::before { content: "Untitled"; color: var(--muted); }
 h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
 .meta .grow { flex: 1; }
+.link.with-icon { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 560px) { .link.with-icon .label { display: none; } }
 /* Export: a button with a menu of formats, and a line saying where it went. */
 .export-menu { position: relative; display: inline-flex; }
 .export-button { display: inline-flex; align-items: center; gap: 6px; }
@@ -618,7 +620,7 @@ dialog.terms p { margin: 0; font-size: 14px; color: var(--soft); }
 .skip-link { flex: none; display: inline-flex; align-items: center; gap: 2px; margin-top: 4px; padding: 6px 8px 6px 14px; min-height: 0;
   border: 1px solid transparent; border-radius: 999px; background: none; color: var(--accent-text); font-size: 14px; font-weight: 500; }
 .skip-link:hover { background: var(--raised); border-color: var(--line); color: var(--text); }
-.welcome-title { font-size: 34px; }
+.welcome-title { font-size: 34px; white-space: nowrap; }
 /* The logo stands in for the word: its "p" hangs below the line like the text's would. */
 .welcome-title .welcome-logo { display: inline-block; margin: 0; line-height: 0; vertical-align: -0.21em; }
 .welcome-title .welcome-logo img { height: 1.08em; width: auto; }
@@ -705,3 +707,29 @@ button.more-link:hover { color: var(--text); text-decoration: underline; }
   border-radius: 12px; background: var(--warn-bg); font-size: 13px; }
 .update-bar .label { flex: 1 1 100%; }
 .update-bar .label small { display: block; color: var(--muted); }
+
+/* Vocabulary */
+.vocab-row .vocab-word { font-weight: 600; flex: 0 1 auto; min-width: 80px; }
+.vocab-row .detail { flex: 1 1 240px; }
+.notice { color: var(--ok); font-size: 14px; }
+.vocab-editor { max-width: 640px; }
+.vocab-field { display: flex; flex-direction: column; gap: 6px; margin: 16px 0; }
+.vocab-field > span { font-weight: 600; }
+.vocab-field small, .vocab-when small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+.vocab-field input { width: 100%; box-sizing: border-box; }
+.vocab-test { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.pill.with-icon { display: inline-flex; align-items: center; gap: 6px; }
+.vocab-test-result { font-size: 14px; color: var(--soft); }
+.vocab-when { border: 1px solid var(--line); border-radius: 12px; padding: 8px 14px 12px; margin: 16px 0; }
+.vocab-when legend { font-weight: 600; padding: 0 6px; }
+.vocab-when .choice { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; cursor: pointer; }
+.vocab-when .choice input { margin-top: 3px; accent-color: var(--key); }
+.vocab-near { padding: 0 0 6px 28px; }
+.vocab-near[hidden] { display: none; }
+.vocab-near input { width: 100%; box-sizing: border-box; }
+.vfix { cursor: pointer; border-radius: 3px; text-decoration-color: var(--key); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.vfix.applied { text-decoration-line: underline; text-decoration-style: solid; }
+.vfix.suggested { text-decoration-line: underline; text-decoration-style: dotted; }
+.vfix:hover { background: var(--hover); }
+.fix-menu { position: fixed; z-index: 50; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: 280px; padding: 10px 12px;
+  border-radius: 12px; background: var(--panel); color: var(--text); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25); font-size: 13px; }

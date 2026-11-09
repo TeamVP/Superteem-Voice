@@ -14,6 +14,7 @@ pub mod recorder;
 pub mod script;
 pub mod transcribe;
 pub mod update;
+pub mod vocabulary;
 pub mod voices;
 
 use library::{Meta, PrintLink, Segment};
@@ -482,7 +483,12 @@ fn update_segment(
     edit_session(&state, &id, |_, segments| {
         let s = segments.iter_mut().find(|s| s.id == segment).ok_or("That line no longer exists.")?;
         if let Some(text) = text {
-            s.text = text.trim().to_string();
+            let text = text.trim().to_string();
+            // Typed words are the person's own, so the vocabulary's changes no longer line up with them.
+            if text != s.text {
+                s.fixes.clear();
+            }
+            s.text = text;
         }
         let mut moved_from = None;
         if let Some(speaker) = speaker {
@@ -518,6 +524,7 @@ fn split_segment(state: State<AppState>, id: String, segment: usize, at: usize) 
         }
         new_id = segments.iter().map(|s| s.id).max().unwrap_or(0) + 1;
         let s = &mut segments[i];
+        s.fixes.clear();
         let split_s = s.start_s + (s.end_s - s.start_s) * at as f64 / chars.len() as f64;
         let mut second = s.clone();
         s.text = head;
@@ -573,6 +580,8 @@ fn join_segments(state: State<AppState>, id: String, first: usize, second: usize
         let mut parts = s.spans();
         parts.extend(next.spans());
         s.parts = parts;
+        let shift = s.text.split_whitespace().count();
+        s.fixes.extend(next.fixes.iter().map(|f| stv_core::vocab::Fix { at: f.at + shift, ..f.clone() }));
         s.text = format!("{} {}", s.text.trim(), next.text.trim()).trim().to_string();
         s.end_s = s.end_s.max(next.end_s);
         s.confidence = s.confidence.min(next.confidence);
@@ -1115,6 +1124,63 @@ async fn dictate_stop(note: Option<String>) -> Result<String, String> {
     .await?
 }
 
+/// The person's vocabulary, as the page lists it.
+#[tauri::command]
+fn list_vocabulary() -> Vec<stv_core::vocab::Term> {
+    let mut terms = vocabulary::load();
+    terms.sort_by_key(|t| t.spelling.to_lowercase());
+    terms
+}
+
+#[tauri::command]
+fn save_vocab_term(term: stv_core::vocab::Term) -> Result<stv_core::vocab::Term, String> {
+    vocabulary::save(term)
+}
+
+#[tauri::command]
+fn delete_vocab_term(id: String) -> Result<(), String> {
+    vocabulary::delete(&id)
+}
+
+/// Undoes a vocabulary change in a line, or makes a suggested one.
+#[tauri::command]
+fn toggle_fix(state: State<AppState>, id: String, segment: usize, fix: usize) -> Result<(), String> {
+    edit_session(&state, &id, |_, segments| {
+        let s = segments.iter_mut().find(|s| s.id == segment).ok_or("That line no longer exists.")?;
+        vocabulary::toggle(s, fix)
+    })
+}
+
+/// Corrects every saved meeting, or only the meeting `only`, with the vocabulary, leaving lines the person
+/// edited alone. With `dry_run`, only counts the words that would change. Meetings being recorded or
+/// processed are skipped.
+#[tauri::command]
+async fn fix_past_transcripts<R: Runtime>(app: AppHandle<R>, dry_run: bool, only: Option<String>) -> Result<usize, String> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let terms = vocabulary::load();
+        let mut changed = 0;
+        for summary in library::list("", &[]).into_iter().filter(|s| only.as_ref().is_none_or(|o| *o == s.id)) {
+            let busy = is_queued(&state, &summary.id)
+                || state.recording.lock().unwrap().as_ref().is_some_and(|r| r.dir().file_name().is_some_and(|n| n == summary.id.as_str()));
+            if busy {
+                continue;
+            }
+            let Ok(dir) = library::session_dir(&summary.id) else { continue };
+            let _guard = state.edit.lock().unwrap();
+            changed += vocabulary::correct_session(&dir, &terms, dry_run)?;
+        }
+        Ok(changed)
+    })
+    .await?
+}
+
+/// Ends a "how does whisper write it" test: the words spoken since `dictate_start`, unsteered and uncorrected.
+#[tauri::command]
+async fn vocab_test_stop() -> Result<String, String> {
+    blocking(listen::dictate_stop_plain).await?
+}
+
 #[tauri::command]
 async fn dictate_cancel() -> Result<(), String> {
     blocking(listen::dictate_cancel).await?
@@ -1327,6 +1393,12 @@ pub fn run() {
             dictate_start,
             dictate_stop,
             dictate_cancel,
+            list_vocabulary,
+            save_vocab_term,
+            delete_vocab_term,
+            toggle_fix,
+            fix_past_transcripts,
+            vocab_test_stop,
             probe_start,
             archive_note,
             set_note_status,

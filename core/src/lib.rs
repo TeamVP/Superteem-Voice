@@ -9,4 +9,5 @@ pub mod merge;
 pub mod pipeline;
 pub mod protocol;
 pub mod session;
+pub mod vocab;
 pub mod voiceprint;

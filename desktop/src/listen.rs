@@ -10,6 +10,7 @@ use crate::keyphrases::{self, Heard};
 use crate::process::{FRAME_SAMPLES, RATE};
 use crate::transcribe::{self, Transcriber};
 use crate::voices::VoicePrint;
+use crate::vocabulary;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -87,9 +88,30 @@ pub fn phrases_changed() {
     PHRASES_VERSION.fetch_add(1, Ordering::Relaxed);
 }
 
-/// Transcribes dictation, steered towards the app's name.
+/// Transcribes dictation, steered towards the app's name and the person's vocabulary, then corrected by it.
 pub fn transcribe_all(pcm: &[i16]) -> Result<String, String> {
-    with_transcriber(|t| t.transcribe_with_prompt(pcm, PROMPT))
+    let prompt = vocabulary::prompt(PROMPT, &vocabulary::load()).unwrap_or_else(|| PROMPT.to_string());
+    let words = with_transcriber(|t| t.transcribe_with_prompt(pcm, &prompt))?;
+    Ok(vocabulary::correct_text(&words))
+}
+
+/// Returns the words spoken since `dictate_start`, and the audio they came from.
+pub fn dictate_stop() -> Result<(String, Vec<i16>), String> {
+    let pcm = dictate_stop_audio()?;
+    if pcm.len() < RATE as usize / 4 {
+        return Ok((String::new(), pcm));
+    }
+    Ok((transcribe_all(&pcm)?, pcm))
+}
+
+/// What whisper writes for the words spoken since `dictate_start` with nothing to steer or correct it, so
+/// the person can hear how it gets one of their words wrong.
+pub fn dictate_stop_plain() -> Result<String, String> {
+    let pcm = dictate_stop_audio()?;
+    if pcm.len() < RATE as usize / 4 {
+        return Ok(String::new());
+    }
+    with_transcriber(|t| t.transcribe_plain(&pcm))
 }
 
 /// Transcribes a short phrase heard by the listener, with no prompt for whisper to repeat.
@@ -571,8 +593,8 @@ mod imp {
         sync_microphone()
     }
 
-    /// Returns the words spoken since `dictate_start`, and the audio they came from.
-    pub fn dictate_stop() -> Result<(String, Vec<i16>), String> {
+    /// Returns the audio recorded since `dictate_start`.
+    pub fn dictate_stop_audio() -> Result<Vec<i16>, String> {
         // A short tail, so the last word isn't cut off when the key is released mid-word.
         thread::sleep(Duration::from_millis(250));
         let pcm = {
@@ -581,10 +603,7 @@ mod imp {
             std::mem::take(&mut ear.dictation)
         };
         sync_microphone()?;
-        if pcm.len() < RATE as usize / 4 {
-            return Ok((String::new(), pcm));
-        }
-        Ok((transcribe_all(&pcm)?, pcm))
+        Ok(pcm)
     }
 
     /// The microphone level from 0 to 1, for the dictation meter.
@@ -626,7 +645,7 @@ mod imp {
 
     // Dictation records through the capture service, like a meeting with one microphone, into a folder of
     // its own that is deleted once the words are written down.
-    use super::{transcribe, transcribe_all, RATE};
+    use super::{transcribe, RATE};
     use crate::recorder::{self, Recorder};
     use std::path::Path;
     use std::sync::Mutex;
@@ -683,15 +702,11 @@ mod imp {
         Ok(())
     }
 
-    pub fn dictate_stop() -> Result<(String, Vec<i16>), String> {
+    pub fn dictate_stop_audio() -> Result<Vec<i16>, String> {
         let dir = stop()?;
         let pcm = recorded(&dir);
         let _ = std::fs::remove_dir_all(&dir);
-        let pcm = pcm?;
-        if pcm.len() < RATE as usize / 4 {
-            return Ok((String::new(), pcm));
-        }
-        Ok((transcribe_all(&pcm)?, pcm))
+        pcm
     }
 
     pub fn level() -> f32 {

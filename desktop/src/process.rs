@@ -4,6 +4,7 @@ use crate::keyphrases;
 use crate::library::{self, Meta, PrintLink, Segment};
 use crate::script;
 use crate::transcribe;
+use crate::vocabulary;
 use crate::voices;
 use std::collections::BTreeMap;
 use serde_json::json;
@@ -60,10 +61,30 @@ fn carry_over_edits(old: &[Segment], new: &mut [Segment]) {
             s.text = edited.text.clone();
             s.speaker = edited.speaker.clone();
             s.edited = true;
+            s.fixes = edited.fixes.clone();
             // A line the person put back in the script stays there.
             if edited.in_script() {
                 s.echo_of = None;
             }
+        }
+    }
+}
+
+/// Keeps vocabulary changes the person undid or accepted when a session is processed again, on lines that
+/// came out the same.
+fn carry_over_fixes(old: &[Segment], new: &mut [Segment]) {
+    for before in old.iter().filter(|s| !s.edited && !s.fixes.is_empty()) {
+        let raw = |s: &Segment| {
+            let mut words: Vec<String> = s.text.split_whitespace().map(str::to_string).collect();
+            for f in s.fixes.iter().rev().filter(|f| f.applied) {
+                words.splice(f.at..(f.at + f.words).min(words.len()), f.raw.split_whitespace().map(str::to_string));
+            }
+            words.join(" ")
+        };
+        let before_raw = raw(before);
+        if let Some(s) = new.iter_mut().find(|s| !s.edited && s.stream == before.stream && (s.start_s - before.start_s).abs() < SAME_LINE_S && s.text == before_raw) {
+            s.text = before.text.clone();
+            s.fixes = before.fixes.clone();
         }
     }
 }
@@ -129,6 +150,9 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     let samples = |window: usize| window * pipeline::WINDOW_MS * RATE as usize / 1000;
     let mut texts = vec![String::new(); utterances.len()];
     let mut confidences: Vec<f32> = utterances.iter().map(|u| u.confidence).collect();
+    // The person's vocabulary steers whisper's spelling, and corrects what it still gets wrong below.
+    let terms = vocabulary::load();
+    let prompt = vocabulary::prompt("", &terms);
     let transcription = if transcribe::model_ready() {
         transcribe::Transcriber::load().and_then(|t| {
             let readings: Vec<usize> = utterances.iter().map(|u| u.sources.len().min(merge::MAX_READINGS)).collect();
@@ -140,7 +164,8 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
                 for &(source, clarity) in &u.sources[..readings[i]] {
                     progress("Transcribing", 0.1 + 0.85 * done as f32 / count);
                     done += 1;
-                    heard.push((t.transcribe(&sources[source].pcm, samples(u.start_window), samples(u.end_window))?, clarity));
+                    let words = t.transcribe(&sources[source].pcm, samples(u.start_window), samples(u.end_window), prompt.as_deref())?;
+                    heard.push((vocabulary::drop_echo(words, &terms), clarity));
                 }
                 let combined = merge::combine(&heard);
                 texts[i] = combined.text;
@@ -283,7 +308,10 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
             segment
         })
         .collect();
-    carry_over_edits(&library::load_segments(dir), &mut segments);
+    let old = library::load_segments(dir);
+    carry_over_edits(&old, &mut segments);
+    carry_over_fixes(&old, &mut segments);
+    vocabulary::correct_segments(&mut segments, &terms);
     voices::mark_overlaps(&mut segments);
 
     progress("Saving", 0.98);

@@ -49,6 +49,9 @@ const icon = {
   home: '<path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"></path>',
   chevron: '<path d="M9 6l6 6-6 6"></path>',
   down: '<path d="M6 9l6 6 6-6"></path>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path>',
+  // Lucide's refresh-cw.
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path>',
 };
 
 function svg(name, size = 18) {
@@ -1473,7 +1476,8 @@ function renderSession(session, processingError, suggestion) {
     if (await save("delete_session", {})) showHome();
   });
   const edits = session.segments.filter((s) => s.edited).length;
-  const reprocess = el("button", { class: "link", title: "Run speaker detection and transcription again" }, "Transcribe again");
+  const reprocess = el("button", { class: "link with-icon", title: "Transcribe again: run speaker detection and transcription again", "aria-label": "Transcribe again" },
+    svg("refresh", 16), el("span", { class: "label" }, "Transcribe"));
   reprocess.addEventListener("click", () => processAgain(id));
   const used = new Set(scriptLines.map((s) => s.speaker));
   const streams = Object.keys(session.audio).sort();
@@ -1492,7 +1496,8 @@ function renderSession(session, processingError, suggestion) {
     meta.duration_s ? el("span", { title: clock(meta.duration_s) }, `Length: ${lengthText(meta.duration_s)}`) : null,
     el("span", { class: "grow" }),
     session.segments.length ? exporter : null,
-    platform === "windows" ? el("button", { class: "link", onclick: () => invoke("open_folder", { id }) }, "Open folder") : null,
+    platform === "windows" ? el("button", { class: "icon-only", title: "Open this meeting's folder, with its audio, transcript and exports", "aria-label": "Open this meeting's folder",
+      onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
     session.model_ready && !session.needs_processing ? reprocess : null,
     remove), exporter.status);
 
@@ -1508,8 +1513,8 @@ function renderSession(session, processingError, suggestion) {
     page.append(el("div", { class: "notice" }, "No speech was found in this recording."));
   } else if (!session.transcribed) {
     page.append(el("div", { class: "notice" }, session.model_ready
-      ? "This meeting has no transcript yet. Use Transcribe again above."
-      : "This meeting has no transcript. Get the speech model in Settings, then use Transcribe again."));
+      ? "This meeting has no transcript yet. Use Transcribe (↻) above."
+      : "This meeting has no transcript. Get the speech model in Settings, then use Transcribe (↻) above."));
   }
   // Shown behind the "?" with the other notes on reading the transcript.
   const extraHelp = [];
@@ -1670,8 +1675,8 @@ function renderSession(session, processingError, suggestion) {
   const lineById = new Map(session.segments.map((s) => [s.id, s]));
   for (const seg of showDoubles ? session.segments : scriptLines) {
     while (markers.length && markers[0].at_s <= seg.start_s) {
+      // The same person carrying on after a bookmark or action item isn't named again.
       transcript.append(markerLine(markers.shift()));
-      previous = null;
     }
     const select = el("select", { style: `background:${colours.get(seg.speaker)}`, title: "Change the speaker for this line" },
       session.speakers.map((sp) => el("option", { value: sp.key, selected: sp.key === seg.speaker }, sp.name)),
@@ -1690,15 +1695,22 @@ function renderSession(session, processingError, suggestion) {
         showError(page, e);
       }
     });
-    const text = el("div", { class: "text", contenteditable: "plaintext-only", spellcheck: "true" }, seg.text);
+    const text = el("div", { class: "text", contenteditable: "plaintext-only", spellcheck: "true" }, ...lineWords(seg));
+    text.addEventListener("click", (e) => {
+      const span = e.target.closest?.(".vfix");
+      const fix = span && seg.fixes?.[Number(span.dataset.fix)];
+      if (!fix || !getSelection().isCollapsed) return;
+      fixMenu(span, fix, async () => { if (await save("toggle_fix", { segment: seg.id, fix: Number(span.dataset.fix) })) reload(); });
+    });
     text.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); text.blur(); }
-      if (e.key === "Escape") { text.textContent = seg.text; text.blur(); }
+      if (e.key === "Escape") { text.replaceChildren(...lineWords(seg)); text.blur(); }
     });
     text.addEventListener("blur", async () => {
       const value = text.textContent.trim();
       if (value !== seg.text && (await save("update_segment", { segment: seg.id, text: value, speaker: null }))) {
         seg.text = value;
+        seg.fixes = [];
         seg.edited = true;
         if (!who.querySelector(".edited")) who.append(el("span", { class: "edited" }, "edited"));
       }
@@ -1752,9 +1764,19 @@ function renderSession(session, processingError, suggestion) {
   const showLineAction = () => {
     for (const e of lineEls) e.action.replaceChildren();
     const sel = getSelection();
-    if (!sel.rangeCount || !sel.isCollapsed) return;
+    if (!sel.rangeCount) return;
     const i = lineEls.findIndex((e) => e.text.contains(sel.anchorNode));
     if (i < 0) return;
+    if (!sel.isCollapsed) {
+      // A word or two picked out of a line can be taught to the vocabulary.
+      const heard = sel.toString().trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+      const words = heard.split(/\s+/).filter(Boolean).length;
+      if (lineEls[i].text.contains(sel.focusNode) && heard && words <= 4) {
+        lineEls[i].action.append(actionButton("SPELL", `Teach Voice to spell “${heard}” another way`, false,
+          () => showTermEditor(null, { id, heard })));
+      }
+      return;
+    }
     const entry = lineEls[i];
     const range = document.createRange();
     range.selectNodeContents(entry.text);
@@ -2477,6 +2499,222 @@ function showPhraseTakes() {
 
 // ---------- Settings ----------
 
+/// How a term's "When" reads in the list.
+function whenText(when) {
+  if (when?.kind === "near") return `Only near ${when.words.map((w) => `“${w}”`).join(", ")}`;
+  if (when?.kind === "suggest") return "Suggested, not written in";
+  return "Always";
+}
+
+const splitList = (text) => text.split(",").map((s) => s.trim()).filter(Boolean);
+
+/// The person's vocabulary: words speech to text should spell their way.
+async function showVocabulary(message) {
+  leave();
+  showPage();
+  view = { kind: "vocabulary" };
+  refreshItems();
+  const terms = await invoke("list_vocabulary").catch(() => []);
+  const page = el("div", { class: "page" },
+    el("button", { class: "link", onclick: () => showSettings() }, "‹ Settings"),
+    el("h1", {}, "Vocabulary"),
+    el("p", { class: "legend" }, "Names, products and acronyms that speech to text writes as everyday words, such as “SIBR” "
+      + "written as “cyber”. Voice tells the speech model about these words before it listens, and corrects what it "
+      + "still gets wrong. In a meeting, each corrected word is underlined: click it to undo the change."));
+  if (message) page.append(el("p", { class: "notice", role: "status" }, message));
+  if (!terms.length) page.append(el("div", { class: "empty" }, "No words yet."));
+  for (const t of terms) {
+    const remove = el("button", { class: "link danger" }, "Delete");
+    remove.addEventListener("click", async () => {
+      if (!remove.dataset.armed) {
+        remove.dataset.armed = "1";
+        remove.textContent = "Click again to delete";
+        setTimeout(() => { delete remove.dataset.armed; remove.textContent = "Delete"; }, 4000);
+        return;
+      }
+      try { await invoke("delete_vocab_term", { id: t.id }); showVocabulary(); } catch (e) { showError(page, e); }
+    });
+    page.append(el("div", { class: "print-row vocab-row" },
+      el("span", { class: "vocab-word" }, t.spelling),
+      el("span", { class: "detail" }, [
+        t.sounds_like.length ? `Sounds like ${t.sounds_like.map((s) => `“${s}”`).join(", ")}` : "No sound-alikes yet",
+        t.letters ? "also said letter by letter" : null,
+        whenText(t.when),
+        t.uses ? `used ${t.uses} time${t.uses === 1 ? "" : "s"}` : null,
+      ].filter(Boolean).join(" · ")),
+      el("button", { onclick: () => showTermEditor(t) }, "Edit"), remove));
+  }
+  const fix = el("button", { class: "pill", hidden: true });
+  page.append(el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showTermEditor(null) }, "Add a word"), fix));
+  main.replaceChildren(page);
+  if (!terms.length) return;
+  // Meetings made before a word was added still have the everyday word; offer to correct them.
+  const count = await invoke("fix_past_transcripts", { dryRun: true, only: null }).catch(() => 0);
+  if (!count || !page.isConnected) return;
+  fix.hidden = false;
+  fix.textContent = `Correct ${count} word${count === 1 ? "" : "s"} in past meetings`;
+  fix.title = "Lines you edited by hand are left alone. Each change can be undone from the meeting.";
+  fix.addEventListener("click", async () => {
+    fix.disabled = true;
+    try {
+      const done = await invoke("fix_past_transcripts", { dryRun: false, only: null });
+      showVocabulary(`Corrected ${done} word${done === 1 ? "" : "s"} in past meetings.`);
+    } catch (e) {
+      fix.disabled = false;
+      showError(page, e);
+    }
+  });
+}
+
+/// Adds or edits a term. `from` is a meeting the person picked the word in, as { id, heard }: saving
+/// corrects that meeting and returns to it.
+function showTermEditor(term, from) {
+  leave();
+  showPage();
+  view = { kind: "vocabulary" };
+  let testing = false;
+  const back = () => {
+    if (testing) invoke("dictate_cancel").catch(() => {});
+    from ? openSession(from.id) : showVocabulary();
+  };
+  const spelling = el("input", { value: term?.spelling ?? "", placeholder: "SIBR", "aria-label": "Spelling", autocomplete: "off", spellcheck: "false" });
+  const sounds = el("input", { value: (term?.sounds_like ?? (from?.heard ? [from.heard] : [])).join(", "),
+    placeholder: "cyber, sigh ber", "aria-label": "Sounds like", autocomplete: "off" });
+  const letters = el("input", { type: "checkbox", checked: !!term?.letters });
+  const kind = term?.when?.kind ?? "always";
+  const radio = (value, label, detail) => el("label", { class: "choice" },
+    el("input", { type: "radio", name: "when", value, checked: kind === value }),
+    el("span", {}, label, el("small", {}, detail)));
+  const near = el("input", { value: term?.when?.kind === "near" ? term.when.words.join(", ") : "", placeholder: "platform, release, dashboard",
+    "aria-label": "Words it's said near", autocomplete: "off" });
+  const nearField = el("div", { class: "vocab-near" }, near);
+
+  // The speech model is the judge of what it hears: the person says the word and sees how it comes out.
+  const testResult = el("div", { class: "vocab-test-result", role: "status" });
+  const testLabel = el("span", {}, "Say it");
+  const test = el("button", { class: "pill with-icon" }, svg("mic", 16), testLabel);
+  test.addEventListener("click", async () => {
+    if (!testing) {
+      try {
+        await invoke("dictate_start");
+      } catch (e) {
+        testResult.replaceChildren(el("span", { class: "danger" }, String(e)));
+        return;
+      }
+      testing = true;
+      test.classList.add("primary");
+      testLabel.textContent = "Done";
+      testResult.replaceChildren("Say the word the way you normally would, then click Done.");
+      return;
+    }
+    testing = false;
+    test.disabled = true;
+    test.classList.remove("primary");
+    testLabel.textContent = "Listening…";
+    try {
+      const heard = (await invoke("vocab_test_stop")).trim().replace(/[.!?,]+$/, "");
+      if (!heard) {
+        testResult.replaceChildren("Nothing was heard. Try again, a little closer to the microphone.");
+      } else {
+        const have = splitList(sounds.value).map((s) => s.toLowerCase());
+        const add = el("button", { class: "link" }, "Add to Sounds like");
+        add.addEventListener("click", () => {
+          sounds.value = [...splitList(sounds.value), heard].join(", ");
+          add.remove();
+        });
+        const covered = have.includes(heard.toLowerCase()) || heard.toLowerCase() === spelling.value.trim().toLowerCase();
+        testResult.replaceChildren("The speech model wrote ", el("b", {}, `“${heard}”`), ". ", covered ? "That's covered already." : add);
+      }
+    } catch (e) {
+      testResult.replaceChildren(el("span", { class: "danger" }, String(e)));
+    }
+    test.disabled = false;
+    testLabel.textContent = "Say it again";
+  });
+
+  const save = el("button", { class: "primary pill" }, "Save");
+  const page = el("div", { class: "page vocab-editor" },
+    el("button", { class: "link", onclick: back }, from ? "‹ Back to the meeting" : "‹ Vocabulary"),
+    el("h1", {}, term ? `Edit “${term.spelling}”` : "Add a word"),
+    el("label", { class: "vocab-field" }, el("span", {}, "Spelling", el("small", {}, "Exactly how it should be written.")), spelling),
+    el("label", { class: "vocab-field" }, el("span", {}, "Sounds like",
+      el("small", {}, "The everyday words it's mistaken for, separated by commas.")), sounds),
+    el("div", { class: "vocab-field" }, el("span", {}, "Not sure?", el("small", {}, "Say the word and see what the speech model writes.")),
+      el("div", { class: "vocab-test" }, test, testResult)),
+    el("label", { class: "field" }, letters, el("span", {}, "Also said letter by letter, as “S I B R”")),
+    el("fieldset", { class: "vocab-when" }, el("legend", {}, "When should it replace the everyday word?"),
+      radio("always", "Always", "Every time the everyday word is heard."),
+      radio("near", "Only when talking about…", "When one of these words is said close by, so other uses of the everyday word are left alone."),
+      nearField,
+      radio("suggest", "Just suggest", "Underline it in meetings so you can accept it with a click. Dictation is left as heard.")),
+    el("div", { class: "actions" }, save, el("button", { class: "pill", onclick: back }, "Cancel")));
+  const syncNear = () => { nearField.hidden = page.querySelector("input[name=when]:checked")?.value !== "near"; };
+  page.querySelectorAll("input[name=when]").forEach((r) => r.addEventListener("change", syncNear));
+  syncNear();
+  save.addEventListener("click", async () => {
+    const choice = page.querySelector("input[name=when]:checked")?.value ?? "always";
+    const when = choice === "near" ? { kind: "near", words: splitList(near.value) } : { kind: choice };
+    save.disabled = true;
+    try {
+      if (testing) { testing = false; await invoke("dictate_cancel").catch(() => {}); }
+      const saved = await invoke("save_vocab_term",
+        { term: { ...(term ?? {}), spelling: spelling.value, sounds_like: splitList(sounds.value), letters: letters.checked, when } });
+      if (from) {
+        await invoke("fix_past_transcripts", { dryRun: false, only: from.id });
+        openSession(from.id);
+      } else {
+        showVocabulary(`Saved “${saved.spelling}”.`);
+      }
+    } catch (e) {
+      save.disabled = false;
+      showError(page, e);
+    }
+  });
+  main.replaceChildren(page);
+  spelling.focus();
+}
+
+/// A line's words, with the vocabulary's changes underlined: solid where a word was changed, dotted where
+/// one is only suggested.
+function lineWords(seg) {
+  const fixes = seg.fixes ?? [];
+  if (!fixes.length) return [seg.text];
+  const words = seg.text.split(" ");
+  const out = [];
+  let i = 0;
+  fixes.forEach((f, index) => {
+    if (f.at < i || f.at + f.words > words.length) return;
+    if (f.at > i) out.push(words.slice(i, f.at).join(" ") + " ");
+    const title = f.applied ? `Written as “${f.fixed}” from your vocabulary; heard “${f.raw}”. Click to change it back.`
+      : `Did they say “${f.fixed}”? Click to use your vocabulary's spelling.`;
+    out.push(el("span", { class: `vfix ${f.applied ? "applied" : "suggested"}`, "data-fix": String(index), title },
+      words.slice(f.at, f.at + f.words).join(" ")));
+    i = f.at + f.words;
+    if (i < words.length) out.push(" ");
+  });
+  if (i < words.length) out.push(words.slice(i).join(" "));
+  return out;
+}
+
+/// A small menu under a corrected word, to change it back or accept a suggestion.
+function fixMenu(anchor, fix, run) {
+  document.querySelector(".fix-menu")?.remove();
+  const menu = el("div", { class: "fix-menu", role: "dialog" },
+    el("span", {}, ...(fix.applied ? ["Heard “", el("b", {}, fix.raw), "”"] : ["Did they say “", el("b", {}, fix.fixed), "”?"])),
+    el("button", { class: "pill", onmousedown: (e) => e.preventDefault(), onclick: () => { menu.remove(); run(); } },
+      fix.applied ? `Change back to “${fix.raw}”` : `Use “${fix.fixed}”`));
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 288))}px`;
+  menu.style.top = `${r.bottom + 6}px`;
+  document.body.append(menu);
+  const close = (e) => {
+    if (menu.contains(e.target)) return;
+    menu.remove();
+    document.removeEventListener("mousedown", close, true);
+  };
+  setTimeout(() => document.addEventListener("mousedown", close, true));
+}
+
 function toggleRow(label, detail, checked, onChange) {
   const box = el("input", { type: "checkbox", class: "switch", checked, "aria-label": label });
   box.addEventListener("change", () => onChange(box.checked, box));
@@ -2500,7 +2738,8 @@ async function showSettings() {
   showPage();
   view = { kind: "settings" };
   refreshItems();
-  const [fresh, ready, prints] = await Promise.all([invoke("get_prefs"), invoke("model_ready"), invoke("list_voiceprints").catch(() => [])]);
+  const [fresh, ready, prints, terms] = await Promise.all([invoke("get_prefs"), invoke("model_ready"), invoke("list_voiceprints").catch(() => []),
+    invoke("list_vocabulary").catch(() => [])]);
   prefs = fresh;
   const page = el("div", { class: "page" }, el("h1", {}, "Settings"));
 
@@ -2547,6 +2786,8 @@ async function showSettings() {
     page.append(el("h2", {}, "This phone"), el("div", { class: "group" },
       linkRow("App permissions", "Microphone, Bluetooth, notifications", () => showPermissions())));
   }
+  page.append(el("h2", {}, "Transcription"), el("div", { class: "group" },
+    linkRow("Vocabulary", terms.length ? `${terms.length} word${terms.length === 1 ? "" : "s"}` : "Spell names and acronyms your way", () => showVocabulary())));
   page.append(el("h2", {}, "Voices"), el("div", { class: "group" },
     linkRow("Voice prints", prints.length ? `${prints.length} saved` : "None yet", () => showVoicePrints()),
     linkRow("Default microphone and voice print", prefs.enrol_input ?? "Not set up", () => showOnboarding(SETUP.voice)),
@@ -2829,7 +3070,7 @@ async function showOnboarding(step = SETUP.welcome) {
     });
     page.classList.add("welcome");
     page.append(
-      el("h1", { class: "welcome-title" }, "Welcome to ", el("span", { class: "product" }, "Voice"), " ", el("span", { class: "by" }, "by"), " ",
+      el("h1", { class: "welcome-title" }, el("span", { class: "product" }, "Voice"), " ", el("span", { class: "by" }, "by"), " ",
         el("span", { class: "welcome-logo", role: "img", "aria-label": "Superteem" },
           el("img", { class: "logo-light-mode", src: "logo-light-mode.png", alt: "" }),
           el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" }))),

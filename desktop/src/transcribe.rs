@@ -249,11 +249,12 @@ impl Transcriber {
             .map_err(|e| e.to_string())
     }
 
-    /// Returns the words between two sample positions, or an empty string if there are none.
-    pub fn transcribe(&self, pcm: &[i16], start: usize, end: usize) -> Result<String, String> {
+    /// Returns the words between two sample positions, or an empty string if there are none. `prompt` steers
+    /// spelling, as with the person's vocabulary.
+    pub fn transcribe(&self, pcm: &[i16], start: usize, end: usize, prompt: Option<&str>) -> Result<String, String> {
         let from = start.saturating_sub(PADDING_SAMPLES).min(pcm.len());
         let to = (end + PADDING_SAMPLES).min(pcm.len());
-        self.run(&pcm[from..to], None)
+        self.run(&pcm[from..to], prompt)
     }
 
     /// Transcribes all of `pcm`, with `prompt` as the words heard just before, to steer spelling.
@@ -419,7 +420,7 @@ mod tests {
         let data = std::fs::read(std::env::var("STV_TEST_WAV").unwrap()).unwrap();
         let at = data.windows(4).position(|w| w == b"data").unwrap() + 8;
         let pcm: Vec<i16> = data[at..].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
-        let text = Transcriber::load().unwrap().transcribe(&pcm, 0, pcm.len()).unwrap();
+        let text = Transcriber::load().unwrap().transcribe(&pcm, 0, pcm.len(), None).unwrap();
         println!("{text}");
         assert!(text.to_lowercase().contains(&std::env::var("STV_TEST_EXPECT").unwrap().to_lowercase()));
     }
