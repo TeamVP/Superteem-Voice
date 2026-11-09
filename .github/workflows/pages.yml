@@ -11,7 +11,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # Write, to make the commit object each deployment is named after (see "Deploy to GitHub Pages").
+  contents: write
   pages: write
   id-token: write
 
@@ -57,10 +58,11 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
-      # actions/deploy-pages names each deployment after the commit, and GitHub Pages treats a second
-      # deployment of a commit it has already deployed as done without publishing it. A release tagged on a
-      # commit whose site changes were deployed on push then left the page offering the previous release.
-      # So each run is deployed under its own name, through the same API deploy-pages uses.
+      # GitHub Pages names each deployment after a commit, and treats a second deployment of a commit it has
+      # already deployed as done without publishing it. A release tagged on a commit whose site changes were
+      # deployed on push then left the page offering the previous release. So each run makes its own commit
+      # object (the same files and parent, on no branch) and deploys under that, through the same API
+      # actions/deploy-pages uses.
       - id: deployment
         name: Deploy to GitHub Pages
         env:
@@ -69,15 +71,11 @@ jobs:
         run: |
           set -o pipefail
           oidc=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -r .value)
-          version="$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          echo "Artifact $ARTIFACT_ID, sign-in token of ${#oidc} characters"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[] | "\(.id) \(.name)"'
+          tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq .tree.sha)
+          version=$(gh api -X POST "repos/$GITHUB_REPOSITORY/git/commits" -f tree="$tree" -f "parents[]=$GITHUB_SHA" \
+            -f message="Download page deployment, run $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT" --jq .sha)
           created=$(gh api -X POST "repos/$GITHUB_REPOSITORY/pages/deployments" \
-            -F artifact_id="$ARTIFACT_ID" -f pages_build_version="$version" -f oidc_token="$oidc") || {
-            gh api -i -X POST "repos/$GITHUB_REPOSITORY/pages/deployments" \
-              -F artifact_id="$ARTIFACT_ID" -f pages_build_version="$version" -f oidc_token="$oidc" | grep -iv "^authorization" || true
-            exit 1
-          }
+            -F artifact_id="$ARTIFACT_ID" -f pages_build_version="$version" -f oidc_token="$oidc")
           id=$(jq -r .id <<< "$created")
           echo "page_url=$(jq -r .page_url <<< "$created")" >> "$GITHUB_OUTPUT"
           echo "Deployment $id for $version"
