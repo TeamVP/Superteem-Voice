@@ -573,3 +573,19 @@ button.more-link:hover { color: var(--text); text-decoration: underline; }
   .ticks span.done { animation: none; }
 }
 .welcome.all-set { max-width: 780px; }
+
+/* The first page sits in the middle of the window, with room between its parts, and clear of a phone's
+   status bar. */
+.welcome:not(.all-set) {
+  margin: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
+  min-height: 100%; box-sizing: border-box;
+  padding-top: max(48px, calc(env(safe-area-inset-top, 0px) + 32px));
+  padding-bottom: max(48px, calc(env(safe-area-inset-bottom, 0px) + 32px));
+}
+.welcome:not(.all-set) .welcome-title { margin: 0 0 20px; line-height: 1.35; }
+.welcome:not(.all-set) .lead { margin: 0 0 56px; line-height: 1.6; text-wrap: balance; }
+.welcome:not(.all-set) .legend { margin: 0 0 20px; }
+@media (max-width: 720px) {
+  .welcome:not(.all-set) .welcome-title { font-size: 30px; }
+  .welcome:not(.all-set) .lead { font-size: 18px; margin-bottom: 64px; }
+}
