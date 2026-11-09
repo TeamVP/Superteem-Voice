@@ -41,6 +41,35 @@ jobs:
           workspaces: desktop
           # Changed when how whisper.cpp is compiled changes, so an old build of it isn't reused.
           prefix-key: v1-portable-cpu
+      # Tauri downloads NSIS and its plugin from GitHub release links, which have returned 504 for hours at a
+      # time while the same files came through the API. They are fetched that way, with the hashes Tauri
+      # 2.12 checks, into the folder Tauri looks in first.
+      - name: Fetch the installer tools
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          function Fetch($repo, $tag, $name, $sha1, $out) {
+            $id = gh api "repos/$repo/releases/tags/$tag" --jq ".assets[] | select(.name == `"$name`") | .id"
+            if (-not $id) { throw "$name is not in $repo $tag" }
+            curl.exe -sSfL --retry 5 --retry-all-errors -H "Authorization: Bearer $env:GH_TOKEN" -H 'Accept: application/octet-stream' `
+              "https://api.github.com/repos/$repo/releases/assets/$id" -o $out
+            if ($LASTEXITCODE -ne 0) { throw "Could not download $name" }
+            $hash = (Get-FileHash $out -Algorithm SHA1).Hash
+            if ($hash -ne $sha1) { throw "$name has hash $hash, expected $sha1" }
+          }
+          $tools = Join-Path $env:LOCALAPPDATA 'tauri'
+          $nsis = Join-Path $tools 'NSIS'
+          if (-not (Test-Path (Join-Path $nsis 'makensis.exe'))) {
+            New-Item -ItemType Directory -Force $tools | Out-Null
+            $zip = Join-Path $env:RUNNER_TEMP 'nsis.zip'
+            Fetch 'tauri-apps/binary-releases' 'nsis-3.13' 'nsis-3.13.zip' 'DB14F8AF2EA346B786C6AE19343F61AAF5E09B8E' $zip
+            Expand-Archive $zip $tools -Force
+            Rename-Item (Join-Path $tools 'nsis-3.13') 'NSIS'
+          }
+          $additional = Join-Path $nsis 'Plugins\x86-unicode\additional'
+          New-Item -ItemType Directory -Force $additional | Out-Null
+          Fetch 'tauri-apps/nsis-tauri-utils' 'nsis_tauri_utils-v0.5.3' 'nsis_tauri_utils.dll' '75197FEE3C6A814FE035788D1C34EAD39349B860' (Join-Path $additional 'nsis_tauri_utils.dll')
       - name: Build the installer
         shell: pwsh
         run: |
