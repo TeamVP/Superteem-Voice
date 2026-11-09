@@ -705,3 +705,11 @@ button.more-link:hover { color: var(--text); text-decoration: underline; }
   border-radius: 12px; background: var(--warn-bg); font-size: 13px; }
 .update-bar .label { flex: 1 1 100%; }
 .update-bar .label small { display: block; color: var(--muted); }
+
+/* Delete menu: the whole meeting, or only its audio. */
+.delete-menu .menu button[disabled] { opacity: 0.55; cursor: default; }
+.delete-menu .menu button[disabled]:hover { background: transparent; }
+.notice.confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.notice.confirm[hidden] { display: none; }
+.notice.confirm p { flex-basis: 100%; }
+button.primary.danger-fill { background: #c0262d; border-color: #c0262d; color: #fff; }

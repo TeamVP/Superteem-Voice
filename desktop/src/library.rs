@@ -132,6 +132,9 @@ pub struct Meta {
     /// Where the meeting is in the person's own workflow; empty when not set.
     #[serde(default)]
     pub status: String,
+    /// The audio was deleted to save space; only the transcript is left, so it can't be processed again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub compacted: bool,
 }
 
 /// Workflow states a note or meeting can be in. Empty is the default: no status yet.
@@ -248,6 +251,7 @@ pub struct Summary {
     pub preview: String,
     pub needs_processing: bool,
     pub status: String,
+    pub compacted: bool,
 }
 
 /// Newest first. A query matches the title, a speaker name or any transcript text, ignoring case.
@@ -278,6 +282,7 @@ pub fn list(query: &str, busy: &[String]) -> Vec<Summary> {
             preview,
             needs_processing,
             status: meta.status,
+            compacted: meta.compacted,
         });
     }
     out.sort_by(|a, b| b.created.cmp(&a.created).then(b.id.cmp(&a.id)));
@@ -292,6 +297,44 @@ pub fn delete(id: &str) -> Result<(), String> {
     return trash::delete(dir).map_err(|e| e.to_string());
     #[cfg(target_os = "android")]
     return fs::remove_dir_all(dir).map_err(|e| e.to_string());
+}
+
+/// A session's recorded audio: the WAV per microphone and the raw journals they were made from.
+pub fn audio_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "wav" || x == "stvj"))
+        .collect();
+    files.sort();
+    files
+}
+
+/// Bytes the audio takes, which compacting frees.
+pub fn audio_bytes(dir: &Path) -> u64 {
+    audio_files(dir).iter().filter_map(|p| fs::metadata(p).ok()).map(|m| m.len()).sum()
+}
+
+/// Deletes a session's audio for good, keeping its transcript, names, markers and exports.
+/// Marked first, so a session left with some journals after a failed delete is never processed
+/// from what remains. Returns the bytes freed.
+pub fn compact(dir: &Path) -> Result<u64, String> {
+    if !dir.join(TRANSCRIPT).exists() {
+        return Err("This meeting has no transcript yet, so compacting it would leave nothing.".into());
+    }
+    let mut meta = load_meta(dir);
+    if !meta.compacted {
+        meta.compacted = true;
+        write_json(&dir.join(META), &meta)?;
+    }
+    let mut freed = 0;
+    for file in audio_files(dir) {
+        let len = fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+        fs::remove_file(&file).map_err(|e| format!("Couldn't delete {}: {e}", file.display()))?;
+        freed += len;
+    }
+    Ok(freed)
 }
 
 #[cfg(test)]
@@ -335,6 +378,51 @@ mod tests {
         assert_eq!(load_meta(&dir).title, "Standup");
         let text = fs::read_to_string(dir.join("transcript.txt")).unwrap();
         assert_eq!(text, "[00:00:00.000] Alice: Hello\n[00:00:02.000] Unknown speaker: Hi\n");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compacting_deletes_only_the_audio() {
+        let dir = std::env::temp_dir().join(format!("stv-compact-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let meta = Meta { title: "Standup".into(), ..Meta::default() };
+        let segments = vec![segment(0, "input1", "Hello")];
+        save(&dir, &meta, &segments).unwrap();
+        for (file, bytes) in [("input1.wav", 100), ("input2.wav", 50), ("input1.stvj", 30), ("input1-2.stvj", 20)] {
+            fs::write(dir.join(file), vec![0u8; bytes]).unwrap();
+        }
+        fs::write(dir.join("keyphrases.json"), "[]").unwrap();
+        assert_eq!(audio_bytes(&dir), 200);
+
+        assert_eq!(compact(&dir).unwrap(), 200);
+        assert!(audio_files(&dir).is_empty());
+        assert!(load_meta(&dir).compacted);
+        assert_eq!(load_meta(&dir).title, "Standup");
+        assert_eq!(load_segments(&dir), segments);
+        for kept in ["transcript.txt", "transcript.md", "transcript.srt", "keyphrases.json"] {
+            assert!(dir.join(kept).exists(), "{kept}");
+        }
+        // The transcript can still be edited and saved.
+        let mut edited = segments.clone();
+        edited[0].text = "Hello there".into();
+        save(&dir, &load_meta(&dir), &edited).unwrap();
+        assert!(load_meta(&dir).compacted);
+        assert_eq!(load_segments(&dir)[0].text, "Hello there");
+        // Compacting again does nothing more.
+        assert_eq!(compact(&dir).unwrap(), 0);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_session_without_a_transcript_is_not_compacted() {
+        let dir = std::env::temp_dir().join(format!("stv-compact-none-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("input1.stvj"), [0u8; 10]).unwrap();
+        assert!(compact(&dir).is_err());
+        assert!(dir.join("input1.stvj").exists());
+        assert!(!load_meta(&dir).compacted);
         let _ = fs::remove_dir_all(&dir);
     }
 
