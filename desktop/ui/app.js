@@ -102,9 +102,21 @@ function micHelp(problem) {
   return el("div", { class: "actions" }, el("button", { class: "pill", onclick: () => showPermissions() }, "Check app permissions"));
 }
 
-/// On a phone the list and the page take turns filling the screen.
+/// On a phone the list and the page take turns filling the screen. Opening a page from the list leaves
+/// a step in the history, so Android's Back gesture returns to the list rather than closing the app.
 function showPage() {
+  const fromList = document.body.classList.contains("show-list");
   document.body.classList.remove("show-list");
+  if (fromList && !document.body.classList.contains("setup") && !history.state?.page) {
+    history.pushState({ page: true }, "");
+  }
+}
+
+function backToList() {
+  leave();
+  view = { kind: "home" };
+  document.body.classList.add("show-list");
+  refreshItems();
 }
 
 /// Leaves whatever page was open: stops playback and polling, and saves a note being edited.
@@ -364,10 +376,13 @@ try {
   });
 }
 document.getElementById("back").addEventListener("click", () => {
-  leave();
-  view = { kind: "home" };
-  document.body.classList.add("show-list");
-  refreshItems();
+  // The step left when the page opened is used up, so Back from the list then closes the app.
+  if (history.state?.page) history.back();
+  else backToList();
+});
+window.addEventListener("popstate", () => {
+  if (matchMedia("(max-width: 720px)").matches && !document.body.classList.contains("show-list")
+    && !document.body.classList.contains("setup")) backToList();
 });
 
 // ---------- Home: one button, two modes ----------

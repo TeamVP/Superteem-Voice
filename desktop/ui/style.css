@@ -239,7 +239,9 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .dictating { display: inline-flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 6px 0 16px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); }
 .dictating[hidden], .talk[hidden] { display: none; }
 .dictating .wave { color: var(--key); }
-.dictating .left { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+.dictating .left { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; white-space: nowrap; margin-left: auto; }
+.dictating > span { white-space: nowrap; }
+.dictating .icon-btn { flex: none; }
 .icon-btn { width: 38px; height: 38px; min-height: 0; padding: 0; border-radius: 19px; border: none; display: inline-grid; place-items: center; cursor: pointer; }
 .icon-btn.keep { background: var(--key); color: #fff; }
 .icon-btn.keep:hover { background: var(--key-1); }
@@ -418,8 +420,9 @@ body[data-platform="android"] .windows-only { display: none !important; }
   body.show-list .sidebar { display: flex; }
   body.show-list #main-wrap { display: none; }
   #main-wrap { height: 100%; }
-  .back { display: block; padding: 14px 16px 0; font-size: 15px; }
-  body[data-platform="android"] .back, body[data-platform="android"] .sidebar { padding-top: 36px; }
+  /* "button.link" would otherwise take away the side padding. Android already keeps the page clear of the
+     status bar, so no extra room is needed above. */
+  button.link.back { display: flex; align-items: center; align-self: flex-start; min-height: 44px; padding: 6px 16px; font-size: 15px; }
   .page, .note, .live { padding: 12px 16px 80px; }
   .toolbar, .tracks { padding-left: 12px; padding-right: 12px; }
   h1, .note-title { font-size: 26px; }
@@ -623,5 +626,7 @@ button.more-link:hover { color: var(--text); text-decoration: underline; }
   .permission-action { width: 100%; justify-content: space-between; }
   /* On a phone the dictation bar spans the screen, just above the keyboard when it is open. */
   .toolbar { padding: 8px 12px; }
-  .dictating { flex: 1; justify-content: space-between; gap: 8px; }
+  .dictating { flex: 1; min-width: 0; justify-content: space-between; gap: 10px; padding-left: 14px; }
+  /* While dictating, the bar takes the whole row rather than sharing it with the spacer. */
+  .toolbar:has(.dictating:not([hidden])) .grow { display: none; }
 }
