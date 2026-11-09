@@ -67,10 +67,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_ID: ${{ steps.artifact.outputs.artifact_id }}
         run: |
+          set -o pipefail
           oidc=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -r .value)
           version="$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "Artifact $ARTIFACT_ID, sign-in token of ${#oidc} characters"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[] | "\(.id) \(.name)"'
           created=$(gh api -X POST "repos/$GITHUB_REPOSITORY/pages/deployments" \
-            -F artifact_id="$ARTIFACT_ID" -f pages_build_version="$version" -f oidc_token="$oidc")
+            -F artifact_id="$ARTIFACT_ID" -f pages_build_version="$version" -f oidc_token="$oidc") || {
+            gh api -i -X POST "repos/$GITHUB_REPOSITORY/pages/deployments" \
+              -F artifact_id="$ARTIFACT_ID" -f pages_build_version="$version" -f oidc_token="$oidc" | grep -iv "^authorization" || true
+            exit 1
+          }
           id=$(jq -r .id <<< "$created")
           echo "page_url=$(jq -r .page_url <<< "$created")" >> "$GITHUB_OUTPUT"
           echo "Deployment $id for $version"
