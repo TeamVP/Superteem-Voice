@@ -27,6 +27,14 @@ pub fn model_path() -> PathBuf {
     library::models_dir().join(MODEL_FILE)
 }
 
+pub fn model_file() -> &'static str {
+    MODEL_FILE
+}
+
+pub fn model_url() -> &'static str {
+    MODEL_URL
+}
+
 pub fn model_ready() -> bool {
     std::fs::metadata(model_path()).is_ok_and(|m| m.len() >= MODEL_MIN_BYTES)
 }
@@ -38,7 +46,10 @@ pub fn download_model(progress: impl Fn(f32)) -> Result<(), String> {
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
     let partial = path.with_extension("part");
     let result = (|| -> Result<u64, String> {
-        let response = ureq::get(MODEL_URL).call().map_err(|e| e.to_string())?;
+        let response = agent()?.get(MODEL_URL).call().map_err(|e| match proxy() {
+            Some(p) => format!("{e} (through the proxy {})", p.shown),
+            None => e.to_string(),
+        })?;
         let total: Option<u64> = response.header("Content-Length").and_then(|v| v.parse().ok());
         let mut reader = response.into_reader();
         let mut file = std::fs::File::create(&partial).map_err(|e| e.to_string())?;
@@ -66,6 +77,96 @@ pub fn download_model(progress: impl Fn(f32)) -> Result<(), String> {
             Err(format!("The speech model could not be downloaded: {reason}"))
         }
     }
+}
+
+/// A proxy to download through, and how to show it without its password.
+pub struct ProxyChoice {
+    pub url: String,
+    pub shown: String,
+    /// Where it came from: Settings, an environment variable or Windows.
+    pub source: &'static str,
+}
+
+/// The proxy the person set in Settings, else HTTPS_PROXY and friends, else the Windows proxy setting.
+pub fn proxy() -> Option<ProxyChoice> {
+    let typed = crate::prefs::load().proxy.trim().to_string();
+    if !typed.is_empty() {
+        return Some(choice(&typed, "Settings"));
+    }
+    for var in ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy"] {
+        if let Some(v) = std::env::var(var).ok().filter(|v| !v.trim().is_empty()) {
+            if !no_proxy_for("huggingface.co") {
+                return Some(choice(v.trim(), "environment"));
+            }
+        }
+    }
+    windows_proxy().map(|url| choice(&url, "Windows"))
+}
+
+fn choice(url: &str, source: &'static str) -> ProxyChoice {
+    let url = if url.contains("://") { url.to_string() } else { format!("http://{url}") };
+    // "http://user:secret@host:8080" is shown as "http://user:•••@host:8080".
+    let shown = match (url.find("://"), url.rfind('@')) {
+        (Some(scheme), Some(at)) if at > scheme => {
+            let creds = &url[scheme + 3..at];
+            let user = creds.split(':').next().unwrap_or("");
+            format!("{}{}:•••{}", &url[..scheme + 3], user, &url[at..])
+        }
+        _ => url.clone(),
+    };
+    ProxyChoice { url, shown, source }
+}
+
+fn no_proxy_for(host: &str) -> bool {
+    let list = std::env::var("NO_PROXY").or_else(|_| std::env::var("no_proxy")).unwrap_or_default();
+    list.split(',').map(|s| s.trim().trim_start_matches('.')).any(|s| s == "*" || (!s.is_empty() && (host == s || host.ends_with(&format!(".{s}")))))
+}
+
+/// The proxy set in Windows' proxy settings, if it is turned on.
+#[cfg(windows)]
+fn windows_proxy() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    const NO_WINDOW: u32 = 0x0800_0000;
+    let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+    let read = |name: &str| -> Option<String> {
+        let out = std::process::Command::new("reg").args(["query", key, "/v", name]).creation_flags(NO_WINDOW).output().ok()?;
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        let line = text.lines().find(|l| l.trim_start().starts_with(name))?;
+        line.split_whitespace().nth(2).map(str::to_string)
+    };
+    let enabled = read("ProxyEnable").is_some_and(|v| v.trim_start_matches("0x") != "0");
+    if !enabled {
+        return None;
+    }
+    parse_windows_proxy(&read("ProxyServer")?)
+}
+
+#[cfg(not(windows))]
+fn windows_proxy() -> Option<String> {
+    None
+}
+
+/// Windows keeps either "host:port" for everything or "http=host:port;https=host:port;socks=host:port".
+fn parse_windows_proxy(server: &str) -> Option<String> {
+    let server = server.trim();
+    if server.is_empty() {
+        return None;
+    }
+    if !server.contains('=') {
+        return Some(server.to_string());
+    }
+    let parts: Vec<(&str, &str)> = server.split(';').filter_map(|p| p.split_once('=')).map(|(k, v)| (k.trim(), v.trim())).collect();
+    let find = |k: &str| parts.iter().find(|(key, v)| key.eq_ignore_ascii_case(k) && !v.is_empty()).map(|(_, v)| v.to_string());
+    find("https").or_else(|| find("http")).or_else(|| find("socks").map(|v| format!("socks5://{v}")))
+}
+
+fn agent() -> Result<ureq::Agent, String> {
+    let mut builder = ureq::AgentBuilder::new();
+    if let Some(p) = proxy() {
+        let proxy = ureq::Proxy::new(&p.url).map_err(|e| format!("The proxy {} isn't usable: {e}", p.shown))?;
+        builder = builder.proxy(proxy);
+    }
+    Ok(builder.build())
 }
 
 /// Whisper labels non-speech as "[BLANK_AUDIO]" or "(wind blowing)", which is not what anyone said.
@@ -227,6 +328,23 @@ fn looped(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_proxy_settings_are_read() {
+        assert_eq!(parse_windows_proxy("proxy.corp:8080").as_deref(), Some("proxy.corp:8080"));
+        assert_eq!(parse_windows_proxy("http=a:80;https=b:443").as_deref(), Some("b:443"));
+        assert_eq!(parse_windows_proxy("http=a:80;ftp=c:21").as_deref(), Some("a:80"));
+        assert_eq!(parse_windows_proxy("socks=s:1080").as_deref(), Some("socks5://s:1080"));
+        assert_eq!(parse_windows_proxy(" "), None);
+    }
+
+    #[test]
+    fn proxy_passwords_are_not_shown() {
+        let p = choice("http://me:secret@proxy:8080", "Settings");
+        assert_eq!(p.url, "http://me:secret@proxy:8080");
+        assert_eq!(p.shown, "http://me:•••@proxy:8080");
+        assert_eq!(choice("proxy:3128", "Windows").url, "http://proxy:3128");
+    }
 
     #[test]
     fn non_speech_labels_are_removed() {

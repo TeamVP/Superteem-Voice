@@ -14,7 +14,8 @@ stv-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = ["protocol-asset", "custom-protocol"] }
-ureq = "2"
+# The OS trust store and SOCKS, so downloads work behind company proxies.
+ureq = { version = "2", features = ["native-certs", "socks-proxy"] }
 whisper-rs = "0.16"
 
 # Android records in its Kotlin foreground service, so these are Windows only.

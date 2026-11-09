@@ -14,7 +14,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use stv_core::attribute::window_db;
-use stv_core::kws::Spotter;
+use stv_core::kws::{Spotter, Template};
 
 /// Biases dictation towards the app's name, which whisper otherwise hears as "super team". Phrases the
 /// listener hears are never given it: on a tap or a cough whisper repeats the prompt back, which read as
@@ -24,6 +24,49 @@ const PROMPT: &str = "Hey Superteem.";
 static TRANSCRIBER: Mutex<Option<Transcriber>> = Mutex::new(None);
 static ON_HEARD: OnceLock<Box<dyn Fn(String) + Send + Sync>> = OnceLock::new();
 static ON_PHRASE: OnceLock<Box<dyn Fn(Heard) + Send + Sync>> = OnceLock::new();
+static ON_PRACTICE: OnceLock<Box<dyn Fn(Practice) + Send + Sync>> = OnceLock::new();
+/// Good takes of the wake word said so far while practising it, each as said and with noise added.
+static PRACTICE: Mutex<Vec<Vec<Template>>> = Mutex::new(Vec::new());
+
+/// One go at saying "Hey Superteem" while practising it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Practice {
+    /// It counted.
+    pub ok: bool,
+    /// Good takes so far.
+    pub good: usize,
+    /// What speech to text heard, when the model is there.
+    pub heard: String,
+    /// Why it didn't count.
+    pub reason: String,
+}
+
+pub fn on_practice(f: impl Fn(Practice) + Send + Sync + 'static) {
+    let _ = ON_PRACTICE.set(Box::new(f));
+}
+
+/// Checks one thing said while practising, and keeps it if it was the wake word.
+fn practise(pcm: &[i16]) {
+    let spec = keyphrases::spec(keyphrases::WAKE).unwrap();
+    let result = keyphrases::take_from_utterance(spec, pcm);
+    let mut takes = PRACTICE.lock().unwrap();
+    let report = match result {
+        Ok((t, heard)) => {
+            takes.push(t);
+            Practice { ok: true, good: takes.len(), heard, reason: String::new() }
+        }
+        Err(reason) => Practice { ok: false, good: takes.len(), heard: String::new(), reason },
+    };
+    drop(takes);
+    if let Some(f) = ON_PRACTICE.get() {
+        f(report);
+    }
+}
+
+/// The good takes from practice, which are cleared.
+pub fn practice_takes() -> Vec<Template> {
+    std::mem::take(&mut *PRACTICE.lock().unwrap()).into_iter().flatten().collect()
+}
 /// Bumped when key phrases are trained, so the listener picks them up.
 static PHRASES_VERSION: AtomicU32 = AtomicU32::new(0);
 
@@ -115,8 +158,13 @@ impl Hearing {
     pub fn new() -> Self {
         let (models, prints) = keyphrases::models();
         let trained = (!models.is_empty()).then(|| Trained { spotter: Spotter::new(models), prints, verify: crate::prefs::load().kws_verify });
+        Self { trained, ..Self::untrained() }
+    }
+
+    /// Hears where phrases start and end, without listening for trained ones.
+    pub fn untrained() -> Self {
         Self {
-            trained,
+            trained: None,
             floor_db: -60.0,
             preroll: VecDeque::new(),
             phrase: Vec::new(),
@@ -263,6 +311,8 @@ mod imp {
         dictating: bool,
         dictation: Vec<i16>,
         level_db: f32,
+        /// Set while setup has the person practise "Hey Superteem": each thing said is checked and kept.
+        practising: bool,
     }
 
     struct Running {
@@ -271,14 +321,23 @@ mod imp {
     }
 
     static EAR: Mutex<Ear> =
-        Mutex::new(Ear { wake: false, muted: false, attentive: false, paused: false, dictating: false, dictation: Vec::new(), level_db: -90.0 });
+        Mutex::new(Ear {
+        wake: false,
+        muted: false,
+        attentive: false,
+        paused: false,
+        dictating: false,
+        dictation: Vec::new(),
+        level_db: -90.0,
+        practising: false,
+    });
     static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
 
     /// Opens the microphone when something needs it and closes it when nothing does.
     fn sync_microphone() -> Result<(), String> {
         let needed = {
             let ear = EAR.lock().unwrap();
-            ear.wake || ear.dictating
+            ear.wake || ear.dictating || ear.practising
         };
         let mut running = RUNNING.lock().unwrap();
         if needed && running.is_none() {
@@ -296,7 +355,7 @@ mod imp {
 
     fn open() -> Result<Running, String> {
         let stop = Arc::new(AtomicBool::new(false));
-        let (phrases_tx, phrases_rx) = mpsc::channel::<Vec<i16>>();
+        let (phrases_tx, phrases_rx) = mpsc::channel::<(Vec<i16>, bool)>();
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
         let mic = {
             let stop = stop.clone();
@@ -308,7 +367,11 @@ mod imp {
         };
         // Phrases are transcribed on their own thread so listening never stalls behind whisper.
         let words = thread::spawn(move || {
-            for phrase in phrases_rx {
+            for (phrase, practice) in phrases_rx {
+                if practice {
+                    practise(&phrase);
+                    continue;
+                }
                 if let Ok(text) = transcribe_phrase(&phrase) {
                     if !text.is_empty() {
                         if let Some(on_heard) = ON_HEARD.get() {
@@ -325,7 +388,7 @@ mod imp {
         }
     }
 
-    fn run_microphone(stop: &AtomicBool, phrases: mpsc::Sender<Vec<i16>>, ready: &mpsc::Sender<Result<(), String>>) -> Result<(), String> {
+    fn run_microphone(stop: &AtomicBool, phrases: mpsc::Sender<(Vec<i16>, bool)>, ready: &mpsc::Sender<Result<(), String>>) -> Result<(), String> {
         // The microphone chosen when the person's voice print was made, while it is still connected.
         let host = cpal::default_host();
         let chosen = crate::prefs::load().enrol_input;
@@ -360,6 +423,7 @@ mod imp {
 
         let mut pending: Vec<i16> = Vec::new();
         let mut hearing = Hearing::new();
+        let mut practice = Hearing::untrained();
         let mut version = PHRASES_VERSION.load(Ordering::Relaxed);
         let mut events = Vec::new();
         while !stop.load(Ordering::Relaxed) {
@@ -375,7 +439,7 @@ mod imp {
             while pending.len() >= FRAME_SAMPLES {
                 let frame: Vec<i16> = pending.drain(..FRAME_SAMPLES).collect();
                 let db = window_db(&frame, FRAME_SAMPLES)[0];
-                let (listening, attentive) = {
+                let (listening, attentive, practising) = {
                     let mut ear = EAR.lock().unwrap();
                     ear.level_db = db;
                     if ear.dictating && ear.dictation.len() < MAX_DICTATION {
@@ -384,8 +448,20 @@ mod imp {
                     // While dictating, only trained phrases are listened for, so "Hey Superteem, stop recording"
                     // can end it without every word being transcribed twice.
                     let dictating = ear.dictating && !hearing.trained();
-                    (ear.wake && !ear.muted && !ear.paused && !dictating, ear.attentive && !ear.dictating)
+                    (ear.wake && !ear.muted && !ear.paused && !dictating, ear.attentive && !ear.dictating, ear.practising && !ear.muted)
                 };
+                // Practising the wake word: every phrase said is checked, and nothing is acted on.
+                if practising {
+                    hearing.interrupt();
+                    practice.push(&frame, true, &mut events);
+                    for event in events.drain(..) {
+                        if let Event::Speech(pcm) = event {
+                            let _ = phrases.send((pcm, true));
+                        }
+                    }
+                    continue;
+                }
+                practice.interrupt();
                 // While the app speaks it would hear itself.
                 if !listening {
                     hearing.interrupt();
@@ -400,7 +476,7 @@ mod imp {
                             }
                         }
                         Event::Speech(pcm) => {
-                            let _ = phrases.send(pcm);
+                            let _ = phrases.send((pcm, false));
                         }
                     }
                 }
@@ -425,6 +501,15 @@ mod imp {
 
     pub fn set_paused(paused: bool) {
         EAR.lock().unwrap().paused = paused;
+    }
+
+    /// Starts or ends practising the wake word. Starting forgets earlier takes.
+    pub fn set_practising(on: bool) -> Result<(), String> {
+        if on {
+            PRACTICE.lock().unwrap().clear();
+        }
+        EAR.lock().unwrap().practising = on;
+        sync_microphone().inspect_err(|_| EAR.lock().unwrap().practising = false)
     }
 
     pub fn dictate_start() -> Result<(), String> {
@@ -488,6 +573,14 @@ mod imp {
     pub fn set_attentive(_attentive: bool) {}
 
     pub fn set_paused(_paused: bool) {}
+
+    pub fn set_practising(on: bool) -> Result<(), String> {
+        if on {
+            Err(NOT_YET.into())
+        } else {
+            Ok(())
+        }
+    }
 
     pub fn dictate_start() -> Result<(), String> {
         Err(NOT_YET.into())

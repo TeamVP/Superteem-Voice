@@ -161,6 +161,41 @@ fn model_ready() -> bool {
     transcribe::model_ready()
 }
 
+#[derive(Serialize)]
+struct ModelInfo {
+    ready: bool,
+    folder: String,
+    file: &'static str,
+    url: &'static str,
+    /// The proxy downloads go through, shown without its password, and where it was set.
+    proxy: Option<String>,
+    proxy_source: Option<&'static str>,
+}
+
+#[tauri::command]
+fn model_info() -> ModelInfo {
+    let proxy = transcribe::proxy();
+    ModelInfo {
+        ready: transcribe::model_ready(),
+        folder: library::models_dir().to_string_lossy().into_owned(),
+        file: transcribe::model_file(),
+        url: transcribe::model_url(),
+        proxy_source: proxy.as_ref().map(|p| p.source),
+        proxy: proxy.map(|p| p.shown),
+    }
+}
+
+/// Opens the folder the speech model goes in, creating it, so the file can be put there by hand.
+#[tauri::command]
+fn open_models_folder() -> Result<(), String> {
+    if cfg!(target_os = "android") {
+        return Err("Folders can't be opened on Android.".into());
+    }
+    let dir = library::models_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn download_model<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     blocking(move || transcribe::download_model(|f| drop(app.emit("model-download", f)))).await?
@@ -768,8 +803,9 @@ fn list_keyphrases(print: Option<String>) -> KeyphrasesView {
                 does: s.does,
                 how: s.how,
                 after: s.requires.and_then(keyphrases::spec).map(|r| r.text),
-                takes: phrase.map_or(0, |p| p.said()),
-                separation: phrase.and_then(|p| p.calibration).map(|c| c.separation),
+                // A wake word from before takes were checked has to be trained again.
+                takes: phrase.filter(|p| p.checked || s.id != keyphrases::WAKE).map_or(0, |p| p.said()),
+                separation: phrase.filter(|p| p.usable(s.id)).and_then(|p| p.calibration).map(|c| c.separation),
                 updated: phrase.map_or(0, |p| p.updated),
             }
         })
@@ -827,6 +863,27 @@ async fn stop_phrase_training<R: Runtime>(app: AppHandle<R>, save: bool) -> Resu
     result?
 }
 
+/// Setup's practice of "Hey Superteem": each time it is said it is checked, and a "wake-practice" event
+/// says whether it counted.
+#[tauri::command]
+fn start_wake_practice(state: State<'_, AppState>) -> Result<(), String> {
+    if state.busy() {
+        return Err("Already recording.".into());
+    }
+    listen::set_practising(true)
+}
+
+/// Ends the practice. With `print`, its good takes become that voice print's wake word.
+#[tauri::command]
+async fn stop_wake_practice(print: Option<String>) -> Result<Option<keyphrases::TrainResult>, String> {
+    listen::set_practising(false)?;
+    let takes = listen::practice_takes();
+    let Some(print) = print else { return Ok(None) };
+    let result = blocking(move || keyphrases::save_checked(&print, keyphrases::WAKE, takes)).await??;
+    listen::phrases_changed();
+    Ok(Some(result))
+}
+
 #[tauri::command]
 fn clear_keyphrase(print: String, phrase: String) -> Result<(), String> {
     keyphrases::clear(&print, &phrase)?;
@@ -862,8 +919,12 @@ fn save_prefs(
     hidden_mics: Option<Vec<String>>,
     pins_added: Option<bool>,
     keep_audio: Option<bool>,
+    proxy: Option<String>,
 ) -> Result<(), String> {
     prefs::update(|p| {
+        if let Some(proxy) = proxy {
+            p.proxy = proxy.trim().to_string();
+        }
         if let Some(keep) = keep_audio {
             p.keep_audio = keep;
         }
@@ -1055,6 +1116,8 @@ pub fn run() {
             }
             let handle = app.handle().clone();
             let phrases = handle.clone();
+            let practice = app.handle().clone();
+            listen::on_practice(move |p| drop(practice.emit("wake-practice", p)));
             listen::init(move |text| drop(handle.emit("heard", text)), move |heard| drop(phrases.emit("keyphrase", heard)));
             std::thread::spawn(notes::purge_old_audio);
             let root = library::root();
@@ -1097,6 +1160,10 @@ pub fn run() {
             save_prefs,
             delete_session,
             open_folder,
+            start_wake_practice,
+            stop_wake_practice,
+            model_info,
+            open_models_folder,
             save_markers,
             save_consent,
             processing_queue,

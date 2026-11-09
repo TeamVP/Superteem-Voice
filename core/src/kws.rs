@@ -338,7 +338,11 @@ pub fn find_takes(pcm: &[i16]) -> Vec<(usize, usize)> {
 /// The takes in a recording of someone saying a phrase several times, ready to keep: each as said, then
 /// each again with noise added.
 pub fn takes_from(pcm: &[i16]) -> Vec<Template> {
-    let spans = find_takes(pcm);
+    takes_at(pcm, &find_takes(pcm))
+}
+
+/// The takes at the given sample ranges of a recording, as `takes_from` makes them.
+pub fn takes_at(pcm: &[i16], spans: &[(usize, usize)]) -> Vec<Template> {
     let cut = |frames: Vec<Frame>, noisy: bool| -> Vec<Template> {
         spans
             .iter()
@@ -353,6 +357,47 @@ pub fn takes_from(pcm: &[i16]) -> Vec<Template> {
         out.extend(cut(features_of(&with_noise(pcm, speech_rms / 10f32.powf(snr / 20.0), i as u32 + 1)), true));
     }
     out
+}
+
+/// Analysis frames for voicing: 30 ms every 15 ms.
+const VOICE_FRAME: usize = 480;
+const VOICE_HOP: usize = 240;
+/// Pitch from 80 to 400 Hz, which covers adult and children's voices.
+const MIN_LAG: usize = RATE as usize / 400;
+const MAX_LAG: usize = RATE as usize / 80;
+/// A frame is voiced when it repeats itself this closely at some pitch.
+const VOICED_CORRELATION: f32 = 0.55;
+
+/// Seconds of voiced sound (vowels and other sounds with a pitch) among the loud parts of `pcm`. Speech is
+/// mostly voiced; keyboard taps, clicks, knocks and breaths have no pitch, so they score near zero.
+pub fn voiced_seconds(pcm: &[i16]) -> f32 {
+    if pcm.len() < VOICE_FRAME + MAX_LAG {
+        return 0.0;
+    }
+    let x: Vec<f32> = pcm.iter().map(|&s| s as f32 / 32768.0).collect();
+    let energy = |f: &[f32]| f.iter().map(|v| v * v).sum::<f32>();
+    let frames: Vec<usize> = (0..x.len() - VOICE_FRAME - MAX_LAG).step_by(VOICE_HOP).collect();
+    // Only frames within 30 dB of the loudest count, so a quiet room's hum isn't taken as a voice.
+    let loudest = frames.iter().map(|&i| energy(&x[i..i + VOICE_FRAME])).fold(0.0f32, f32::max);
+    if loudest <= 1e-9 {
+        return 0.0;
+    }
+    let voiced = frames
+        .iter()
+        .filter(|&&i| {
+            let a = &x[i..i + VOICE_FRAME];
+            let ea = energy(a);
+            if ea < loudest * 1e-3 {
+                return false;
+            }
+            (MIN_LAG..=MAX_LAG).any(|lag| {
+                let b = &x[i + lag..i + lag + VOICE_FRAME];
+                let r = a.iter().zip(b).map(|(p, q)| p * q).sum::<f32>() / (ea * energy(b)).sqrt().max(1e-12);
+                r > VOICED_CORRELATION
+            })
+        })
+        .count();
+    (voiced * VOICE_HOP) as f32 / RATE as f32
 }
 
 /// Adds noise of the given loudness, half hiss and half rumble, like a room with a fan in it.
@@ -711,6 +756,26 @@ mod tests {
             assert!(back.data.iter().zip(&t.data).all(|(a, b)| (a - b).abs() <= 0.0005), "{n}");
             assert_eq!(back.noisy, t.noisy);
         }
+    }
+
+    #[test]
+    fn taps_are_not_voiced_and_speech_is() {
+        let speech = word(WAKE, 140.0, 1.0, 3);
+        assert!(voiced_seconds(&speech) > 0.3, "{}", voiced_seconds(&speech));
+        // Keyboard taps: a click every 120 ms, a decaying burst of noise each.
+        let mut taps = vec![0i16; RATE as usize];
+        let mut x = 12345u32;
+        for start in (0..taps.len() - 800).step_by(1920) {
+            for i in 0..800 {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                let n = (x as f32 / u32::MAX as f32 - 0.5) * 20000.0 * (-(i as f32) / 120.0).exp();
+                taps[start + i] = n as i16;
+            }
+        }
+        assert!(voiced_seconds(&taps) < 0.1, "{}", voiced_seconds(&taps));
+        assert_eq!(voiced_seconds(&[0; 16000]), 0.0);
     }
 
     #[test]

@@ -539,3 +539,34 @@ dialog.terms p { margin: 0; font-size: 14px; color: var(--soft); }
 @media (prefers-reduced-motion: reduce) {
   .hello-mic.on, .celebrate .badge, .celebrate .badge::after { animation: none; }
 }
+
+/* Setup pages: the heading with "Skip this step" on its right, and less space above. */
+.setup-page { padding-top: 28px; }
+.setup-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.skip-link { flex: none; display: inline-flex; align-items: center; gap: 2px; margin-top: 4px; padding: 6px 8px 6px 14px; min-height: 0;
+  border: 1px solid transparent; border-radius: 999px; background: none; color: var(--accent-text); font-size: 14px; font-weight: 500; }
+.skip-link:hover { background: var(--raised); border-color: var(--line); color: var(--text); }
+.welcome-title { font-size: 34px; }
+/* The logo stands in for the word: its "p" hangs below the line like the text's would. */
+.welcome-title .welcome-logo { display: inline-block; margin: 0; line-height: 0; vertical-align: -0.21em; }
+.welcome-title .welcome-logo img { height: 1.08em; width: auto; }
+.welcome .legend { margin: 0 0 14px; }
+.welcome .actions { margin-top: 0; }
+.setup-page .script { font-size: 18px; line-height: 1.6; padding: 14px 20px; margin: 10px 0; }
+.hello-mic { cursor: default; }
+.ticks span { width: 48px; height: 48px; border-radius: 24px; transition: background 0.2s, border-color 0.2s; }
+.ticks span.done { animation: pop 0.35s cubic-bezier(0.2, 1.6, 0.4, 1) both; }
+.hello-state { text-align: center; min-height: 1.5em; }
+.hello-actions { justify-content: center; }
+.hello-struggle { max-width: 520px; margin: 16px auto; text-align: center; }
+.all-set h1 { margin-top: 8px; }
+.all-set .actions { margin-top: 24px; }
+.model-group { padding: 0 18px 16px; }
+.model-help h2 { margin-top: 18px; }
+.model-help .field input { flex: 1; max-width: 420px; }
+.model-help code { font-size: 12px; background: var(--raised); padding: 1px 5px; border-radius: 5px; }
+.model-help code.path { word-break: break-all; }
+@media (prefers-reduced-motion: reduce) {
+  .ticks span.done { animation: none; }
+}
+.welcome.all-set { max-width: 780px; }

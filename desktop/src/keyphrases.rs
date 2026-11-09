@@ -19,6 +19,8 @@ pub struct Spec {
     pub requires: Option<&'static str>,
     /// One line per take, so the takes cover the ways the person really says it.
     pub how: &'static [&'static str],
+    /// Parts of the words that speech to text must hear in a take, lower case, for it to count.
+    pub sounds: &'static [&'static str],
 }
 
 pub const WAKE: &str = "wake";
@@ -41,6 +43,7 @@ pub const PHRASES: &[Spec] = &[
             "Mid-sentence, as in \"…so, hey Superteem\"",
             "As \"Hi Superteem\" or \"Okay Superteem\", if you might say that",
         ],
+        sounds: &["super t", "supert", "super st", "superst", "souper t"],
     },
     Spec {
         id: "bookmark",
@@ -48,6 +51,7 @@ pub const PHRASES: &[Spec] = &[
         does: "Marks the moment in the transcript.",
         requires: None,
         how: &["Normally", "Quickly", "Slowly and clearly", "Quietly"],
+        sounds: &["book"],
     },
     Spec {
         id: "action",
@@ -55,6 +59,7 @@ pub const PHRASES: &[Spec] = &[
         does: "Marks an action item. It's heard whenever it's said, as that is when it matters.",
         requires: None,
         how: &["Normally", "Quickly, as in \"action item for Raj\"", "Slowly and clearly", "Quietly"],
+        sounds: &["action", "acting"],
     },
     Spec {
         id: "stop",
@@ -62,6 +67,7 @@ pub const PHRASES: &[Spec] = &[
         does: "Stops the recording, but only straight after \"Hey Superteem\".",
         requires: Some(WAKE),
         how: &["Normally", "Quickly", "Slowly and clearly", "Quietly"],
+        sounds: &["stop"],
     },
 ];
 
@@ -72,6 +78,12 @@ pub const MAX_TAKES: usize = 12;
 const VERIFY_MIN: f32 = 0.25;
 /// The same phrase heard on two microphones this close together is one hit.
 const SAME_HIT_S: f64 = 1.0;
+/// A take, and a hit heard live, must have at least this much voiced sound. "Hey Superteem" has about
+/// half a second of it; keyboard taps, clicks and knocks have next to none.
+const MIN_VOICED_S: f32 = 0.18;
+/// A take is a phrase of a few words, not a click or a sentence.
+const MIN_TAKE_S: f32 = 0.35;
+const MAX_TAKE_S: f32 = 2.5;
 /// Hits from the scan of a session are kept in its folder.
 pub const SESSION_FILE: &str = "keyphrases.json";
 
@@ -85,6 +97,10 @@ pub struct Phrase {
     pub takes: Vec<Template>,
     pub calibration: Option<Calibration>,
     pub updated: u64,
+    /// Every take passed the speech check. A wake word trained before the check existed may be keyboard
+    /// taps, which made it wake on typing, so it isn't listened for until it is trained again.
+    #[serde(default)]
+    pub checked: bool,
 }
 
 impl Phrase {
@@ -135,18 +151,87 @@ pub struct TrainResult {
     pub separation: Option<f32>,
 }
 
-/// Adds the takes in a recording of someone saying `phrase` several times, or replaces the old ones.
-pub fn train(print: &str, phrase: &str, pcm: &[i16], replace: bool) -> Result<TrainResult, String> {
+/// Lower-case letters and single spaces, for comparing what speech to text heard.
+fn plain_words(text: &str) -> String {
+    text.to_lowercase().split(|c: char| !c.is_alphabetic()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
+}
+
+/// Whether transcribed words are the phrase: its key sounds are there, and not a whole sentence besides.
+pub fn sounds_like(spec: &Spec, text: &str) -> bool {
+    let words = plain_words(text);
+    let joined = words.replace(' ', "");
+    let count = words.split(' ').filter(|w| !w.is_empty()).count();
+    let expected = spec.text.split_whitespace().count();
+    count <= expected + 3 && spec.sounds.iter().any(|s| words.contains(s) || joined.contains(&s.replace(' ', "")))
+}
+
+/// Checks one take is someone saying the phrase: long enough, voiced like speech rather than taps or
+/// clicks, and, when the speech model is there, heard as the phrase's words. Returns the words heard.
+pub fn check_take(spec: &Spec, pcm: &[i16]) -> Result<String, String> {
+    let seconds = pcm.len() as f32 / RATE as f32;
+    if seconds < MIN_TAKE_S {
+        return Err("That was too short to be speech.".into());
+    }
+    if seconds > MAX_TAKE_S {
+        return Err(format!("That was too long. Say just “{}”, then pause.", spec.text));
+    }
+    if kws::voiced_seconds(pcm) < MIN_VOICED_S {
+        return Err("That didn't sound like a voice. Taps, clicks and other noises aren't counted.".into());
+    }
+    match crate::listen::transcribe_phrase(pcm) {
+        Ok(text) if sounds_like(spec, &text) => Ok(text),
+        Ok(text) if text.trim().is_empty() => Err(format!("No words were heard. Say “{}” clearly.", spec.text)),
+        Ok(text) => Err(format!("That sounded like “{}”, not “{}”.", text.trim(), spec.text)),
+        // Without the speech model only the sound is checked.
+        Err(_) => Ok(String::new()),
+    }
+}
+
+/// The takes of one phrase said once, from a recording that may have a little noise either side.
+pub fn take_from_utterance(spec: &Spec, pcm: &[i16]) -> Result<(Vec<Template>, String), String> {
+    let spans = kws::find_takes(pcm);
+    // The span with the most voice, so a tap before or after it doesn't matter.
+    let best = spans
+        .iter()
+        .map(|&(s, e)| ((s, e), kws::voiced_seconds(&pcm[s..e.min(pcm.len())])))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(span, _)| span)
+        .ok_or_else(|| format!("Nothing clear was heard. Say “{}”, then pause.", spec.text))?;
+    let heard = check_take(spec, &pcm[best.0..best.1.min(pcm.len())])?;
+    Ok((kws::takes_at(pcm, &[best]), heard))
+}
+
+/// Saves takes said one at a time, each already checked, as the whole of a phrase.
+pub fn save_checked(print: &str, phrase: &str, takes: Vec<Template>) -> Result<TrainResult, String> {
     spec(phrase).ok_or("That isn't a key phrase.")?;
-    let takes = kws::takes_from(pcm);
     let heard = takes.iter().filter(|t| !t.noisy).count();
-    if heard == 0 {
-        return Err("No clear takes were heard. Say the phrase with a pause of about a second between takes.".into());
+    if heard < 2 {
+        return Err("Say it at least twice.".into());
     }
     let mut trained = load(print);
-    let entry = trained.phrases.entry(phrase.to_string()).or_insert(Phrase { takes: Vec::new(), calibration: None, updated: 0 });
+    trained.phrases.insert(phrase.to_string(), Phrase { takes, calibration: None, updated: library::now(), checked: true });
+    recalibrate(&mut trained);
+    save(print, &trained)?;
+    let phrase = &trained.phrases[phrase];
+    Ok(TrainResult { heard, takes: phrase.said(), separation: phrase.calibration.map(|c| c.separation) })
+}
+
+/// Adds the takes in a recording of someone saying `phrase` several times, or replaces the old ones.
+/// Takes that aren't the phrase, such as taps or other words, are left out.
+pub fn train(print: &str, phrase: &str, pcm: &[i16], replace: bool) -> Result<TrainResult, String> {
+    let spec = spec(phrase).ok_or("That isn't a key phrase.")?;
+    let spans: Vec<(usize, usize)> =
+        kws::find_takes(pcm).into_iter().filter(|&(s, e)| check_take(spec, &pcm[s..e.min(pcm.len())]).is_ok()).collect();
+    let takes = kws::takes_at(pcm, &spans);
+    let heard = takes.iter().filter(|t| !t.noisy).count();
+    if heard == 0 {
+        return Err(format!("No clear takes of “{}” were heard. Say it with a pause of about a second between takes.", spec.text));
+    }
+    let mut trained = load(print);
+    let entry = trained.phrases.entry(phrase.to_string()).or_insert(Phrase { takes: Vec::new(), calibration: None, updated: 0, checked: true });
     if replace {
         entry.takes.clear();
+        entry.checked = true;
     }
     entry.takes.extend(takes);
     if entry.said() > MAX_TAKES {
@@ -166,9 +251,16 @@ pub fn clear(print: &str, phrase: &str) -> Result<(), String> {
     save(print, &trained)
 }
 
+impl Phrase {
+    /// Trained well enough to listen for.
+    pub fn usable(&self, id: &str) -> bool {
+        self.calibration.is_some() && (self.checked || id != WAKE)
+    }
+}
+
 /// How many phrases a print has trained well enough to listen for.
 pub fn trained_count(print: &str) -> usize {
-    load(print).phrases.values().filter(|p| p.calibration.is_some()).count()
+    load(print).phrases.iter().filter(|(id, p)| p.usable(id)).count()
 }
 
 /// The phrases to listen for, from every voice print, with the person's sensitivity applied.
@@ -178,6 +270,9 @@ pub fn models() -> (Vec<PhraseModel>, Vec<VoicePrint>) {
     let mut models = Vec::new();
     for print in &prints {
         for (id, phrase) in load(&print.id).phrases {
+            if !phrase.usable(&id) {
+                continue;
+            }
             let (Some(spec), Some(calibration)) = (spec(&id), phrase.calibration) else { continue };
             models.push(PhraseModel {
                 id,
@@ -208,13 +303,15 @@ pub struct Heard {
     pub delay_ms: f32,
     /// How much the phrase sounded like the print's owner, when it was long enough to tell.
     pub speaker: Option<f32>,
-    /// Checking the speaker is on and this didn't sound like them, so nothing was done.
+    /// Checking the speaker is on and this didn't sound like them, or it wasn't a voice at all (taps and
+    /// clicks), so nothing was done.
     pub rejected: bool,
 }
 
 pub fn describe(hit: &kws::Hit, stream: &str, prints: &[VoicePrint], verify: bool) -> Heard {
     let print = prints.iter().find(|p| p.id == hit.owner);
     let speaker = print.and_then(|p| embed::voice(&hit.audio, RATE).map(|v| embed::similarity(&v, &p.voice)));
+    let voiced = kws::voiced_seconds(&hit.audio) >= MIN_VOICED_S;
     Heard {
         phrase: hit.phrase.clone(),
         text: spec(&hit.phrase).map_or(hit.phrase.as_str(), |s| s.text).to_string(),
@@ -226,7 +323,7 @@ pub fn describe(hit: &kws::Hit, stream: &str, prints: &[VoicePrint], verify: boo
         score: hit.score,
         delay_ms: hit.delay_ms(),
         speaker,
-        rejected: verify && speaker.is_some_and(|s| s < VERIFY_MIN),
+        rejected: !voiced || (verify && speaker.is_some_and(|s| s < VERIFY_MIN)),
     }
 }
 
@@ -290,8 +387,30 @@ mod tests {
     }
 
     #[test]
+    fn transcripts_are_matched_to_the_phrase() {
+        let wake = spec(WAKE).unwrap();
+        for said in ["Hey Superteem.", "Hey, super team!", "Hi Supertim", "okay super-team", "Hey Super Steam"] {
+            assert!(sounds_like(wake, said), "{said}");
+        }
+        for said in ["", "Hey there.", "Thank you.", "super", "So we have a really great super team working on this today"] {
+            assert!(!sounds_like(wake, said), "{said}");
+        }
+        assert!(sounds_like(spec("bookmark").unwrap(), "Book mark that."));
+        assert!(!sounds_like(spec("stop").unwrap(), "Start recording"));
+    }
+
+    #[test]
+    fn old_wake_words_wait_to_be_trained_again() {
+        let p = |checked| Phrase { takes: Vec::new(), calibration: Some(Calibration { threshold: 1.0, separation: 2.0 }), updated: 0, checked };
+        assert!(!p(false).usable(WAKE));
+        assert!(p(true).usable(WAKE));
+        assert!(p(false).usable("bookmark"));
+    }
+
+    #[test]
     fn every_phrase_has_takes_described_and_known_requirements() {
         for s in PHRASES {
+            assert!(!s.sounds.is_empty(), "{}", s.id);
             assert!(s.how.len() >= 4, "{}", s.id);
             assert!(s.requires.map_or(true, |r| spec(r).is_some()), "{}", s.id);
         }
