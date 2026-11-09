@@ -279,9 +279,10 @@ pub fn assign(lines: &[Line], streams: usize) -> Vec<String> {
 
 /// Marks lines spoken while someone else was also speaking.
 pub fn mark_overlaps(segments: &mut [Segment]) {
-    let spans: Vec<(f64, f64, String)> = segments.iter().map(|s| (s.start_s, s.end_s, s.speaker.clone())).collect();
+    // Doubled-up copies of a line are the same voice again, not someone else talking.
+    let spans: Vec<(f64, f64, String)> = segments.iter().filter(|s| s.in_script()).map(|s| (s.start_s, s.end_s, s.speaker.clone())).collect();
     for s in segments.iter_mut() {
-        s.overlap = spans.iter().any(|(start, end, who)| *who != s.speaker && end.min(s.end_s) - start.max(s.start_s) > OVERLAP_S);
+        s.overlap = s.in_script() && spans.iter().any(|(start, end, who)| *who != s.speaker && end.min(s.end_s) - start.max(s.start_s) > OVERLAP_S);
     }
 }
 
@@ -364,7 +365,7 @@ mod tests {
 
     #[test]
     fn overlapping_lines_from_different_speakers_are_marked() {
-        let seg = |speaker: &str, start_s: f64, end_s: f64| Segment { id: 0, speaker: speaker.into(), stream: "a".into(), start_s, end_s, text: String::new(), confidence: 1.0, edited: false, overlap: false };
+        let seg = |speaker: &str, start_s: f64, end_s: f64| Segment { id: 0, speaker: speaker.into(), stream: "a".into(), start_s, end_s, text: String::new(), confidence: 1.0, edited: false, overlap: false, ..Default::default() };
         let mut segments = vec![seg("a", 0.0, 2.0), seg("b", 1.5, 3.0), seg("b", 3.0, 4.0), seg("a", 3.9, 5.0)];
         mark_overlaps(&mut segments);
         assert_eq!(segments.iter().map(|s| s.overlap).collect::<Vec<_>>(), [true, true, false, false]);

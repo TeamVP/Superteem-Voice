@@ -10,6 +10,7 @@ pub mod prefs;
 pub mod probe;
 pub mod process;
 pub mod recorder;
+pub mod script;
 pub mod transcribe;
 pub mod update;
 pub mod voices;
@@ -521,6 +522,11 @@ fn split_segment(state: State<AppState>, id: String, segment: usize, at: usize) 
         s.text = head;
         s.end_s = split_s;
         s.edited = true;
+        if !s.parts.is_empty() {
+            let parts = std::mem::take(&mut s.parts);
+            s.parts = parts.iter().filter(|p| p.0 < split_s).map(|&(a, b)| (a, b.min(split_s))).collect();
+            second.parts = parts.iter().filter(|p| p.1 > split_s).map(|&(a, b)| (a.max(split_s), b)).collect();
+        }
         second.id = new_id;
         second.text = tail;
         second.start_s = split_s;
@@ -549,20 +555,32 @@ fn join_segments(state: State<AppState>, id: String, first: usize, second: usize
     edit_session(&state, &id, |_, segments| {
         let i = segments.iter().position(|s| s.id == first).ok_or("That line no longer exists.")?;
         let j = segments.iter().position(|s| s.id == second).ok_or("That line no longer exists.")?;
-        // Lines between them that hold no words are hidden on the page, so they go too.
-        if j <= i || segments[i + 1..j].iter().any(|s| !process::is_silence(&s.text)) {
+        // Lines between them that hold no words are hidden on the page, so they go too. Doubled-up copies
+        // are hidden as well, but stay for the tracks.
+        if j <= i || segments[i + 1..j].iter().any(|s| s.in_script() && !process::is_silence(&s.text)) {
             return Err("Only neighbouring lines can be joined.".into());
         }
         if let Some(why) = join_blocker(&segments[i], &segments[j]) {
             return Err(why.into());
         }
         let next = segments.remove(j);
-        segments.drain(i + 1..j);
+        let between: Vec<usize> = (i + 1..j).filter(|&k| segments[k].in_script()).collect();
+        for k in between.into_iter().rev() {
+            segments.remove(k);
+        }
         let s = &mut segments[i];
+        let mut parts = s.spans();
+        parts.extend(next.spans());
+        s.parts = parts;
         s.text = format!("{} {}", s.text.trim(), next.text.trim()).trim().to_string();
         s.end_s = s.end_s.max(next.end_s);
         s.confidence = s.confidence.min(next.confidence);
         s.edited = true;
+        let joined = s.id;
+        // Copies of the line that went now copy the line it joined.
+        for copy in segments.iter_mut().filter(|c| c.echo_of == Some(next.id)) {
+            copy.echo_of = Some(joined);
+        }
         voices::mark_overlaps(segments);
         Ok(())
     })
@@ -969,6 +987,46 @@ fn save_markers(state: State<AppState>, id: String, markers: Vec<library::Marker
     })
 }
 
+/// Changes the note on a marker, or deletes it. `index` is its place among the saved markers; without one,
+/// it is a phrase heard in the recording at `at_s`, which is saved as a marker of its own to change it.
+#[tauri::command]
+fn edit_marker(
+    state: State<AppState>,
+    id: String,
+    index: Option<usize>,
+    at_s: f64,
+    kind: String,
+    text: String,
+    remove: bool,
+) -> Result<(), String> {
+    edit_session(&state, &id, |meta, _| {
+        match index {
+            Some(i) => {
+                let m = meta.markers.get_mut(i).ok_or("That bookmark no longer exists.")?;
+                m.text = text.trim().to_string();
+                m.removed = remove;
+            }
+            None => {
+                meta.markers.push(library::Marker { at_s, text: text.trim().to_string(), kind, removed: remove });
+                meta.markers.sort_by(|a, b| a.at_s.total_cmp(&b.at_s));
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Puts a doubled-up line back in the script, when it was something said after all.
+#[tauri::command]
+fn keep_segment(state: State<AppState>, id: String, segment: usize) -> Result<(), String> {
+    edit_session(&state, &id, |_, segments| {
+        let s = segments.iter_mut().find(|s| s.id == segment).ok_or("That line no longer exists.")?;
+        s.echo_of = None;
+        s.edited = true;
+        voices::mark_overlaps(segments);
+        Ok(())
+    })
+}
+
 #[tauri::command]
 fn save_consent(state: State<AppState>, id: String, consent: library::Consent) -> Result<(), String> {
     edit_session(&state, &id, |meta, _| {
@@ -1225,6 +1283,8 @@ pub fn run() {
             model_info,
             open_models_folder,
             save_markers,
+            edit_marker,
+            keep_segment,
             save_consent,
             processing_queue,
             split_segment,

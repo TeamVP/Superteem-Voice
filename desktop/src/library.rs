@@ -71,7 +71,7 @@ pub fn session_dir(id: &str) -> Result<PathBuf, String> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Segment {
     pub id: usize,
     /// A stream name for a wearer, or UNKNOWN for a guest.
@@ -87,6 +87,28 @@ pub struct Segment {
     /// Someone else is speaking at the same time.
     #[serde(default)]
     pub overlap: bool,
+    /// The line that says the same thing, heard more clearly on another microphone. A line with this is
+    /// left out of the script and greyed out in the tracks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub echo_of: Option<usize>,
+    /// Other microphones that heard this line too, greyed out in their tracks over its time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also_on: Vec<String>,
+    /// The clips a line was stitched together from, when it is more than one: (start_s, end_s) each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<(f64, f64)>,
+}
+
+impl Segment {
+    /// The stretches of audio this line was heard in.
+    pub fn spans(&self) -> Vec<(f64, f64)> {
+        if self.parts.is_empty() { vec![(self.start_s, self.end_s)] } else { self.parts.clone() }
+    }
+
+    /// Part of the script: not a doubled-up copy of another line.
+    pub fn in_script(&self) -> bool {
+        self.echo_of.is_none()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -138,6 +160,9 @@ pub struct Marker {
     /// "action" for an action item, written up from what was said there; empty for a bookmark.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub kind: String,
+    /// Deleted by the person. Kept so the same bookmark heard in the recording doesn't come back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub removed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -193,7 +218,7 @@ pub fn save(dir: &Path, meta: &Meta, segments: &[Segment]) -> Result<(), String>
     write_json(&dir.join(TRANSCRIPT), &segments)?;
     let lines: Vec<Line> = segments
         .iter()
-        .filter(|s| !s.text.is_empty())
+        .filter(|s| !s.text.is_empty() && s.in_script())
         .map(|s| Line { speaker: meta.name(&s.speaker), start_s: s.start_s, end_s: s.end_s, text: s.text.clone() })
         .collect();
     if lines.is_empty() {
@@ -284,6 +309,7 @@ mod tests {
             confidence: 1.0,
             edited: false,
             overlap: false,
+            ..Default::default()
         }
     }
 

@@ -1063,12 +1063,42 @@ function addMarker(text, kind = "") {
 const isAction = (m) => m.kind === "action" || (!m.kind && m.text === "Action item");
 const markerLabel = (m) => (isAction(m) ? "Action item" : "Bookmark");
 
+/// The marker open for changing while recording.
+let editingMarker = null;
+
+/// Every marker made so far; clicking one opens it to change its note or delete it.
 function drawMarkers() {
   const list = document.getElementById("live-markers");
   if (!list || !recording) return;
-  list.replaceChildren(...recording.markers.slice(-4).map((m) =>
-    el("div", { class: `marker${isAction(m) ? " action" : ""}` }, el("span", { class: "mono" }, clock(m.at_s)),
-      el("strong", {}, markerLabel(m)), m.text && m.text !== "Action item" ? ` · ${m.text}` : "")));
+  if (!recording.markers.includes(editingMarker)) editingMarker = null;
+  const typed = (m) => (m.text && m.text !== "Action item" ? m.text : "");
+  list.replaceChildren(...recording.markers.map((m) => {
+    const what = markerLabel(m).toLowerCase();
+    if (m === editingMarker) {
+      const input = el("input", { value: typed(m), placeholder: isAction(m) ? "What needs doing" : "Add a note to this bookmark", "aria-label": `Note for the ${what} at ${clock(m.at_s)}` });
+      const close = () => { editingMarker = null; drawMarkers(); };
+      const done = () => { m.text = input.value.trim(); close(); };
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); done(); }
+        if (e.key === "Escape") { e.preventDefault(); close(); }
+      });
+      const remove = () => { recording.markers.splice(recording.markers.indexOf(m), 1); close(); };
+      const row = el("div", { class: `marker editing${isAction(m) ? " action" : ""}` }, el("span", { class: "mono" }, clock(m.at_s)),
+        el("strong", {}, markerLabel(m)), input,
+        el("button", { class: "primary pill", type: "button", onclick: done }, "Save"),
+        el("button", { class: "icon-btn trash", type: "button", title: `Delete this ${what}`, "aria-label": `Delete this ${what}`, onclick: remove }, svg("trash", 18)),
+        el("button", { class: "icon-btn", type: "button", title: "Cancel", "aria-label": "Cancel", onclick: close }, svg("close", 18)));
+      requestAnimationFrame(() => input.focus());
+      return row;
+    }
+    const open = () => { editingMarker = m; drawMarkers(); };
+    const row = el("div", { class: `marker${isAction(m) ? " action" : ""}`, role: "button", tabindex: "0", title: "Click to change the note or delete it" },
+      el("span", { class: "mono" }, clock(m.at_s)), el("strong", {}, markerLabel(m)), typed(m) ? ` · ${typed(m)}` : "");
+    row.addEventListener("click", open);
+    row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+    return row;
+  }));
+  if (!editingMarker) list.scrollTop = list.scrollHeight;
 }
 
 function renderRecording(status) {
@@ -1282,6 +1312,8 @@ async function openSession(id, processingError) {
 }
 
 let sessionListeners = null;
+/// Whether the meeting page also shows the clips left out of the script as doubles.
+let showDoubles = false;
 
 /// `suggestion` is lines that sound like one just moved: { lines, speaker }.
 function renderSession(session, processingError, suggestion) {
@@ -1290,6 +1322,9 @@ function renderSession(session, processingError, suggestion) {
   // silence was dropped still have these lines.
   if (session.transcribed) session.segments = session.segments.filter((s) => s.edited || hasWords(s.text));
   window.currentPrints = session.voiceprints;
+  // Clips another microphone heard more clearly are left out of the script; they stay, greyed, in the tracks.
+  const doubles = session.segments.filter((s) => s.echo_of != null);
+  const scriptLines = session.segments.filter((s) => s.echo_of == null);
   const keepTime = player?.t ?? 0;
   stopPlayback();
   const save = async (command, args) => {
@@ -1334,7 +1369,7 @@ function renderSession(session, processingError, suggestion) {
   const edits = session.segments.filter((s) => s.edited).length;
   const reprocess = el("button", { class: "link", title: "Run speaker detection and transcription again" }, "Transcribe again");
   reprocess.addEventListener("click", () => processAgain(id));
-  const used = new Set(session.segments.map((s) => s.speaker));
+  const used = new Set(scriptLines.map((s) => s.speaker));
   const streams = Object.keys(session.audio).sort();
   const picker = statusPicker(meta.status, async (status) => {
     if (!(await save("set_session_status", { status }))) return false;
@@ -1369,6 +1404,12 @@ function renderSession(session, processingError, suggestion) {
   }
   if (edits) {
     page.append(el("div", { class: "legend" }, `${edits} line${edits > 1 ? "s" : ""} edited by hand. Transcribing again keeps them.`));
+  }
+  if (doubles.length) {
+    const toggle = el("button", { class: "link", type: "button", "aria-pressed": String(showDoubles) }, showDoubles ? "Hide them" : "Show them");
+    toggle.addEventListener("click", () => { showDoubles = !showDoubles; renderSession(session, processingError); });
+    page.append(el("div", { class: "legend" },
+      `${doubles.length} clip${doubles.length > 1 ? "s" : ""} heard again on another microphone ${doubles.length > 1 ? "are" : "is"} greyed out in the tracks and left out of the script. `, toggle));
   }
 
   // Speakers: renaming here changes every line for that person.
@@ -1459,16 +1500,51 @@ function renderSession(session, processingError, suggestion) {
   }
 
   const duration = meta.duration_s || Math.max(1, ...session.segments.map((s) => s.end_s));
+  const trackName = (stream) => session.speakers.find((s) => s.key === stream)?.name ?? streamName(stream, prefs.inputs);
   const lineEls = [];
   const transcript = el("div", { class: "transcript" });
   const allMarkers = sessionMarkers(meta.markers ?? [], session.keyphrases ?? []);
   const markers = [...allMarkers];
   let previous = null;
   const playFrom = (t) => { player?.seek(t); player?.play(); };
-  const markerLine = (m) => el("div", { class: `line marker-line${isAction(m) ? " action" : ""}` },
-    el("button", { class: "time mono", title: "Play from here", onclick: () => playFrom(m.at_s) }, clock(m.at_s)),
-    el("div", {}, el("strong", {}, markerLabel(m)), markerNote(m, session.segments) ? ` · ${markerNote(m, session.segments)}` : "",
-      m.heard ? el("span", { class: "edited", title: "Heard in the recording when it was processed" }, "heard") : null));
+  // Clicking a bookmark or action item, here or in the tracks, opens it for changing its note or deleting it.
+  const markerEditors = new Map();
+  const saveMarker = async (m, text, remove) => {
+    if (await save("edit_marker", { index: m.index ?? null, atS: m.at_s, kind: m.kind ?? "", text, remove })) reload();
+  };
+  const markerLine = (m) => {
+    const note = markerNote(m, scriptLines);
+    const typed = m.text && m.text !== "Action item" ? m.text : "";
+    const body = el("div", { class: "marker-body", role: "button", tabindex: "0", title: "Click to change the note or delete it" },
+      el("strong", {}, markerLabel(m)), note ? ` · ${note}` : "",
+      m.heard ? el("span", { class: "edited", title: "Heard in the recording when it was processed" }, "heard") : null);
+    const line = el("div", { class: `line marker-line${isAction(m) ? " action" : ""}` },
+      el("button", { class: "time mono", title: "Play from here", onclick: () => playFrom(m.at_s) }, clock(m.at_s)), body);
+    const edit = () => {
+      if (line.classList.contains("editing")) return;
+      line.classList.add("editing");
+      const input = el("input", { value: typed, placeholder: isAction(m) ? note || "What needs doing" : "Add a note to this bookmark",
+        "aria-label": `Note for the ${markerLabel(m).toLowerCase()} at ${clock(m.at_s)}` });
+      const cancel = () => { line.classList.remove("editing"); editor.replaceWith(body); };
+      const done = () => (input.value.trim() === typed ? cancel() : saveMarker(m, input.value.trim(), false));
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); done(); }
+        if (e.key === "Escape") { e.preventDefault(); cancel(); }
+      });
+      const what = markerLabel(m).toLowerCase();
+      const editor = el("div", { class: "marker-edit" }, el("strong", {}, markerLabel(m)), input,
+        el("button", { class: "primary pill", type: "button", onclick: done }, "Save"),
+        el("button", { class: "icon-btn trash", type: "button", title: `Delete this ${what}`, "aria-label": `Delete this ${what}`, onclick: () => saveMarker(m, m.text ?? "", true) }, svg("trash", 18)),
+        el("button", { class: "icon-btn", type: "button", title: "Cancel", "aria-label": "Cancel", onclick: cancel }, svg("close", 18)));
+      body.replaceWith(editor);
+      line.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      input.focus();
+    };
+    body.addEventListener("click", edit);
+    body.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); edit(); } });
+    markerEditors.set(m, edit);
+    return line;
+  };
 
   // Action items, written up from what was said where each was marked.
   const actions = allMarkers.filter(isAction);
@@ -1476,9 +1552,10 @@ function renderSession(session, processingError, suggestion) {
     page.append(el("h2", {}, `Action item${actions.length > 1 ? "s" : ""}`), el("ul", { class: "action-items" },
       actions.map((m) => el("li", {},
         el("button", { class: "time mono", title: "Play from here", onclick: () => playFrom(m.at_s) }, clock(m.at_s)),
-        el("span", {}, markerNote(m, session.segments) || el("span", { class: "hint" }, "Nothing was said here to write up."))))));
+        el("span", {}, markerNote(m, scriptLines) || el("span", { class: "hint" }, "Nothing was said here to write up."))))));
   }
-  for (const seg of session.segments) {
+  const lineById = new Map(session.segments.map((s) => [s.id, s]));
+  for (const seg of showDoubles ? session.segments : scriptLines) {
     while (markers.length && markers[0].at_s <= seg.start_s) {
       transcript.append(markerLine(markers.shift()));
       previous = null;
@@ -1513,14 +1590,21 @@ function renderSession(session, processingError, suggestion) {
         if (!who.querySelector(".edited")) who.append(el("span", { class: "edited" }, "edited"));
       }
     });
+    const double = seg.echo_of != null;
+    const original = double ? lineById.get(seg.echo_of) : null;
+    const keep = double ? el("button", { class: "link", type: "button", title: "Put this line back in the script, as something said that the other line doesn't have" }, "Keep in script") : null;
+    keep?.addEventListener("click", async () => { if (await save("keep_segment", { segment: seg.id })) reload(); });
     const who = el("div", { class: "who" }, select,
       seg.overlap ? el("span", { class: "mark", title: "Someone else was speaking at the same time" }, "talking at once") : null,
-      seg.edited ? el("span", { class: "edited" }, "edited") : null);
+      seg.edited ? el("span", { class: "edited" }, "edited") : null,
+      double ? el("span", { class: "mark", title: original ? `Heard more clearly on ${trackName(original.stream)}: “${original.text}”` : "" },
+        `heard better on ${original ? trackName(original.stream) : "another microphone"}${original ? ` at ${clock(original.start_s)}` : ""}`) : null,
+      keep);
     const low = seg.confidence < session.low_confidence;
     const suggested = suggestion?.lines.includes(seg.id);
     // An overlapping line always shows its speaker, since the one before may be the other voice.
-    const same = previous === seg.speaker && !seg.overlap;
-    const line = el("div", { class: `line${low ? " low" : ""}${same ? " same-speaker" : ""}${seg.overlap ? " overlap" : ""}${suggested ? " suggest" : ""}` });
+    const same = previous === seg.speaker && !seg.overlap && !double;
+    const line = el("div", { class: `line${low ? " low" : ""}${same ? " same-speaker" : ""}${seg.overlap ? " overlap" : ""}${suggested ? " suggest" : ""}${double ? " double" : ""}` });
     const time = el("button", { class: "time mono", title: "Play from this line" }, clock(seg.start_s));
     time.addEventListener("click", () => {
       if (!player) return;
@@ -1531,7 +1615,7 @@ function renderSession(session, processingError, suggestion) {
     line.append(time, el("div", {}, who, text), action);
     transcript.append(line);
     lineEls.push({ seg, line, text, action });
-    previous = seg.speaker;
+    previous = double ? null : seg.speaker;
   }
   markers.forEach((m) => transcript.append(markerLine(m)));
   page.append(transcript);
@@ -1609,12 +1693,35 @@ function renderSession(session, processingError, suggestion) {
         mute.classList.toggle("on", audio.muted);
         mute.setAttribute("aria-pressed", String(audio.muted));
       });
-      const bar = el("span", { class: "bar" },
-        session.segments.filter((s) => s.stream === stream).map((s) => el("span", {
-          style: `left:${(100 * s.start_s) / duration}%;width:${Math.max(0.3, (100 * (s.end_s - s.start_s)) / duration)}%;background:${strong.get(s.speaker) ?? "var(--key-light)"}`,
-          title: `${session.speakers.find((sp) => sp.key === s.speaker)?.name ?? ""} · ${clock(s.start_s)}`,
-        })),
-        allMarkers.map((m) => el("i", { class: isAction(m) ? "action" : "", style: `left:${(100 * m.at_s) / duration}%`, title: `${markerLabel(m)} · ${clock(m.at_s)}` })));
+      const clip = (start, end, style, title, cls = "") => el("span", {
+        class: cls,
+        style: `left:${(100 * start) / duration}%;width:${Math.max(0.3, (100 * (end - start)) / duration)}%;${style}`,
+        title,
+      });
+      const spans = (s) => (s.parts?.length ? s.parts : [[s.start_s, s.end_s]]);
+      // Greyed first: what this microphone heard that the script takes from another one.
+      const greyed = [
+        ...scriptLines.filter((s) => s.stream !== stream && s.also_on?.includes(stream))
+          .map((s) => clip(s.start_s, s.end_s, "", `Also heard here · the script uses ${trackName(s.stream)} · ${clock(s.start_s)}`, "echo")),
+        ...doubles.filter((s) => s.stream === stream).flatMap((s) => {
+          const original = lineById.get(s.echo_of);
+          return spans(s).map(([a, b]) => clip(a, b, "", `Left out of the script: heard more clearly ${original ? `on ${trackName(original.stream)}` : "elsewhere"} · “${s.text}”`, "echo"));
+        }),
+      ];
+      const used = scriptLines.filter((s) => s.stream === stream).flatMap((s) => spans(s).map(([a, b]) => clip(a, b,
+        `background:${strong.get(s.speaker) ?? "var(--key-light)"}`,
+        `${session.speakers.find((sp) => sp.key === s.speaker)?.name ?? ""} · ${clock(s.start_s)}`)));
+      const bar = el("span", { class: "bar" }, greyed, used,
+        allMarkers.map((m) => {
+          const note = markerNote(m, scriptLines);
+          const tick = el("i", { class: isAction(m) ? "action" : "", style: `left:${(100 * m.at_s) / duration}%`, title: `${markerLabel(m)} · ${clock(m.at_s)}${note ? ` · ${note}` : ""} · click to change or delete` });
+          tick.addEventListener("click", (e) => {
+            e.stopPropagation();
+            player?.seek(m.at_s);
+            markerEditors.get(m)?.();
+          });
+          return tick;
+        }));
       lanes.append(el("div", { class: "track" }, el("span", { class: "name", style: `color:${strong.get(stream) ?? "inherit"}` }, name), mute, bar));
     }
     lanes.append(head);
@@ -1638,7 +1745,7 @@ function renderSession(session, processingError, suggestion) {
     player = makePlayer(session, duration, onTick);
     playButton.addEventListener("click", () => player?.toggle());
     // Clip starts, bookmarks and action items, for jumping to the previous or next in the timeline.
-    const starts = [...new Set([...session.segments.map((s) => s.start_s), ...allMarkers.map((m) => m.at_s)])].sort((a, b) => a - b);
+    const starts = [...new Set([...scriptLines.map((s) => s.start_s), ...allMarkers.map((m) => m.at_s)])].sort((a, b) => a - b);
     const prevClip = () => {
       // Within a moment of a clip's start, go to the one before, as a music player does.
       const t = (player?.t ?? 0) - 0.5;
@@ -1668,12 +1775,14 @@ const PHRASE_KINDS = { bookmark: "", action: "action" };
 
 /// The markers made while recording, and "Bookmark that" or "Action item" heard in the recording when it was
 /// processed, as when nothing was listening for them at the time.
+/// Saved markers keep their place in the list, for changing them; deleted ones still hide the phrase heard there.
 function sessionMarkers(saved, phrases) {
+  const all = saved.map((m, index) => ({ ...m, index }));
   const heard = phrases
     .filter((h) => !h.rejected && h.phrase in PHRASE_KINDS)
     .map((h) => ({ at_s: Math.round(h.start_s * 10) / 10, text: "", kind: PHRASE_KINDS[h.phrase], heard: true }))
-    .filter((h) => !saved.some((m) => isAction(m) === isAction(h) && Math.abs(m.at_s - h.at_s) < SAME_MARK_S));
-  return [...saved, ...heard].sort((a, b) => a.at_s - b.at_s);
+    .filter((h) => !all.some((m) => isAction(m) === isAction(h) && Math.abs(m.at_s - h.at_s) < SAME_MARK_S));
+  return [...all.filter((m) => !m.removed), ...heard].sort((a, b) => a.at_s - b.at_s);
 }
 
 /// What a marker says: the note typed with it, or for an action item, what was said where it was marked.
@@ -1703,7 +1812,7 @@ function actionItemText(m, segments) {
 window.addEventListener("keydown", (e) => {
   if (view.kind !== "session" || !player || e.code !== "Space" || e.ctrlKey) return;
   const t = e.target;
-  if (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(t.tagName)) return;
+  if (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(t.tagName) || t.getAttribute?.("role") === "button") return;
   e.preventDefault();
   player.toggle();
 });

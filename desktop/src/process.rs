@@ -2,6 +2,7 @@
 
 use crate::keyphrases;
 use crate::library::{self, Meta, PrintLink, Segment};
+use crate::script;
 use crate::transcribe;
 use crate::voices;
 use std::collections::BTreeMap;
@@ -59,6 +60,10 @@ fn carry_over_edits(old: &[Segment], new: &mut [Segment]) {
             s.text = edited.text.clone();
             s.speaker = edited.speaker.clone();
             s.edited = true;
+            // A line the person put back in the script stays there.
+            if edited.in_script() {
+                s.echo_of = None;
+            }
         }
     }
 }
@@ -173,59 +178,107 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     fs::write(dir.join("session.json"), text).map_err(|e| e.to_string())?;
 
     progress("Recognising voices", 0.95);
-    let mut lines: Vec<(Segment, f32)> = utterances
+    let mut clips: Vec<script::Clip> = utterances
         .iter()
         .zip(texts)
         .zip(confidences)
         .map(|((u, text), confidence)| {
             let speaker = u.speaker_source.map_or(library::UNKNOWN.to_string(), |i| names[i].clone());
             let segment = Segment {
-                id: 0,
                 speaker,
                 stream: names[u.best()].clone(),
                 start_s: seconds(u.start_window),
                 end_s: seconds(u.end_window),
                 text,
                 confidence,
-                edited: false,
-                overlap: false,
+                ..Default::default()
             };
-            (segment, u.sources[0].1)
+            script::Clip { segment, heard: u.sources.iter().map(|(s, clarity)| (names[*s].clone(), *clarity)).collect() }
         })
         .collect();
     // Only people talking matter: with a transcript, lines where nothing was said are silence or noise,
-    // and are dropped before voices are grouped so they cannot become an "Unknown speaker".
+    // and are dropped before voices are grouped so they cannot become an "Unknown speaker". Where they
+    // fall between someone's words, the script notes that something wasn't caught.
+    let mut unheard = Vec::new();
     if transcribed {
-        lines.retain(|(s, _)| !is_silence(&s.text));
+        clips.retain(|c| {
+            let silent = is_silence(&c.segment.text);
+            if silent {
+                let s = &c.segment;
+                unheard.push(script::Unheard { stream: s.stream.clone(), start_s: s.start_s, end_s: s.end_s, clarity_db: c.heard.first().map_or(0.0, |h| h.1) });
+            }
+            !silent
+        });
     }
-    let joined = join_same_words(&mut lines);
+    clips.sort_by(|a, b| a.segment.start_s.total_cmp(&b.segment.start_s));
+    // What one microphone heard more clearly than another is written once; the other's copy stays,
+    // greyed out, for the tracks.
+    let echoes = script::find_echoes(&mut clips);
+    let doubled = echoes.iter().flatten().count();
     let stream_index = |name: &str| names.iter().position(|n| n == name).unwrap_or(0);
-    let mut lines: Vec<(Segment, voices::Line)> = lines
-        .into_iter()
-        .map(|(segment, _)| {
+    let kept: Vec<usize> = (0..clips.len()).filter(|&i| echoes[i].is_none()).collect();
+    let lines: Vec<voices::Line> = kept
+        .iter()
+        .map(|&i| {
+            let segment = &clips[i].segment;
             let pcm = &sources[stream_index(&segment.stream)].pcm;
             let at = |s: f64| ((s * RATE as f64) as usize).min(pcm.len());
             let span = &pcm[at(segment.start_s)..at(segment.end_s)];
             let power = span.iter().map(|&x| (x as f64).powi(2)).sum::<f64>() / span.len().max(1) as f64;
             let level_db = (10.0 * (power.max(1.0) / (32768.0f64 * 32768.0)).log10()) as f32;
-            let line = voices::Line { speaker: segment.speaker.clone(), voice: stv_core::embed::voice(span, RATE), level_db };
-            (segment, line)
+            voices::Line { speaker: segment.speaker.clone(), voice: stv_core::embed::voice(span, RATE), level_db }
         })
         .collect();
-    lines.sort_by(|a, b| a.0.start_s.total_cmp(&b.0.start_s));
-    let (segments, lines): (Vec<Segment>, Vec<voices::Line>) = lines.into_iter().unzip();
-    let speakers = voices::assign(&lines, names.len());
-    let mut line_voices = BTreeMap::new();
-    let mut segments: Vec<Segment> = segments
+    let assigned = voices::assign(&lines, names.len());
+    let mut speaker_of: Vec<String> = clips.iter().map(|c| c.segment.speaker.clone()).collect();
+    let mut voice_of: BTreeMap<usize, stv_core::embed::Voice> = BTreeMap::new();
+    for ((&i, speaker), line) in kept.iter().zip(assigned).zip(lines) {
+        speaker_of[i] = speaker;
+        if let Some(v) = line.voice {
+            voice_of.insert(i, v);
+        }
+    }
+    // A doubled-up copy belongs to whoever said the line it copies.
+    for (i, echo) in echoes.iter().enumerate() {
+        if let Some(t) = echo {
+            speaker_of[i] = speaker_of[*t].clone();
+        }
+    }
+    let segments: Vec<Segment> = clips
         .into_iter()
-        .zip(lines)
-        .zip(speakers)
         .enumerate()
-        .map(|(id, ((mut segment, line), speaker))| {
-            segment.id = id;
-            segment.speaker = speaker;
-            if let Some(v) = line.voice {
-                line_voices.insert(id, v);
+        .map(|(i, c)| {
+            let also_on = c.heard.iter().skip(1).map(|(s, _)| s.clone()).filter(|s| *s != c.segment.stream).collect();
+            Segment { id: i, speaker: speaker_of[i].clone(), echo_of: echoes[i], also_on, ..c.segment }
+        })
+        .collect();
+
+    // Key phrases first, so a line is never stitched across a bookmark said aloud.
+    progress("Listening for key phrases", 0.96);
+    let streams: Vec<(String, &[i16])> = names.iter().cloned().zip(sources.iter().map(|s| s.pcm.as_slice())).collect();
+    let phrases = keyphrases::scan_session(&streams);
+    library::write_json(&dir.join(keyphrases::SESSION_FILE), &phrases)?;
+    let mut marks: Vec<f64> = library::load_meta(dir).markers.iter().filter(|m| !m.removed).map(|m| m.at_s).collect();
+    marks.extend(phrases.iter().filter(|h| !h.rejected && matches!(h.phrase.as_str(), "bookmark" | "action")).map(|h| h.start_s));
+
+    // Each person's clips on one microphone, a breath apart, become one line.
+    let stitched = script::stitch(segments, &unheard, &marks);
+    let mut new_id = vec![0; stitched.iter().map(|(_, m)| m.len()).sum()];
+    for (k, (_, members)) in stitched.iter().enumerate() {
+        for &m in members {
+            new_id[m] = k;
+        }
+    }
+    let mut line_voices = BTreeMap::new();
+    let mut segments: Vec<Segment> = stitched
+        .into_iter()
+        .enumerate()
+        .map(|(k, (mut segment, members))| {
+            segment.id = k;
+            segment.echo_of = segment.echo_of.map(|o| new_id[o]);
+            // The line sounds like its longest clip.
+            if let Some(v) = members.iter().filter_map(|m| voice_of.remove(m)).max_by_key(|v| v.frames) {
+                line_voices.insert(k, v);
             }
             segment
         })
@@ -233,60 +286,20 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     carry_over_edits(&library::load_segments(dir), &mut segments);
     voices::mark_overlaps(&mut segments);
 
-    progress("Saving", 0.97);
+    progress("Saving", 0.98);
     let duration = sources.iter().map(|s| s.pcm.len()).max().unwrap_or(0) as f64 / RATE as f64;
     let mut meta = library::new_meta(dir, duration);
     name_from_prints(&mut meta, &segments, &line_voices);
     library::write_json(&dir.join(voices::LINE_VOICES), &line_voices)?;
     library::save(dir, &meta, &segments)?;
 
-    progress("Listening for key phrases", 0.98);
-    let streams: Vec<(String, &[i16])> = names.iter().cloned().zip(sources.iter().map(|s| s.pcm.as_slice())).collect();
-    library::write_json(&dir.join(keyphrases::SESSION_FILE), &keyphrases::scan_session(&streams))?;
     let outcome = transcription.map_or_else(|e| format!("transcription failed: {e}"), str::to_string);
-    let shared = attribution.segments.len() - utterances.len() + joined;
-    Ok(format!("{} stream(s), {} speech segment(s), {shared} joined from more than one microphone, {outcome}", names.len(), utterances.len() - joined))
-}
-
-/// The last check against the same words twice: lines on different microphones at the same time that say
-/// mostly the same thing are one line, kept from the microphone that heard it more clearly and made more
-/// certain by the other. `lines` pairs each line with how clearly it was heard. Returns how many were joined.
-fn join_same_words(lines: &mut Vec<(Segment, f32)>) -> usize {
-    /// Fewer words than this are too common ("yes", "okay") to say two lines are the same.
-    const MIN_WORDS: usize = 3;
-    let mut joined = 0;
-    let mut i = 0;
-    while i < lines.len() {
-        let mut j = i + 1;
-        while j < lines.len() {
-            let (a, b) = (&lines[i].0, &lines[j].0);
-            let overlap = a.end_s.min(b.end_s) - a.start_s.max(b.start_s);
-            let shorter = a.text.split_whitespace().count().min(b.text.split_whitespace().count());
-            if a.stream == b.stream || overlap <= 0.0 || shorter < MIN_WORDS {
-                j += 1;
-                continue;
-            }
-            let shared = merge::shared_words(&a.text, &b.text);
-            if shared < merge::SAME_WORDS {
-                j += 1;
-                continue;
-            }
-            // The clearer line is moved to i, and the other is taken out; lines are sorted by time later.
-            if lines[j].1 > lines[i].1 {
-                lines.swap(i, j);
-            }
-            let gone = lines.remove(j).0;
-            let kept = &mut lines[i].0;
-            kept.start_s = kept.start_s.min(gone.start_s);
-            kept.end_s = kept.end_s.max(gone.end_s);
-            kept.confidence = merge::boosted(kept.confidence.max(gone.confidence), shared);
-            joined += 1;
-            // Line i is now whichever was kept; compare it with the rest again from the next one.
-            j = i + 1;
-        }
-        i += 1;
-    }
-    joined
+    let shared = attribution.segments.len() - utterances.len();
+    let script_lines = segments.iter().filter(|s| s.in_script()).count();
+    Ok(format!(
+        "{} stream(s), {script_lines} line(s) in the script, {shared} joined from more than one microphone before transcribing, {doubled} doubled-up clip(s) greyed out, {outcome}",
+        names.len()
+    ))
 }
 
 #[cfg(test)]
@@ -306,6 +319,7 @@ mod tests {
             confidence: 1.0,
             edited,
             overlap: false,
+            ..Default::default()
         }
     }
 
@@ -327,23 +341,6 @@ mod tests {
         let mut new = vec![line("input2", 1.0, "a", false), line("input1", 2.0, "b", false)];
         carry_over_edits(&old, &mut new);
         assert_eq!((new[0].text.as_str(), new[1].text.as_str()), ("a", "b"));
-    }
-
-    #[test]
-    fn the_same_words_on_two_microphones_are_one_line() {
-        let mut lines = vec![
-            (line("input1", 1.0, "Let's ship the new version on Friday", false), 18.0),
-            (line("input2", 1.2, "let's ship the new version on Friday", false), 12.0),
-            (line("input2", 3.0, "Sounds good to me", false), 20.0),
-            (line("input1", 3.1, "Okay", false), 5.0),
-        ];
-        assert_eq!(join_same_words(&mut lines), 1);
-        assert_eq!(lines.len(), 3);
-        assert_eq!((lines[0].0.stream.as_str(), lines[0].0.end_s), ("input1", 2.2));
-        assert!(lines[0].0.confidence > 0.9);
-        // Different words at the same time are two people talking at once, and both are kept.
-        let mut talking = vec![(line("input1", 1.0, "I think we should wait", false), 18.0), (line("input2", 1.0, "can we ship it today", false), 18.0)];
-        assert_eq!(join_same_words(&mut talking), 0);
     }
 
     #[test]
@@ -571,6 +568,42 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
         assert_eq!(meta.name(&first.speaker), "Alice");
         assert_eq!(meta.names.values().filter(|n| *n == "Alice").count(), 1);
+    }
+
+    /// Processes a copy of a recorded session, such as one shared in examples/, and prints its script and
+    /// the clips greyed out as doubles: set STV_EXAMPLE to the session folder and run with --ignored.
+    #[test]
+    #[ignore]
+    fn an_example_session_is_one_script() {
+        let from = std::path::PathBuf::from(std::env::var("STV_EXAMPLE").unwrap());
+        let dir = std::env::temp_dir().join(format!("stv-example-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        for entry in fs::read_dir(&from).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "stvj") || path.file_name().is_some_and(|n| n == "meta.json") {
+                fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
+            }
+        }
+        println!("{}", process_session(&dir, &|_, _| {}).unwrap());
+        let segments = library::load_segments(&dir);
+        let meta = library::load_meta(&dir);
+        for s in &segments {
+            let parts = if s.parts.len() > 1 { format!(" ({} clips)", s.parts.len()) } else { String::new() };
+            match s.echo_of {
+                None => println!("{:>6.2}-{:>6.2} {:<7} {}{parts}: {}", s.start_s, s.end_s, s.stream, meta.name(&s.speaker), s.text),
+                Some(t) => println!("   {:>6.2}-{:>6.2} {:<7} greyed, doubles line {t}: {}", s.start_s, s.end_s, s.stream, s.text),
+            }
+        }
+        // STV_EXAMPLE_KEEP keeps the processed copy there, to look at in the app or a browser.
+        match std::env::var("STV_EXAMPLE_KEEP") {
+            Ok(keep) => {
+                let _ = fs::remove_dir_all(&keep);
+                fs::rename(&dir, &keep).unwrap();
+            }
+            Err(_) => {
+                let _ = fs::remove_dir_all(&dir);
+            }
+        }
     }
 
     /// Needs the model and a 16 kHz mono 16-bit WAV: set STV_TEST_WAV and run with --ignored.

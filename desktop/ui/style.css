@@ -266,8 +266,18 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .lane .name small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
 .spark { flex: 1; height: 28px; display: flex; align-items: center; gap: 2px; overflow: hidden; background: var(--raised); border-radius: 6px; padding: 0 4px; }
 .spark span { flex: 1 0 3px; max-width: 4px; border-radius: 2px; min-height: 2px; }
-.markers { display: flex; flex-direction: column; gap: 8px; }
-.marker { padding: 8px 12px; border-radius: 10px; background: var(--highlight); font-size: 14px; }
+.markers { display: flex; flex-direction: column; gap: 8px; max-height: 232px; overflow-y: auto; }
+.marker { padding: 8px 12px; border-radius: 10px; background: var(--highlight); font-size: 14px; cursor: pointer; flex: none; }
+.marker:hover:not(.editing) { box-shadow: inset 0 0 0 1px var(--key-light); }
+.marker.action:hover:not(.editing) { box-shadow: inset 3px 0 0 var(--ok), inset 0 0 0 1px var(--key-light); }
+/* A bookmark or action item open for changing its note, or deleting it. */
+.marker.editing, .marker-edit { display: flex; align-items: center; gap: 8px; cursor: default; }
+.marker.editing input, .marker-edit input { flex: 1; min-width: 0; }
+.marker-edit .pill, .marker.editing .pill { min-height: 32px; padding: 4px 14px; }
+.marker-edit .icon-btn, .marker.editing .icon-btn { width: 32px; height: 32px; background: transparent; color: var(--muted); }
+.icon-btn.trash:hover { color: var(--danger); background: var(--hover); }
+.marker-body { cursor: pointer; border-radius: 6px; }
+.marker-body:hover strong { color: var(--accent-text); }
 .marker .mono { font-size: 12px; color: var(--muted); margin-right: 6px; }
 .pinned { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); }
 .pinned .bookmark { color: var(--accent, var(--soft)); margin-left: -6px; }
@@ -290,7 +300,15 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .track .mute.on { background: var(--key); border-color: var(--key); color: #fff; }
 .track .bar { flex: 1; height: 16px; background: var(--raised); border-radius: 4px; position: relative; overflow: hidden; }
 .track .bar span { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
-.track .bar i { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--key-light); }
+.track .bar span.echo {
+  /* What a microphone heard that the script takes from another, clearer one. */
+  background: repeating-linear-gradient(135deg, var(--line) 0 4px, transparent 4px 7px), var(--hover);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.track .bar i { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1px; background: var(--key-light); cursor: pointer; z-index: 1; }
+/* A wider target than the tick itself, so a bookmark is easy to click. */
+.track .bar i::after { content: ""; position: absolute; top: 0; bottom: 0; left: -5px; right: -5px; }
+.track .bar i:hover { background: var(--accent-text); width: 4px; }
 .track .bar i.action { background: var(--ok); }
 .playhead { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); pointer-events: none; }
 .transport { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -328,6 +346,10 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .line.low .text { text-decoration: underline dotted #d9a400; text-underline-offset: 4px; }
 .edited { color: var(--muted); font-size: 11px; margin-left: 6px; }
 .mark { font-size: 11px; color: var(--muted); margin-left: 6px; }
+/* A clip left out of the script, shown when asked for. */
+.line.double { opacity: 0.55; }
+.line.double:hover { opacity: 0.85; }
+.who button.link { font-size: 11px; margin-left: 8px; color: var(--accent-text); padding: 0; }
 .line.overlap .text { border-left: 2px solid var(--key-light); padding-left: 8px; }
 .line.suggest { outline: 2px dashed var(--key-light); outline-offset: -2px; }
 .suggestion { position: sticky; top: 0; z-index: 1; background: var(--highlight); border-radius: 10px; padding: 10px 14px; margin: 12px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
