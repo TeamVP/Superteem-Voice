@@ -21,6 +21,13 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-native-certs = "0.7"
 webpki-roots = "0.26"
 whisper-rs = "0.16"
+# Local language model for analysis templates (Phase 1). Pinned: whisper.cpp is built against its ggml
+# (build-env.ps1), so the two must move together. Default features pull in OpenMP, which
+# whisper.cpp does not use here.
+llama-cpp-2 = { version = "=0.1.161", default-features = false }
+# Chat templates llama.cpp's built-in list doesn't know, rendered from the model's own Jinja template.
+minijinja = "3"
+minijinja-contrib = { version = "3", features = ["pycompat"] }
 
 # Android records in its Kotlin foreground service, so these are Windows only.
 [target.'cfg(not(target_os = "android"))'.dependencies]

@@ -59,6 +59,62 @@ if (-not $text.Contains('rerun-if-env-changed=GGML_NATIVE')) {
     Set-Content $build $text.Replace($marker, ($watch -join '') + $marker) -NoNewline
 }
 
+# llama.cpp (the local language model for analysis templates) brings its own, newer ggml, and two copies
+# in one program are duplicate symbols. whisper.cpp is built against llama.cpp's ggml instead: llama-cpp-sys-2
+# installs it as a CMake package and tells crates that depend on it where (DEP_LLAMA_GGML_CMAKE_DIR).
+$llamaSys = '=0.1.161'
+$manifest = Join-Path $vendor 'Cargo.toml'
+$text = Get-Content $manifest -Raw
+if (-not $text.Contains('[dependencies.llama-cpp-sys-2]')) {
+    $text += "`n# Superteem: build against llama.cpp's ggml, so the app has one copy.`n[dependencies.llama-cpp-sys-2]`nversion = `"$llamaSys`"`ndefault-features = false`n"
+    Set-Content $manifest $text -NoNewline
+}
+$wrapper = Join-Path $vendor 'wrapper.h'
+$text = Get-Content $wrapper -Raw
+if ($text.Contains('<ggml/include/ggml.h>')) {
+    Set-Content $wrapper $text.Replace('<ggml/include/ggml.h>', '<ggml.h>') -NoNewline
+}
+$text = Get-Content $build -Raw
+if (-not $text.Contains('DEP_LLAMA_GGML_CMAKE_DIR')) {
+    $edits = @(
+        @('        let bindings = bindings
+            .clang_arg("-I./whisper.cpp/")',
+          '        let ggml_include = env::var("DEP_LLAMA_GGML_CMAKE_DIR")
+            .map(|d| PathBuf::from(d).join("..").join("..").join("include").display().to_string())
+            .unwrap_or_else(|_| "./whisper.cpp/ggml/include".into());
+        let bindings = bindings
+            .clang_arg("-I./whisper.cpp/")'),
+        @('            .clang_arg("-I./whisper.cpp/ggml/include")', '            .clang_arg(format!("-I{ggml_include}"))'),
+        @('    let destination = config.build();',
+          '    // Superteem: one ggml in the app, llama.cpp''s.
+    let system_ggml = env::var("DEP_LLAMA_GGML_CMAKE_DIR").ok();
+    if let Some(dir) = &system_ggml {
+        config.define("WHISPER_USE_SYSTEM_GGML", "ON");
+        config.define("CMAKE_PREFIX_PATH", dir);
+        // The Android NDK''s toolchain only searches its sysroot for packages; naming the folder works anywhere.
+        config.define("ggml_DIR", PathBuf::from(dir).join("ggml"));
+    }
+
+    let destination = config.build();'),
+        @('        println!("cargo:rustc-link-lib=static=whisper");
+        println!("cargo:rustc-link-lib=static=ggml");
+        println!("cargo:rustc-link-lib=static=ggml-base");
+        println!("cargo:rustc-link-lib=static=ggml-cpu");',
+          '        println!("cargo:rustc-link-lib=static=whisper");
+        if system_ggml.is_none() {
+            println!("cargo:rustc-link-lib=static=ggml");
+            println!("cargo:rustc-link-lib=static=ggml-base");
+            println!("cargo:rustc-link-lib=static=ggml-cpu");
+        }')
+    )
+    foreach ($e in $edits) {
+        $from = $e[0].Replace("`r`n", "`n")
+        if (-not $text.Contains($from)) { throw 'The whisper-rs-sys build script changed; update build-env.ps1' }
+        $text = $text.Replace($from, $e[1].Replace("`r`n", "`n"))
+    }
+    Set-Content $build $text -NoNewline
+}
+
 if ($Android) {
     # Android Studio's SDK, unless ANDROID_HOME already points at one (as on GitHub's runners).
     $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }

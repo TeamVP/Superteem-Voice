@@ -5,6 +5,7 @@ pub mod capture;
 pub mod exports;
 pub mod keyphrases;
 pub mod library;
+pub mod llm;
 pub mod listen;
 pub mod notes;
 pub mod prefs;
