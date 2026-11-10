@@ -202,6 +202,13 @@ pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     fs::rename(&partial, path).map_err(|e| e.to_string())
 }
 
+/// Writes text beside the target and renames it, like `write_json`.
+pub fn write_text(path: &Path, text: &str) -> Result<(), String> {
+    let partial = path.with_extension("part");
+    fs::write(&partial, text).map_err(|e| e.to_string())?;
+    fs::rename(&partial, path).map_err(|e| e.to_string())
+}
+
 pub fn load_meta(dir: &Path) -> Meta {
     read_json(&dir.join(META)).unwrap_or_else(|_| {
         let created = dir
@@ -231,8 +238,32 @@ pub fn save(dir: &Path, meta: &Meta, segments: &[Segment]) -> Result<(), String>
         return Ok(());
     }
     let write = |file: &str, text: String| fs::write(dir.join(file), text).map_err(|e| e.to_string());
-    write("transcript.txt", export::to_text(&lines))?;
-    write("transcript.md", export::to_markdown(&meta.title, &lines))?;
+    // Analyses go between the title and the transcript, and on their own in summary.md.
+    let (md, txt) = (crate::analysis::render_meeting(dir, meta, segments, true), crate::analysis::render_meeting(dir, meta, segments, false));
+    if md.is_empty() {
+        write("transcript.txt", export::to_text(&lines))?;
+        write("transcript.md", export::to_markdown(&meta.title, &lines))?;
+        let _ = fs::remove_file(dir.join("summary.md"));
+    } else {
+        let body = export::to_markdown(&meta.title, &lines);
+        let body = body.split_once("
+
+").map_or(body.as_str(), |(_, rest)| rest);
+        write("transcript.md", format!("# {}
+
+{md}## Transcript
+
+{body}", meta.title))?;
+        write("transcript.txt", format!("{}
+
+{txt}TRANSCRIPT
+==========
+
+{}", meta.title, export::to_text(&lines)))?;
+        write("summary.md", format!("# {}
+
+{md}", meta.title))?;
+    }
     write("transcript.srt", export::to_srt(&lines))
 }
 
@@ -265,6 +296,10 @@ pub fn list(query: &str, busy: &[String]) -> Vec<Summary> {
     let mut out = Vec::new();
     for dir in entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()) {
         let Some(id) = dir.file_name().and_then(|n| n.to_str()).map(str::to_string) else { continue };
+        // Exports, Templates and anything else kept beside the meetings aren't meetings.
+        if !id.starts_with("session-") {
+            continue;
+        }
         let meta = load_meta(&dir);
         let segments = load_segments(&dir);
         let line = |s: &Segment| format!("{}: {}", meta.name(&s.speaker), s.text);

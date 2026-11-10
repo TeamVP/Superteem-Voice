@@ -1,0 +1,70 @@
+# The default: what was concluded, separated from what was said.
+id = "meeting-summary"
+name = "Summary"
+description = "Decisions, action items (who, what, when) and open questions."
+version = 2
+
+[prompt]
+instructions = """
+Write notes that separate what was concluded from what was said. Only what was settled is a decision,
+not what was discussed. Don't repeat an action item as a decision. "I'll check..." or "I'll find out..."
+is an action item for the speaker.
+"""
+
+[bookmarks]
+expand = true
+
+[[fields]]
+key = "summary"
+type = "text"
+max_len = 600
+hint = "2-3 sentences on what it was for and where it ended up. No preamble."
+
+[[fields]]
+key = "decisions"
+type = "object-list"
+max_items = 7
+hint = "conclusions everyone agreed on: only what was settled, not what was discussed"
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 240
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "action_items"
+type = "object-list"
+label = "Action items"
+max_items = 15
+hint = "tasks someone committed to or was clearly asked to do"
+  [[fields.items]]
+  key = "who"
+  type = "person"
+  [[fields.items]]
+  key = "what"
+  type = "text"
+  max_len = 200
+  hint = "one discrete action, as an instruction starting with a verb"
+  [[fields.items]]
+  key = "when"
+  type = "when"
+  optional = true
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "open_questions"
+type = "object-list"
+label = "Open questions"
+max_items = 7
+hint = "questions nobody answered, risks, and topics left for later"
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 240
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"

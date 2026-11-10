@@ -28,6 +28,10 @@ llama-cpp-2 = { version = "=0.1.161", default-features = false }
 # Chat templates llama.cpp's built-in list doesn't know, rendered from the model's own Jinja template.
 minijinja = "3"
 minijinja-contrib = { version = "3", features = ["pycompat"] }
+# Checks downloaded models against their published fingerprints.
+sha2 = "0.10"
+# Memory and free disk space, to size the model's context and check a download fits.
+sysinfo = { version = "0.33", default-features = false, features = ["system", "disk"] }
 
 # Android records in its Kotlin foreground service, so these are Windows only.
 [target.'cfg(not(target_os = "android"))'.dependencies]

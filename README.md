@@ -20,9 +20,12 @@ Voice by Superteem turns speech into text on your PC or phone. You can dictate n
 
 - **Voice notes:** start a note and talk. Your words are written into it as you go.
 - **Meeting transcripts:** record from several microphones at once. You get a timecoded transcript with speakers recognised by voice print, plus bookmarks and action items.
+- **Summaries and action items:** decisions, action items (who, what, when) and open questions, written by a small language model that runs on your device. Templates for standups, user interviews, sales calls, lectures and more stack at the top of a meeting or note; every point links to the line it came from. Make your own from a list of headings.
 - **Voice commands (Windows):** say "Hey Superteem, start meeting", "take a note" or "bookmark that".
 - **Plain files:** each meeting is a folder of WAV audio and `transcript.json`. Text, Markdown and SRT copies are written next to them and regenerated on every edit. On Windows the folders live in `Documents\Superteem Voice`.
 - **Voice Pin (in development):** support for Seeed's wearable [reSpeaker Clip](https://github.com/Seeed-Studio/reSpeaker_Clip), which runs Seeed's own open-source firmware.
+
+Summaries use [llama.cpp](https://github.com/ggml-org/llama.cpp) with a small model you choose in Settings (Qwen2.5 1.5B, about 1.1 GB, is recommended), downloaded once. You can also point it at a local server such as Ollama.
 
 Transcription uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with the English `base.en` model. The app downloads the model (about 140 MB) once on first run and then works offline.
 

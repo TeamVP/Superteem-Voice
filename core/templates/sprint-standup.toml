@@ -1,0 +1,56 @@
+# Daily standups: one entry per person.
+id = "sprint-standup"
+name = "Sprint standup"
+description = "Per person: done since last time, doing next, and blockers."
+version = 1
+applies_to = ["meeting"]
+
+[prompt]
+instructions = """
+This is a standup. For each person who gave an update, write what they did since last time, what they'll
+do next and what blocks them, in their own terms. Leave a part empty if they didn't say it.
+"""
+
+[[fields]]
+key = "updates"
+type = "object-list"
+max_items = 15
+render = "table"
+  [[fields.items]]
+  key = "person"
+  type = "speaker"
+  [[fields.items]]
+  key = "yesterday"
+  type = "text"
+  label = "Done"
+  max_len = 240
+  [[fields.items]]
+  key = "today"
+  type = "text"
+  label = "Next"
+  max_len = 240
+  optional = true
+  [[fields.items]]
+  key = "blockers"
+  type = "text"
+  max_len = 200
+  optional = true
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "team_blockers"
+type = "object-list"
+label = "Blockers to follow up"
+max_items = 8
+  [[fields.items]]
+  key = "who"
+  type = "person"
+  [[fields.items]]
+  key = "what"
+  type = "text"
+  max_len = 200
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"

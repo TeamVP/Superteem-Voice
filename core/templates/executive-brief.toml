@@ -1,0 +1,68 @@
+# For sending upward or outward: short, outcome first.
+id = "executive-brief"
+name = "Executive brief"
+description = "A headline, the outcome, decisions, risks and asks, for someone who wasn't there."
+version = 1
+
+[prompt]
+instructions = """
+Write a brief for a busy executive who wasn't there. Lead with the outcome. Be short and concrete; name
+people only as owners of asks.
+"""
+
+[[fields]]
+key = "headline"
+type = "text"
+max_len = 160
+hint = "one sentence: the most important outcome"
+
+[[fields]]
+key = "outcome"
+type = "text"
+max_len = 500
+hint = "2-3 sentences on where things stand now"
+
+[[fields]]
+key = "decisions"
+type = "object-list"
+max_items = 5
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 200
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "risks"
+type = "object-list"
+max_items = 5
+hint = "what could go wrong or is unresolved"
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 200
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "asks"
+type = "object-list"
+max_items = 8
+hint = "what someone needs to do or approve"
+  [[fields.items]]
+  key = "who"
+  type = "person"
+  [[fields.items]]
+  key = "what"
+  type = "text"
+  max_len = 200
+  [[fields.items]]
+  key = "when"
+  type = "when"
+  optional = true
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"

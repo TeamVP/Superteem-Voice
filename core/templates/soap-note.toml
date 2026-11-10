@@ -1,0 +1,74 @@
+# A clinician's draft from their own consult recording. Never run on its own; nothing inferred.
+id = "soap-note"
+name = "SOAP note (draft)"
+description = "Subjective, objective, assessment and plan, drafted from a consult for the clinician to check."
+version = 1
+applies_to = ["meeting"]
+manual_only = true
+notice = "Draft made from a recording. It is not medical advice: check every line against the recording before using it."
+
+[prompt]
+instructions = """
+Draft a SOAP note from this consultation for the clinician to check. Record only what was said. The
+assessment and plan contain only what the clinician said; never add a diagnosis, dose, test or advice
+that wasn't spoken. Leave a section empty when it wasn't covered.
+"""
+
+[[fields]]
+key = "subjective"
+type = "object-list"
+max_items = 10
+hint = "what the patient reported: symptoms, history, concerns"
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 240
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "objective"
+type = "object-list"
+max_items = 10
+hint = "observations and measurements the clinician stated"
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 240
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "assessment"
+type = "object-list"
+max_items = 6
+hint = "the clinician's stated assessment, in their words"
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 240
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "plan"
+type = "object-list"
+max_items = 10
+hint = "treatments, referrals, tests and follow-up the clinician said"
+  [[fields.items]]
+  key = "who"
+  type = "person"
+  [[fields.items]]
+  key = "what"
+  type = "text"
+  max_len = 240
+  [[fields.items]]
+  key = "when"
+  type = "when"
+  optional = true
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"

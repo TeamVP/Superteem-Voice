@@ -65,6 +65,21 @@ pub struct Prefs {
     pub keep_audio: bool,
     /// A proxy for downloading the speech model, such as "http://proxy:8080". Empty uses the system's.
     pub proxy: String,
+    /// The language model file chosen for analyses; empty uses the first one installed.
+    pub llm_model: String,
+    /// Run the default analysis after a meeting is processed. Unset: on for PCs, off for phones.
+    pub auto_analyse: Option<bool>,
+    /// An OpenAI-compatible server to run analyses on instead of this device, such as Ollama; empty when
+    /// analyses run here. Never used unless chosen.
+    pub llm_server: String,
+    /// The model name the server knows, such as "qwen2.5:3b".
+    pub llm_server_model: String,
+}
+
+impl Prefs {
+    pub fn auto_analyse(&self) -> bool {
+        self.auto_analyse.unwrap_or(!cfg!(target_os = "android"))
+    }
 }
 
 impl Prefs {

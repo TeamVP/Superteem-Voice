@@ -1,0 +1,74 @@
+# Lectures and study.
+id = "lecture-notes"
+name = "Lecture notes"
+description = "Key concepts with explanations, examples, questions to review and assigned work."
+version = 1
+
+[prompt]
+instructions = """
+Write study notes. Explain each key concept the way the speaker did, keep the examples they gave, and
+list questions worth reviewing. Assigned reading or work goes under assigned work, owned by "Me" unless
+someone else was named.
+"""
+
+[[fields]]
+key = "overview"
+type = "text"
+max_len = 500
+hint = "2-3 sentences on what was covered"
+
+[[fields]]
+key = "concepts"
+type = "object-list"
+label = "Key concepts"
+max_items = 12
+  [[fields.items]]
+  key = "term"
+  type = "text"
+  max_len = 80
+  [[fields.items]]
+  key = "explanation"
+  type = "text"
+  max_len = 300
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "examples"
+type = "object-list"
+max_items = 8
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 240
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "review_questions"
+type = "list"
+label = "Questions to review"
+max_items = 8
+max_len = 200
+
+[[fields]]
+key = "assigned"
+type = "object-list"
+label = "Assigned work"
+max_items = 8
+  [[fields.items]]
+  key = "who"
+  type = "person"
+  [[fields.items]]
+  key = "what"
+  type = "text"
+  max_len = 200
+  [[fields.items]]
+  key = "when"
+  type = "when"
+  optional = true
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"

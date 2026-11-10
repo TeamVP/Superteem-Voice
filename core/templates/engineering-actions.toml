@@ -1,0 +1,73 @@
+# For handing work to a development team: tasks first, no narrative.
+id = "engineering-actions"
+name = "Engineering actions"
+description = "Tasks by area, blockers, technical decisions and open questions, for a dev team."
+version = 1
+
+[prompt]
+instructions = """
+Pull out the engineering work: tasks, what blocks them, and technical decisions. Skip business discussion
+unless it changes the work. Each task is one discrete change.
+"""
+
+[[fields]]
+key = "action_items"
+type = "object-list"
+label = "Tasks"
+max_items = 20
+  [[fields.items]]
+  key = "who"
+  type = "person"
+  [[fields.items]]
+  key = "what"
+  type = "text"
+  max_len = 200
+  [[fields.items]]
+  key = "area"
+  type = "enum"
+  values = ["frontend", "backend", "infra", "design", "data", "other"]
+  [[fields.items]]
+  key = "when"
+  type = "when"
+  optional = true
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "blockers"
+type = "object-list"
+max_items = 8
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 200
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "decisions"
+type = "object-list"
+label = "Technical decisions"
+max_items = 8
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 200
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "open_questions"
+type = "object-list"
+label = "Open questions"
+max_items = 8
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 200
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"

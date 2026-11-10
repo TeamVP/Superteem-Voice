@@ -602,7 +602,8 @@ function renderNote(data, dictate) {
   main.replaceChildren(
     el("div", { class: "topbar" }, status, el("span", { class: "grow" }), exporter, picker, archive, remove),
     exporter.status,
-    el("div", { class: "note" }, title, chip, body),
+    el("div", { class: "note" }, title,
+      data.id ? analysisStack("note", data.id, { speakers: ["Me"], go: (source) => selectInNote(body, source) }) : null, chip, body),
     el("div", { class: "toolbar" }, el("span", { class: "grow" }), talk, live));
   // The cursor always starts in the body; a new note starts dictating straight away.
   body.classList.toggle("empty", !data.body);
@@ -610,6 +611,27 @@ function renderNote(data, dictate) {
   getSelection().selectAllChildren(body);
   getSelection().collapseToEnd();
   if (dictate ?? !data.id) startDictation();
+}
+
+/// Selects the sentence a source points at in the note being edited.
+function selectInNote(body, source) {
+  const text = body.textContent;
+  const at = text.indexOf(source.text.slice(0, 40));
+  if (at < 0) return;
+  const end = at + source.text.length;
+  const range = document.createRange();
+  let seen = 0;
+  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const next = seen + node.textContent.length;
+    if (at >= seen && at <= next) range.setStart(node, at - seen);
+    if (end >= seen && end <= next) { range.setEnd(node, end - seen); break; }
+    seen = next;
+  }
+  body.focus();
+  getSelection().removeAllRanges();
+  getSelection().addRange(range);
+  range.startContainer.parentElement?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 async function saveNote(status) {
@@ -1580,6 +1602,21 @@ function renderSession(session, processingError, suggestion) {
     page.append(el("div", { class: "notice" }, session.model_ready
       ? "This meeting has no transcript yet. Use Transcribe (↻) above."
       : "This meeting has no transcript. Get the speech model in Settings, then use Transcribe (↻) above."));
+  }
+  // Analyses sit under the title, above the transcript; their sources jump to the line and play from it.
+  if (session.transcribed) {
+    page.append(analysisStack("meeting", id, {
+      speakers: session.speakers.filter((sp) => sp.key !== "unknown").map((sp) => sp.name),
+      go: (source) => {
+        const hit = lineEls.find((l) => l.seg.id === source.segment);
+        if (hit) {
+          hit.line.scrollIntoView({ behavior: "smooth", block: "center" });
+          hit.line.classList.add("flash");
+          setTimeout(() => hit.line.classList.remove("flash"), 1800);
+        }
+        if (player && source.at_s != null) player.seek(source.at_s);
+      },
+    }));
   }
   // Shown behind the "?" with the other notes on reading the transcript.
   const extraHelp = [];
@@ -2853,6 +2890,9 @@ async function showSettings() {
   }
   page.append(el("h2", {}, "Transcription"), el("div", { class: "group" },
     linkRow("Vocabulary", terms.length ? `${terms.length} word${terms.length === 1 ? "" : "s"}` : "Spell names and acronyms your way", () => showVocabulary())));
+  page.append(el("h2", {}, "Analysis"), el("div", { class: "group" },
+    linkRow("Summaries and action items", "The language model, and when it runs", () => showAnalysisSettings()),
+    linkRow("Templates", "Summary, standup, interview, SOAP and your own", () => showTemplates())));
   page.append(el("h2", {}, "Voices"), el("div", { class: "group" },
     linkRow("Voice prints", prints.length ? `${prints.length} saved` : "None yet", () => showVoicePrints()),
     linkRow("Default microphone and voice print", prefs.enrol_input ?? "Not set up", () => showOnboarding(SETUP.voice)),

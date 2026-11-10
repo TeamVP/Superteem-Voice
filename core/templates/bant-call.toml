@@ -1,0 +1,63 @@
+# Sales qualification: budget, authority, need, timeline.
+id = "bant-call"
+name = "BANT sales call"
+description = "Budget, authority, need and timeline, each confirmed, unclear or not discussed, with next steps."
+version = 1
+applies_to = ["meeting"]
+
+[prompt]
+instructions = """
+This is a sales call. For budget, authority, need and timeline, say whether the prospect confirmed it,
+it's unclear, or it wasn't discussed, with the detail they gave. "not discussed" is the honest answer
+when it didn't come up; never guess a budget or a decision-maker.
+"""
+
+[[fields]]
+key = "summary"
+type = "text"
+max_len = 400
+hint = "2 sentences on the prospect and where the deal stands"
+
+[[fields]]
+key = "qualification"
+type = "object-list"
+max_items = 4
+render = "table"
+hint = "exactly four items, in order: budget, authority, need, timeline"
+  [[fields.items]]
+  key = "criterion"
+  type = "text"
+  max_len = 20
+  [[fields.items]]
+  key = "status"
+  type = "enum"
+  values = ["confirmed", "unclear", "not discussed"]
+  [[fields.items]]
+  key = "detail"
+  type = "text"
+  max_len = 240
+  optional = true
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+  optional = true
+
+[[fields]]
+key = "next_steps"
+type = "object-list"
+label = "Next steps"
+max_items = 8
+  [[fields.items]]
+  key = "who"
+  type = "person"
+  [[fields.items]]
+  key = "what"
+  type = "text"
+  max_len = 200
+  [[fields.items]]
+  key = "when"
+  type = "when"
+  optional = true
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"

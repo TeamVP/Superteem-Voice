@@ -1,5 +1,6 @@
 //! Voice by Superteem, shared by Windows and Android.
 
+pub mod analysis;
 #[cfg(not(target_os = "android"))]
 pub mod capture;
 pub mod exports;
@@ -56,6 +57,14 @@ struct AppState {
     queue: Mutex<std::collections::VecDeque<String>>,
     /// Edits to one session are read, changed and written as a unit.
     edit: Mutex<()>,
+    /// Analyses waiting their turn, and the one running.
+    analysis_queue: Mutex<std::collections::VecDeque<Job>>,
+    analysing: Mutex<Option<Job>>,
+    analysis_worker: std::sync::atomic::AtomicBool,
+    analysis_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The catalogue model being downloaded.
+    llm_downloading: Mutex<Option<String>>,
+    llm_download_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl AppState {
@@ -138,7 +147,13 @@ fn enqueue<R: Runtime>(app: &AppHandle<R>, id: String) {
             };
             process::process_session(&dir, &report)
         });
-        let _ = app.emit("processed", Processed { id, summary });
+        let ok = summary.is_ok();
+        let _ = app.emit("processed", Processed { id: id.clone(), summary });
+        // The default analysis follows a processed meeting, when the person wants that and a model is here.
+        let p = prefs::load();
+        if ok && p.auto_analyse() && (!p.llm_server.trim().is_empty() || !llm::installed().is_empty()) {
+            enqueue_analysis(&app, Job { kind: "meeting".into(), id, template: stv_core::analysis::DEFAULT_TEMPLATE.into() });
+        }
     });
 }
 
@@ -1107,7 +1122,9 @@ fn set_note_status(id: String, status: String) -> Result<(), String> {
 
 #[tauri::command]
 fn delete_note(id: String) -> Result<(), String> {
-    notes::delete(&id)
+    notes::delete(&id)?;
+    analysis::forget_note(&id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1321,6 +1338,307 @@ fn open_folder(id: Option<String>) -> Result<(), String> {
     std::process::Command::new("explorer").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+// ---------- Analyses
+
+/// One analysis waiting to run, or running.
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+struct Job {
+    kind: String,
+    id: String,
+    template: String,
+}
+
+#[derive(Serialize, Clone)]
+struct AnalysisQueue {
+    current: Option<Job>,
+    waiting: Vec<Job>,
+}
+
+fn analysis_queue_state(state: &AppState) -> AnalysisQueue {
+    AnalysisQueue { current: state.analysing.lock().unwrap().clone(), waiting: state.analysis_queue.lock().unwrap().iter().cloned().collect() }
+}
+
+#[derive(Serialize, Clone)]
+struct AnalysisProgress {
+    #[serde(flatten)]
+    job: Job,
+    part: usize,
+    parts: usize,
+}
+
+#[derive(Serialize, Clone)]
+struct Analysed {
+    #[serde(flatten)]
+    job: Job,
+    error: Option<String>,
+}
+
+/// The model analyses run on: a local server when one is chosen, else the chosen model file here.
+fn analysis_engine(cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(Box<dyn stv_core::analysis::Model>, analysis::Engine), String> {
+    let p = prefs::load();
+    if !p.llm_server.trim().is_empty() {
+        let server = llm::Endpoint::new(&p.llm_server, &p.llm_server_model, cancel)?;
+        let engine = analysis::Engine { kind: "server".into(), model: server.model.clone(), host: Some(server.host()) };
+        return Ok((Box::new(server), engine));
+    }
+    let path = llm::chosen(&p.llm_model).ok_or("No language model is installed. Get one in Settings › Analysis.")?;
+    let device = llm::device();
+    let local = llm::Local::load(&path, device.context, device.threads, cancel)?;
+    let engine = analysis::Engine { kind: "local".into(), model: local.name.clone(), host: None };
+    Ok((Box::new(local), engine))
+}
+
+/// Adds an analysis to the queue, starting the worker if it is idle. Analyses wait while anything is
+/// recorded or processed, since speech to text needs the processor and the memory, and the model is let go
+/// once the queue is empty.
+fn enqueue_analysis<R: Runtime>(app: &AppHandle<R>, job: Job) {
+    let state = app.state::<AppState>();
+    if state.analysing.lock().unwrap().as_ref() == Some(&job) || state.analysis_queue.lock().unwrap().contains(&job) {
+        return;
+    }
+    let start_worker = {
+        let mut queue = state.analysis_queue.lock().unwrap();
+        queue.push_back(job);
+        state.analysing.lock().unwrap().is_none() && !state.analysis_worker.swap(true, std::sync::atomic::Ordering::SeqCst)
+    };
+    let _ = app.emit("analysis-queue", analysis_queue_state(&state));
+    if !start_worker {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let mut engine: Option<(Box<dyn stv_core::analysis::Model>, analysis::Engine)> = None;
+        loop {
+            while state.busy() || state.processing.lock().unwrap().is_some() {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            let next = {
+                let mut queue = state.analysis_queue.lock().unwrap();
+                let next = queue.pop_front();
+                *state.analysing.lock().unwrap() = next.clone();
+                if next.is_none() {
+                    state.analysis_worker.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
+                next
+            };
+            let _ = app.emit("analysis-queue", analysis_queue_state(&state));
+            let Some(job) = next else { break };
+            state.analysis_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+            let outcome = (|| {
+                if engine.is_none() {
+                    engine = Some(analysis_engine(state.analysis_cancel.clone())?);
+                }
+                let (model, info) = engine.as_mut().expect("just loaded");
+                let item = analysis::Item::new(&job.kind, &job.id)?;
+                let report = |part, parts| drop(app.emit("analysing", AnalysisProgress { job: job.clone(), part, parts }));
+                let entry = analysis::make(&item, &job.template, model.as_mut(), info.clone(), report)?;
+                let _guard = state.edit.lock().unwrap();
+                analysis::put(&item, entry)
+            })();
+            let _ = app.emit("analysed", Analysed { job, error: outcome.err() });
+        }
+        *state.analysing.lock().unwrap() = None;
+    });
+}
+
+#[derive(Serialize)]
+struct AnalysesView {
+    entries: Vec<analysis::EntryView>,
+    templates: Vec<analysis::TemplateInfo>,
+    queue: AnalysisQueue,
+    /// A model is installed here, or a server is chosen.
+    ready: bool,
+}
+
+#[tauri::command]
+fn get_analyses(state: State<AppState>, kind: String, id: String) -> Result<AnalysesView, String> {
+    let item = analysis::Item::new(&kind, &id)?;
+    let p = prefs::load();
+    Ok(AnalysesView {
+        entries: analysis::view(&item),
+        templates: analysis::templates().into_iter().filter(|t| t.applies_to.contains(&kind) && t.errors.is_empty()).map(|t| analysis::TemplateInfo { template: None, ..t }).collect(),
+        queue: analysis_queue_state(&state),
+        ready: !p.llm_server.trim().is_empty() || !llm::installed().is_empty(),
+    })
+}
+
+#[tauri::command]
+fn analyse<R: Runtime>(app: AppHandle<R>, kind: String, id: String, template: String) -> Result<(), String> {
+    analysis::Item::new(&kind, &id)?;
+    analysis::template(&template)?;
+    enqueue_analysis(&app, Job { kind, id, template });
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_analysis<R: Runtime>(app: AppHandle<R>, kind: String, id: String, template: String) {
+    let state = app.state::<AppState>();
+    let job = Job { kind, id, template };
+    state.analysis_queue.lock().unwrap().retain(|j| j != &job);
+    if state.analysing.lock().unwrap().as_ref() == Some(&job) {
+        state.analysis_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    let _ = app.emit("analysis-queue", analysis_queue_state(&state));
+}
+
+#[tauri::command]
+fn edit_analysis(state: State<AppState>, kind: String, id: String, template: String, edit: analysis::Edit) -> Result<(), String> {
+    let _guard = state.edit.lock().unwrap();
+    analysis::edit(&analysis::Item::new(&kind, &id)?, &template, edit)
+}
+
+#[tauri::command]
+fn remove_analysis(state: State<AppState>, kind: String, id: String, template: String) -> Result<(), String> {
+    let _guard = state.edit.lock().unwrap();
+    analysis::remove(&analysis::Item::new(&kind, &id)?, &template)
+}
+
+#[tauri::command]
+fn move_analysis(state: State<AppState>, kind: String, id: String, template: String, by: i32) -> Result<(), String> {
+    let _guard = state.edit.lock().unwrap();
+    analysis::shift(&analysis::Item::new(&kind, &id)?, &template, by)
+}
+
+#[derive(Serialize)]
+struct LlmStatus {
+    catalogue: &'static [llm::Catalogued],
+    installed: Vec<llm::Installed>,
+    /// The file analyses run with.
+    chosen: Option<String>,
+    device: llm::Device,
+    server: String,
+    server_model: String,
+    auto: bool,
+    downloading: Option<String>,
+    folder: String,
+}
+
+#[tauri::command]
+fn llm_status(state: State<AppState>) -> LlmStatus {
+    let p = prefs::load();
+    LlmStatus {
+        catalogue: llm::CATALOGUE,
+        installed: llm::installed(),
+        chosen: llm::chosen(&p.llm_model).and_then(|path| path.file_name().map(|n| n.to_string_lossy().into_owned())),
+        device: llm::device(),
+        auto: p.auto_analyse(),
+        server: p.llm_server,
+        server_model: p.llm_server_model,
+        downloading: state.llm_downloading.lock().unwrap().clone(),
+        folder: llm::dir().to_string_lossy().into_owned(),
+    }
+}
+
+#[derive(Serialize, Clone)]
+struct LlmDownload {
+    id: String,
+    fraction: f32,
+}
+
+#[tauri::command]
+async fn download_llm<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(), String> {
+    {
+        let state = app.state::<AppState>();
+        let mut downloading = state.llm_downloading.lock().unwrap();
+        if downloading.is_some() {
+            return Err("A model is already downloading.".into());
+        }
+        *downloading = Some(id.clone());
+        state.llm_download_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+    let handle = app.clone();
+    let result = blocking(move || {
+        let state = handle.state::<AppState>();
+        let cancel = state.llm_download_cancel.clone();
+        llm::download(&id, &cancel, |fraction| drop(handle.emit("llm-download", LlmDownload { id: id.clone(), fraction })))
+    })
+    .await;
+    *app.state::<AppState>().llm_downloading.lock().unwrap() = None;
+    result?
+}
+
+#[tauri::command]
+fn cancel_llm_download(state: State<AppState>) {
+    state.llm_download_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[tauri::command]
+fn delete_llm(file: String) -> Result<(), String> {
+    llm::delete(&file)
+}
+
+#[tauri::command]
+fn save_analysis_settings(model: Option<String>, auto: Option<bool>, server: Option<String>, server_model: Option<String>) -> Result<(), String> {
+    if let Some(s) = server.as_deref().filter(|s| !s.trim().is_empty()) {
+        llm::Endpoint::new(s, "", Default::default())?;
+    }
+    prefs::update(|p| {
+        if let Some(m) = model {
+            p.llm_model = m;
+        }
+        if let Some(a) = auto {
+            p.auto_analyse = Some(a);
+        }
+        if let Some(s) = server {
+            p.llm_server = s.trim().to_string();
+        }
+        if let Some(m) = server_model {
+            p.llm_server_model = m.trim().to_string();
+        }
+    })
+    .map(|_| ())
+}
+
+fn open_dir(dir: &Path) -> Result<(), String> {
+    if cfg!(target_os = "android") {
+        return Err("Folders can't be opened on Android.".into());
+    }
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_llm_folder() -> Result<(), String> {
+    open_dir(&llm::dir())
+}
+
+#[tauri::command]
+fn open_templates_folder() -> Result<(), String> {
+    open_dir(&analysis::templates_dir())
+}
+
+#[tauri::command]
+fn list_templates() -> Vec<analysis::TemplateInfo> {
+    analysis::templates()
+}
+
+#[derive(Serialize)]
+struct TemplateSource {
+    source: String,
+    file: Option<String>,
+}
+
+#[tauri::command]
+fn template_source(id: String) -> Result<TemplateSource, String> {
+    analysis::template_source(&id).map(|(source, file)| TemplateSource { source, file })
+}
+
+#[tauri::command]
+fn save_template(source: String, file: Option<String>) -> Result<String, String> {
+    analysis::save_template(&source, file.as_deref())
+}
+
+#[tauri::command]
+fn delete_template(file: String) -> Result<(), String> {
+    analysis::delete_template(&file)
+}
+
+#[tauri::command]
+fn new_template(name: String, headings: Vec<(String, stv_core::analysis::HeadingKind)>) -> Result<String, String> {
+    analysis::new_template(&name, &headings)
+}
+
 fn capture_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("capture")
         .setup(|_app, _api| {
@@ -1438,6 +1756,24 @@ pub fn run() {
             install_update,
             open_link,
             dictation_problem,
+            get_analyses,
+            analyse,
+            cancel_analysis,
+            edit_analysis,
+            remove_analysis,
+            move_analysis,
+            llm_status,
+            download_llm,
+            cancel_llm_download,
+            delete_llm,
+            save_analysis_settings,
+            open_llm_folder,
+            open_templates_folder,
+            list_templates,
+            template_source,
+            save_template,
+            delete_template,
+            new_template,
         ])
         .run(tauri::generate_context!())
         .expect("the app failed to start");

@@ -1,0 +1,83 @@
+# Product discovery interviews.
+id = "user-feedback"
+name = "User feedback"
+description = "Context, pains, workarounds, requests and sentiment from a user interview."
+version = 1
+applies_to = ["meeting"]
+
+[prompt]
+instructions = """
+This is a user interview for product discovery. Capture what the participant said about their work and
+problems, in their terms. Report their words as evidence; don't put words in their mouth or present a
+paraphrase as a quote. Ignore the interviewer's own opinions.
+"""
+
+[[fields]]
+key = "context"
+type = "text"
+max_len = 400
+hint = "who the participant is and how they work, as they described it"
+
+[[fields]]
+key = "pains"
+type = "object-list"
+max_items = 8
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 220
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "workarounds"
+type = "object-list"
+label = "Current workarounds"
+max_items = 6
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 220
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "requests"
+type = "object-list"
+label = "Feature requests"
+max_items = 8
+  [[fields.items]]
+  key = "point"
+  type = "text"
+  max_len = 220
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "sentiment"
+type = "enum"
+values = ["positive", "mixed", "negative", "unclear"]
+hint = "the participant's overall feeling about the product or problem area"
+
+[[fields]]
+key = "follow_ups"
+type = "object-list"
+label = "Follow-ups"
+max_items = 6
+  [[fields.items]]
+  key = "who"
+  type = "person"
+  [[fields.items]]
+  key = "what"
+  type = "text"
+  max_len = 200
+  [[fields.items]]
+  key = "when"
+  type = "when"
+  optional = true
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"

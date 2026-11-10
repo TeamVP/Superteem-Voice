@@ -345,7 +345,17 @@ fn meeting_transcript(m: &MeetingExport, format: &str) -> Result<String, String>
                 with.push(Line { speaker, start_s: k.at_s, end_s: k.at_s, text: k.note.clone() });
             }
             with.sort_by(|a, b| a.start_s.total_cmp(&b.start_s));
-            if format == "txt" { format!("{}\n\n{}", m.title, export::to_text(&with)) } else { export::to_markdown(m.title, &with) }
+            let analyses = crate::analysis::render_meeting(m.dir, m.meta, m.segments, format == "md");
+            match (format, analyses.is_empty()) {
+                ("txt", true) => format!("{}\n\n{}", m.title, export::to_text(&with)),
+                ("txt", false) => format!("{}\n\n{analyses}TRANSCRIPT\n==========\n\n{}", m.title, export::to_text(&with)),
+                (_, true) => export::to_markdown(m.title, &with),
+                (_, false) => {
+                    let body = export::to_markdown(m.title, &with);
+                    let body = body.split_once("\n\n").map_or(body.as_str(), |(_, rest)| rest).to_string();
+                    format!("# {}\n\n{analyses}## Transcript\n\n{body}", m.title)
+                }
+            }
         }
         "srt" => export::to_srt(&lines),
         "vtt" => export::to_vtt(&lines),
@@ -448,9 +458,14 @@ pub fn export_note(id: &str, format: &str) -> Result<PathBuf, String> {
     let name = file_name(&title);
     fs::create_dir_all(dir()).map_err(|e| e.to_string())?;
     let body = note.body.trim_end();
-    let text = |format: &str| match format {
-        "md" => format!("# {title}\n\n{body}\n"),
-        _ => format!("{title}\n\n{body}\n"),
+    let text = |format: &str| {
+        let analyses = crate::analysis::render_note(&note, format == "md");
+        match (format, analyses.is_empty()) {
+            ("md", true) => format!("# {title}\n\n{body}\n"),
+            ("md", false) => format!("# {title}\n\n{analyses}## Note\n\n{body}\n"),
+            (_, true) => format!("{title}\n\n{body}\n"),
+            (_, false) => format!("{title}\n\n{analyses}NOTE\n====\n\n{body}\n"),
+        }
     };
     match format {
         "txt" | "md" => {
