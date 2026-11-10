@@ -5,7 +5,8 @@ edition = "2021"
 license = "GPL-3.0-only"
 
 [lib]
-# Android loads the app as a shared library; Windows links it into the exe.
+# Android loads the app as a shared library, the iPhone links the static one into its Xcode project, and
+# Windows and the Mac link it into the executable.
 name = "superteem_voice_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -33,14 +34,22 @@ sha2 = "0.10"
 # Memory and free disk space, to size the model's context and check a download fits.
 sysinfo = { version = "0.33", default-features = false, features = ["system", "disk"] }
 
-# Android records in its Kotlin foreground service, so these are Windows only.
+# Android records in its Kotlin foreground service, so these are for Windows, the Mac and the iPhone.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 btleplug = "0.11"
 cpal = "0.15"
 futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
-trash = "5"
 uuid = "1"
+
+# Deleted meetings go to the Recycle Bin or the Trash. Phones have neither.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+trash = "5"
+
+# The iPhone's audio session is set up through Objective-C, and its links open through the system.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+tauri-plugin-opener = "2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

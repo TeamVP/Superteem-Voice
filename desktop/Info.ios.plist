@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the iPhone app's Info.plist by the Tauri CLI. -->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Voice by Superteem records your notes and meetings and transcribes them on this iPhone. Nothing is uploaded.</string>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>Voice by Superteem records from Voice Pins over Bluetooth.</string>
+  <!-- A meeting keeps recording while the screen is locked or another app is open. -->
+  <key>UIBackgroundModes</key>
+  <array>
+    <string>audio</string>
+    <string>bluetooth-central</string>
+  </array>
+  <!-- Meetings and notes are plain files, shown in the Files app under On My iPhone. -->
+  <key>UIFileSharingEnabled</key>
+  <true/>
+  <key>LSSupportsOpeningDocumentsInPlace</key>
+  <true/>
+  <!-- Only standard HTTPS, to download the speech model, so App Store Connect asks nothing about export. -->
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
+</dict>
+</plist>

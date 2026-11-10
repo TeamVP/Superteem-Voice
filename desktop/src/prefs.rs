@@ -78,7 +78,7 @@ pub struct Prefs {
 
 impl Prefs {
     pub fn auto_analyse(&self) -> bool {
-        self.auto_analyse.unwrap_or(!cfg!(target_os = "android"))
+        self.auto_analyse.unwrap_or(!cfg!(any(target_os = "android", target_os = "ios")))
     }
 }
 

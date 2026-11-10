@@ -1,4 +1,5 @@
-# Builds the Windows and Android apps and publishes them as a GitHub release when a version tag such as v0.2.0 is pushed.
+# Builds the Windows, Mac and Android apps and publishes them as a GitHub release when a version tag such as v0.2.0 is
+# pushed. The iPhone app is built too, and sent to TestFlight when Apple's signing secrets are set.
 # The download page at voice.superteem.com links to the latest release's files by these fixed names.
 # Run it by hand from the Actions tab to build without publishing; the files are then kept as workflow artifacts.
 name: Release
@@ -13,6 +14,7 @@ permissions:
 env:
   WINDOWS_FILE: Voice-by-Superteem-Setup-x64.exe
   ANDROID_FILE: Voice-by-Superteem-Android.apk
+  MAC_FILE: Voice-by-Superteem-macOS.dmg
 
 jobs:
   version:
@@ -216,9 +218,132 @@ jobs:
           path: dist/
           if-no-files-found: ignore
 
-  # Publishes whatever was built. The Windows app is required; Android is left out if it failed.
+  # The Mac app, for Apple silicon. Signed and notarized with the Developer ID secrets when they are set:
+  # APPLE_CERTIFICATE (the .p12, base64), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, and for
+  # notarizing APPLE_API_ISSUER, APPLE_API_KEY and APPLE_API_KEY_P8 (the App Store Connect key's text).
+  # Without them it is signed ad hoc, which runs on Apple silicon once it is allowed in Privacy & Security.
+  macos:
+    needs: version
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+          prefix-key: v2-shared-ggml-mac
+      - name: Build the disk image
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          # Tauri takes a variable that is set but empty, as a missing secret is, as one to use.
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            if [ -n "$APPLE_API_KEY_P8" ] && [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_ISSUER" ]; then
+              export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+              printf '%s\n' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY_PATH"
+            else
+              unset APPLE_API_ISSUER APPLE_API_KEY
+              echo "::warning::The App Store Connect key isn't set, so the Mac app is signed but not notarized."
+            fi
+          else
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_API_ISSUER APPLE_API_KEY
+            export APPLE_SIGNING_IDENTITY=-
+            echo "::warning::The Developer ID secrets aren't set, so the Mac app is signed ad hoc and macOS asks before it first opens."
+          fi
+          unset APPLE_API_KEY_P8
+          rustup target add aarch64-apple-darwin
+          source desktop/build-env.sh
+          cd desktop
+          npm ci
+          npm run tauri -- build --bundles dmg --target aarch64-apple-darwin
+          mkdir -p ../dist
+          cp target/aarch64-apple-darwin/release/bundle/dmg/*.dmg "../dist/$MAC_FILE"
+          ls -l ../dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/
+
+  # The iPhone app. Its Xcode project is made fresh each time by `tauri ios init`. Without signing secrets
+  # it is built for the Simulator, which checks everything compiles. With them (APPLE_DEVELOPMENT_TEAM,
+  # IOS_CERTIFICATE, IOS_CERTIFICATE_PASSWORD, IOS_MOBILE_PROVISION, and the App Store Connect key above)
+  # it is built for the App Store and a tagged release is uploaded to TestFlight. The .ipa isn't put in the
+  # GitHub release, as an App Store build can only be installed through Apple.
+  ios:
+    needs: version
+    runs-on: macos-15
+    # A step's own env isn't readable in its `if`, so whether the secrets are set is said here.
+    env:
+      IOS_SIGNED: ${{ secrets.IOS_CERTIFICATE != '' }}
+      TESTFLIGHT: ${{ secrets.APPLE_API_KEY_P8 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+          prefix-key: v2-shared-ggml-ios
+      - name: Make the Xcode project
+        run: |
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          source desktop/build-env.sh
+          cd desktop
+          npm ci
+          npm run tauri -- ios init --ci
+          # The iPhone's icons, with no transparency, which the App Store refuses.
+          npm run tauri -- icon icons/icon.png --ios-color '#ffffff'
+      - name: Build for the Simulator
+        if: env.IOS_SIGNED != 'true'
+        run: |
+          echo "::warning::The iPhone signing secrets aren't set, so the app is only built for the Simulator."
+          source desktop/build-env.sh
+          cd desktop
+          # Through the Tauri CLI, as the Xcode project's build step asks the running CLI how to build the Rust.
+          npm run tauri -- ios build --target aarch64-sim --no-sign
+      - name: Build for the App Store
+        if: env.IOS_SIGNED == 'true'
+        env:
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+        run: |
+          source desktop/build-env.sh
+          cd desktop
+          npm run tauri -- ios build --export-method app-store-connect
+          mkdir -p ../dist
+          cp gen/apple/build/arm64/*.ipa ../dist/Voice-by-Superteem-iOS.ipa
+          ls -l ../dist
+      - name: Upload to TestFlight
+        if: env.IOS_SIGNED == 'true' && env.TESTFLIGHT == 'true' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s\n' "$APPLE_API_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_$APPLE_API_KEY.p8
+          xcrun altool --upload-app --type ios --file dist/Voice-by-Superteem-iOS.ipa \
+            --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: dist/
+          if-no-files-found: ignore
+
+  # Publishes whatever was built. The Windows app is required; Android and the Mac are left out if they failed.
   release:
-    needs: [windows, android]
+    needs: [windows, android, macos]
     if: startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.windows.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -229,6 +354,8 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+          # The iPhone app goes to TestFlight, not the release.
+          pattern: "{windows,android,macos}"
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}

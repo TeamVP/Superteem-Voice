@@ -430,7 +430,7 @@ async function showAnalysisSettings(message) {
     "Download one once; after that it works offline and nothing is sent anywhere."));
   if (message) page.append(el("div", { class: "notice" }, message));
   const { device } = status;
-  page.append(el("p", { class: "hint" }, `This ${platform === "android" ? "phone" : "computer"} has ${device.ram_gb.toFixed(0)} GB of memory, so models read up to ${device.context.toLocaleString()} tokens at a time${device.too_small ? ". That's too little to run a model well here; a local server (below) can do it instead." : "."}`));
+  page.append(el("p", { class: "hint" }, `This ${isPhone() ? "phone" : "computer"} has ${device.ram_gb.toFixed(0)} GB of memory, so models read up to ${device.context.toLocaleString()} tokens at a time${device.too_small ? ". That's too little to run a model well here; a local server (below) can do it instead." : "."}`));
 
   const installed = new Map(status.installed.map((i) => [i.file, i]));
   const group = el("div", { class: "group" });
@@ -468,7 +468,7 @@ async function showAnalysisSettings(message) {
     } }, svg("trash", 16)));
     group.append(row);
   }
-  if (platform === "windows") {
+  if (isDesktop()) {
     group.append(el("div", { class: "row" }, el("span", { class: "label" }, "Your own model",
       el("small", {}, "Put any instruct model in GGUF format in the models folder and it appears here.")),
       el("button", { class: "pill", onclick: () => invoke("open_llm_folder").catch((e) => showError(page, e)) }, "Open folder"),
@@ -566,7 +566,7 @@ async function showTemplates(message) {
       el("button", { class: "link", type: "button", onclick: () => addRow() }, "+ Add heading")),
     el("div", { class: "row" }, el("span", { class: "grow" }), create));
   page.append(el("h2", {}, "New template"), form);
-  if (platform === "windows") {
+  if (isDesktop()) {
     page.append(el("p", { class: "hint" }, "Templates are TOML files in your Superteem Voice folder, so they can also be edited in any text editor. ",
       el("button", { class: "link inline", onclick: () => invoke("open_templates_folder") }, "Open the folder")));
   }

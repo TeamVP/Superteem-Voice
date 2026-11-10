@@ -229,7 +229,7 @@ pub fn device() -> Device {
     let ram_gb = sys.total_memory() as f32 / 1e9;
     let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
     // Big cores only on phones; half the threads on a PC so the rest of it stays responsive.
-    let threads = if cfg!(target_os = "android") { cores.min(4) } else { (cores / 2).clamp(2, 8) } as i32;
+    let threads = if cfg!(any(target_os = "android", target_os = "ios")) { cores.min(4) } else { (cores / 2).clamp(2, 8) } as i32;
     let context = if ram_gb >= 6.0 { 8192 } else { 4096 };
     Device { ram_gb, context, threads, too_small: ram_gb < 2.5 }
 }

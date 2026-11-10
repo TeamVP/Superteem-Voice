@@ -474,7 +474,7 @@ select.plain, input.plain { padding: 6px 10px; border: 1px solid var(--line); bo
 .agent .agent-actions button { border-radius: 999px; min-height: 44px; padding: 0 20px; }
 .agent .agent-actions .ghost { background: transparent; border-color: #4a4d56; color: #fff; }
 
-body[data-platform="android"] .windows-only { display: none !important; }
+body:is([data-platform="android"], [data-platform="ios"]) .windows-only { display: none !important; }
 
 /* Phone: the list and the page take turns filling the screen. */
 @media (max-width: 720px) {
@@ -828,3 +828,5 @@ li:hover > .when-chip.empty, .when-chip.empty:focus-visible { opacity: 0.7; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .who-chip, :root:not([data-theme="light"]) .row .badge { background: var(--key-3); color: var(--key-light); }
 }
+/* The iPhone draws the page under its status bar and home indicator, so the page keeps clear of them. */
+body[data-platform="ios"] { box-sizing: border-box; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }

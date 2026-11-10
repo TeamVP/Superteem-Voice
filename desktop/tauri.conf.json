@@ -32,7 +32,16 @@
     "publisher": "Superteem",
     "homepage": "https://voice.superteem.com",
     "license": "GPL-3.0-only",
+    "category": "Productivity",
     "icon": ["icons/icon.png", "icons/icon.ico"],
+    "macOS": {
+      "minimumSystemVersion": "13.3",
+      "entitlements": "Entitlements.plist"
+    },
+    "iOS": {
+      "minimumSystemVersion": "16.4",
+      "frameworks": ["Accelerate", "AudioToolbox", "AVFAudio", "CoreBluetooth"]
+    },
     "windows": {
       "nsis": {
         "installMode": "currentUser",

@@ -23,8 +23,8 @@ const SAME_LINE_S: f64 = 1.0;
 // ---------------------------------------------------------------------------------------------------------
 // Templates
 
-/// Where people's own templates live: beside the meetings on Windows, where any text editor can open them;
-/// in the app's own folder on Android.
+/// Where people's own templates live: beside the meetings on Windows, the Mac and iPhone (where Files shows
+/// them), so any text editor can open them; in the app's own folder on Android.
 pub fn templates_dir() -> PathBuf {
     if cfg!(target_os = "android") { library::data_dir().join("templates") } else { library::root().join("Templates") }
 }

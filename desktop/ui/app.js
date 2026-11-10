@@ -20,6 +20,12 @@ let pollTimer = null;
 let stopping = false;
 let player = null;
 let platform = "windows";
+/// Windows and the Mac record in the app, listen for "Hey Superteem" and open folders; Android and the
+/// iPhone are phones, which do neither.
+const isDesktop = () => platform === "windows" || platform === "macos";
+const isPhone = () => platform === "android" || platform === "ios";
+/// Where deleted meetings go, on the computers that have one.
+const binName = () => platform === "macos" ? "Trash" : "Recycle Bin";
 let progress = null;
 // Meetings being processed one at a time, while another can be recorded: { current, waiting }.
 let queue = { current: null, waiting: [] };
@@ -142,7 +148,7 @@ function exportMenu(choices, run) {
         const path = await run(format);
         const name = path.split(/[\\/]/).pop();
         status.replaceChildren(svg("check", 14), ` Exported ${name}`,
-          platform === "windows" ? el("button", { class: "link inline", type: "button", onclick: () => invoke("reveal_export", { path }).catch(() => {}) }, "Show in folder") : ` to ${path}`,
+          isDesktop() ? el("button", { class: "link inline", type: "button", onclick: () => invoke("reveal_export", { path }).catch(() => {}) }, platform === "macos" ? "Show in Finder" : "Show in folder") : ` to ${path}`,
           el("button", { class: "icon-only", type: "button", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { status.hidden = true; } }, svg("close", 14)));
       } catch (e) {
         status.replaceChildren(el("span", { class: "danger" }, String(e)),
@@ -565,7 +571,7 @@ function renderNote(data, dictate) {
   });
   const title = el("input", { class: "note-title", placeholder: "Title", value: data.title, "aria-label": "Title" });
   // An editable div rather than a textarea, so a dictation can hold its place in the text.
-  const body = el("div", { class: "note-body", id: "note-body", contenteditable: "plaintext-only", role: "textbox", "aria-multiline": "true", "data-placeholder": platform === "android"
+  const body = el("div", { class: "note-body", id: "note-body", contenteditable: "plaintext-only", role: "textbox", "aria-multiline": "true", "data-placeholder": isPhone()
     ? "Start typing, or press Dictate to speak up to 2 minutes at a time. The words go where the cursor is when you press the tick."
     : "Start typing, or press Dictate (Ctrl + Space) to speak up to 2 minutes at a time. The words go where the cursor is when you press the tick.", "aria-label": "Note" });
   body.textContent = data.body;
@@ -884,7 +890,7 @@ function showDictationError(e) {
 
 // Ctrl + Space starts dictation in a note, and finishes it; Esc cancels it.
 window.addEventListener("keydown", (e) => {
-  if (view.kind !== "note" || platform === "android") return;
+  if (view.kind !== "note" || isPhone()) return;
   if (e.code === "Space" && e.ctrlKey) {
     e.preventDefault();
     if (!e.repeat) dictation ? stopDictation() : startDictation();
@@ -971,7 +977,7 @@ async function showMeeting() {
 
   // Tracks are only microphones known to work; finding, testing and hiding devices happens in Devices.
   // Android records through its own service, so there every microphone is offered as it is.
-  const testing = platform !== "android";
+  const testing = !isPhone();
   const known = testing ? knownMics(devices) : devices;
   const boxes = known.map((name) => {
     const connected = devices.includes(name);
@@ -1094,7 +1100,7 @@ async function showDevices(fromTracks = false) {
     el("h2", {}, "Microphones"),
     el("div", { class: "mic-list" }, rows.map((r) => r.row),
       shown.length ? null : el("div", { class: "empty" }, "No microphones to show.")),
-    el("div", { class: "legend" }, "To add a microphone, plug it in or pair it in Windows Bluetooth settings, then press Refresh devices."),
+    el("div", { class: "legend" }, `To add a microphone, plug it in or pair it in ${platform === "macos" ? "the Mac's" : "Windows"} Bluetooth settings, then press Refresh devices.`),
     hiddenList.length ? el("details", { class: "hidden-mics" }, el("summary", {}, `Hidden (${hiddenList.length})`),
       el("div", { class: "mic-list" }, hiddenList.map((name) => el("div", { class: "mic-row device untested" },
         el("span", { class: "mic-name" }, name), el("span", { class: "mic-state" }, devices.includes(name) ? "" : "Not connected"),
@@ -1546,14 +1552,14 @@ function renderSession(session, processingError, suggestion) {
     }
   };
   const remove = deleteMenu([
-    ["delete", platform === "android" ? "Delete permanently" : "Move to Recycle Bin",
-      platform === "android" ? "The whole meeting, transcript and audio" : "The whole meeting. It can be restored from the Recycle Bin."],
+    ["delete", isPhone() ? "Delete permanently" : `Move to ${binName()}`,
+      isPhone() ? "The whole meeting, transcript and audio" : `The whole meeting. It can be restored from the ${binName()}.`],
     ["compact", "Compact", compactWhy ?? `Delete only the audio and keep the transcript · frees ${sizeText(session.audio_bytes)}`, !!compactWhy],
   ], (choice) => {
     if (choice === "compact") {
       askFirst(`Delete this meeting's audio for good and free ${sizeText(session.audio_bytes)}? The transcript, names, bookmarks and action items stay and can still be edited and exported, `
         + "but the meeting can't be played or transcribed again. This can't be undone.", "Delete audio", compact);
-    } else if (platform === "android") {
+    } else if (isPhone()) {
       askFirst("Delete this meeting and its audio for good? This can't be undone.", "Delete", deleteWhole);
     } else {
       deleteWhole();
@@ -1580,7 +1586,7 @@ function renderSession(session, processingError, suggestion) {
     meta.duration_s ? el("span", { title: clock(meta.duration_s) }, `Length: ${lengthText(meta.duration_s)}`) : null,
     el("span", { class: "grow" }),
     session.segments.length ? exporter : null,
-    platform === "windows" ? el("button", { class: "icon-only", title: meta.compacted ? "Open this meeting's folder, with its transcript and exports" : "Open this meeting's folder, with its audio, transcript and exports",
+    isDesktop() ? el("button", { class: "icon-only", title: meta.compacted ? "Open this meeting's folder, with its transcript and exports" : "Open this meeting's folder, with its audio, transcript and exports",
       "aria-label": "Open this meeting's folder", onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
     session.model_ready && !session.needs_processing && !meta.compacted ? reprocess : null,
     remove), exporter.status, confirmBox);
@@ -2132,7 +2138,7 @@ window.addEventListener("keydown", (e) => {
     showMeeting();
     return;
   }
-  if (e.altKey && !e.ctrlKey && key === "v" && platform !== "android") {
+  if (e.altKey && !e.ctrlKey && key === "v" && !isPhone()) {
     e.preventDefault();
     if (view.kind === "note") dictation ? stopDictation() : startDictation();
     else if (!recording) openNote(null, { dictate: true });
@@ -2882,7 +2888,7 @@ async function showSettings() {
       await invoke("save_prefs", { keepAudio: on });
     }),
     model));
-  if (platform === "android") page.append(el("div", { class: "group" }, model));
+  if (isPhone()) page.append(el("div", { class: "group" }, model));
 
   if (platform === "android") {
     page.append(el("h2", {}, "This phone"), el("div", { class: "group" },
@@ -2932,7 +2938,7 @@ async function showSettings() {
 
   page.append(el("h2", {}, "Storage"), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, "Recordings and notes", el("small", {}, "Kept on this device only.")),
-      platform === "windows" ? el("button", { class: "pill", onclick: () => invoke("open_folder", { id: null }) }, "Open folder") : null)));
+      isDesktop() ? el("button", { class: "pill", onclick: () => invoke("open_folder", { id: null }) }, "Open folder") : null)));
   main.replaceChildren(page);
 }
 
@@ -3147,7 +3153,7 @@ async function showOnboarding(step = SETUP.welcome) {
   // Remembered, so closing the app part way through comes back to this page.
   if (!rerun) invoke("save_prefs", { setupStep: step }).catch(() => {});
   const ready = await invoke("model_ready");
-  const afterModel = platform === "android" ? SETUP.done : SETUP.hello;
+  const afterModel = isPhone() ? SETUP.done : SETUP.hello;
   // The speech model page is only needed while the model isn't there yet.
   if (step === SETUP.model && ready) return showOnboarding(afterModel);
   const page = el("div", { class: "page setup-page" });
@@ -3263,10 +3269,10 @@ async function modelHelp(changed) {
       : "Only needed if your network makes apps go through a proxy. ",
     "user:password@ can go before the address. ", using),
     // Android keeps the app's folder private, so the model can't be put there by hand.
-    platform === "windows" ? el("h2", {}, "Adding the model yourself") : "",
-    platform === "windows" ? el("div", { class: "legend" }, "Download ", el("code", {}, info.file), " in a browser and put it in ",
+    isDesktop() ? el("h2", {}, "Adding the model yourself") : "",
+    isDesktop() ? el("div", { class: "legend" }, "Download ", el("code", {}, info.file), " in a browser and put it in ",
       el("code", { class: "path" }, info.folder), ". Voice picks it up straight away.") : "",
-    platform === "windows" ? el("div", { class: "actions" },
+    isDesktop() ? el("div", { class: "actions" },
       el("button", { class: "pill", onclick: () => invoke("open_models_folder").catch((e) => showError(copy.parentElement, e)) }, "Open the model folder"),
       copy) : "");
 }
@@ -3570,12 +3576,12 @@ function wantWake() {
 }
 
 function syncWake() {
-  return platform === "android" ? Promise.resolve() : invoke("set_wake", { on: wantWake() });
+  return isPhone() ? Promise.resolve() : invoke("set_wake", { on: wantWake() });
 }
 
 /// Whether a meeting recording hears voice commands.
 function meetingListening() {
-  return platform !== "android" && (prefs.wake || phrasesTrained);
+  return !isPhone() && (prefs.wake || phrasesTrained);
 }
 
 async function refreshPhrasesTrained() {
@@ -3662,7 +3668,7 @@ async function openAgent(greet = true) {
     agent.open = true;
     agentEl.hidden = false;
     agentLog.replaceChildren();
-    if (!prefs.wake && platform !== "android") {
+    if (!prefs.wake && !isPhone()) {
       try {
         await invoke("set_wake", { on: true });
         agent.forcedWake = true;
@@ -4135,6 +4141,8 @@ async function doCommand(id) {
     if (!update?.newer) return doCommand("update");
     await say(platform === "android"
       ? `I'm opening the download in your browser. When it has downloaded, open it to install.`
+      : platform === "macos"
+      ? `Downloading version ${update.latest}. When its window opens, drag Voice by Superteem into Applications.`
       : `Updating to version ${update.latest}. The app will close, install the update, and open again in about a minute.`);
     closeAgent();
     installUpdate();
@@ -4220,7 +4228,9 @@ async function installUpdate() {
   });
   try {
     await invoke("install_update");
-    showUpdateBar(platform === "android" ? "When the download finishes, open it to install." : "Installing. The app opens again when it's done.");
+    showUpdateBar(platform === "android" ? "When the download finishes, open it to install."
+      : platform === "macos" ? "Drag Voice by Superteem into Applications in the window that opened, then open it again."
+      : "Installing. The app opens again when it's done.");
   } catch (e) {
     showUpdateBar(String(e));
   } finally {
@@ -4240,7 +4250,7 @@ async function installUpdate() {
     // The theme saved on this device wins over the browser storage, which the webview may clear.
     if (prefs.theme) applyTheme(prefs.theme);
   } catch {}
-  if (prefs.wake && platform !== "android") {
+  if (prefs.wake && !isPhone()) {
     await invoke("set_wake", { on: true }).catch(() => { prefs.wake = false; });
   }
   await refreshPhrasesTrained();
