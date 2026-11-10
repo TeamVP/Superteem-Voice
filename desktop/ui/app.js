@@ -764,33 +764,54 @@ function insertWords(body, range, words) {
   return span;
 }
 
-let dictation = null; // { session, slot, levelTimer, clockTimer, busy, wrote }
+let dictation = null; // { session, anchor, slots: Map(clip → slot), levelTimer, clockTimer, busy, wrote }
 
-/// Words arrive while dictating, a piece at a time, each time the person pauses.
+/// A clip was cut at a pause and is being written down while the next one records: a widget holds its
+/// place, after the clips before it.
+listen("dictation-clip", (e) => {
+  if (dictation?.session !== e.payload.session) return;
+  dictation.slots.set(e.payload.clip, clipSlot());
+});
+/// A clip's words take the place of its widget.
 listen("dictation-words", (e) => {
   if (dictation?.session !== e.payload.session) return;
-  writeDictated(e.payload.text);
+  const slot = dictation.slots.get(e.payload.clip);
+  dictation.slots.delete(e.payload.clip);
+  fillSlot(slot, e.payload.text);
+  if (dictation.finished) tidyDictation();
 });
-/// A silence after an empty piece ended it: the last words go in, and a chirp and a buzz say it stopped.
+/// A silence after an empty clip ended it: a chirp and a buzz say it stopped.
 listen("dictation-ended", (e) => {
   if (dictation?.session !== e.payload.session || dictation.busy) return;
   dictation.busy = true;
-  writeDictated(e.payload.text);
-  finishDictation();
+  endDictationUi();
+  if (e.payload.text?.trim()) fillSlot(clipSlot(), e.payload.text);
   stoppedSignal();
+  finishDictation();
 });
 
-/// Puts a piece of dictation in just before the marker holding its place, so the next piece follows it.
-function writeDictated(words) {
-  const body = document.getElementById("note-body");
-  const slot = dictation?.slot;
-  if (!body || !slot?.isConnected || !words?.trim()) return;
-  const range = document.createRange();
-  range.setStartBefore(slot);
-  range.collapse(true);
-  insertWords(body, range, words);
-  dictation.wrote = true;
+/// A "Writing it down…" widget for a clip, just before the marker where the dictation goes.
+function clipSlot() {
+  const slot = el("span", { class: "dictation-slot", contenteditable: "false" }, el("span", { class: "spinner" }), "Writing it down…");
+  dictation.anchor.before(slot);
   slot.scrollIntoView({ block: "nearest" });
+  document.getElementById("note-body")?.dispatchEvent(new Event("input"));
+  return slot;
+}
+
+/// Replaces a clip's widget with its words, or takes it away when nothing was said.
+function fillSlot(slot, words) {
+  const body = document.getElementById("note-body");
+  if (!slot?.isConnected || !body) return;
+  if (!words?.trim()) {
+    slot.remove();
+    body.dispatchEvent(new Event("input"));
+    return;
+  }
+  const range = document.createRange();
+  range.selectNode(slot);
+  insertWords(body, range, words);
+  if (dictation) dictation.wrote = true;
 }
 
 /// A short falling chirp, and a buzz where the device has one, when dictation stops by itself.
@@ -813,12 +834,12 @@ function stoppedSignal() {
   if (isPhone()) invoke("haptic").catch(() => {});
 }
 
-/// Dictation records until it's stopped, or until a silence after the person has finished. Each stretch of
-/// speech is written in at the cursor as soon as they pause, while the recording carries on.
+/// Dictation records until it's stopped, or until a silence after the person has finished. At each pause
+/// the clip so far is saved and written down at the cursor while the next clip records, so nothing is missed.
 async function startDictation() {
   const body = document.getElementById("note-body");
   if (!body || dictation) return;
-  dictation = {};
+  dictation = { slots: new Map() };
   document.getElementById("dictation-chip").hidden = true;
   // Kept audio is filed under the note, so the note is saved as keeping it first.
   const keep = !!prefs.keep_audio && !!note;
@@ -838,15 +859,16 @@ async function startDictation() {
   live.replaceChildren(el("span", { class: "rec" }, el("span", { class: "dot" })), el("span", {}, "Dictating"), wave, elapsed, cancel, done);
   live.hidden = false;
   document.getElementById("talk").hidden = true;
-  // The words go where the cursor was, on a line of their own, written in as they come.
-  dictation.slot = placeDictationSlot(body);
-  dictation.slot.replaceChildren(el("span", { class: "rec-dot" }), "Listening…");
+  // An invisible marker keeps the cursor's place: each clip is written in just before it, in order.
+  dictation.anchor = placeDictationSlot(body);
+  dictation.anchor.classList.add("dictation-anchor");
+  dictation.anchor.replaceChildren();
   const started = Date.now();
   dictation.clockTimer = setInterval(() => { elapsed.textContent = clock((Date.now() - started) / 1000); }, 500);
   try {
     dictation.session = await invoke("dictate_start", { continuous: true, note: keep ? note.id : null });
   } catch (e) {
-    removeDictationSlot(dictation.slot);
+    removeDictationSlot(dictation.anchor);
     endDictationUi();
     dictation = null;
     showDictationError(e);
@@ -881,28 +903,39 @@ function endDictationUi() {
   if (talk) talk.hidden = false;
 }
 
-/// Takes the place marker out, and says so when nothing was heard at all.
+/// Recording has ended: once every clip's words are in, the marker goes. A clip still being written keeps
+/// its widget until its words arrive, or for half a minute at most.
 function finishDictation() {
-  endDictationUi();
-  const chip = document.getElementById("dictation-chip");
-  const wrote = dictation?.wrote;
-  removeDictationSlot(dictation?.slot);
-  if (!wrote && chip) { chip.hidden = false; chip.textContent = "No speech heard."; setTimeout(() => (chip.hidden = true), 2500); }
-  dictation = null;
+  if (!dictation) return;
+  dictation.finished = true;
   syncWake().catch(() => {});
+  const mine = dictation;
+  setTimeout(() => { if (dictation === mine) { for (const slot of mine.slots.values()) slot.remove(); mine.slots.clear(); tidyDictation(); } }, 30000);
+  tidyDictation();
 }
 
-/// Stops dictating and writes in what's left. `byVoice` when ended with "Hey Superteem, stop recording",
-/// which is then left out of the words.
+function tidyDictation() {
+  if (!dictation || dictation.slots.size) return;
+  const chip = document.getElementById("dictation-chip");
+  if (dictation.wrote) dictation.anchor?.remove();
+  else removeDictationSlot(dictation.anchor);
+  document.getElementById("note-body")?.dispatchEvent(new Event("input"));
+  if (!dictation.wrote && chip) { chip.hidden = false; chip.textContent = "No speech heard."; setTimeout(() => (chip.hidden = true), 2500); }
+  dictation = null;
+}
+
+/// Stops dictating: the last clip gets its widget and is written in like the others. `byVoice` when ended
+/// with "Hey Superteem, stop recording", which is then left out of the words.
 async function stopDictation(byVoice = false) {
   if (!dictation || dictation.busy) return;
   dictation.busy = true;
   endDictationUi();
-  dictation.slot?.replaceChildren(el("span", { class: "spinner" }), "Writing it down…");
+  const last = clipSlot();
   try {
     const heard = dictation.session ? await invoke("dictate_stop", { session: dictation.session, note: null }) : "";
-    writeDictated(byVoice ? withoutStopCommand(heard) : heard);
+    fillSlot(last, byVoice ? withoutStopCommand(heard) : heard);
   } catch (e) {
+    last.remove();
     showDictationError(e);
   }
   finishDictation();
@@ -923,7 +956,9 @@ async function cancelDictation() {
   dictation.busy = true;
   endDictationUi();
   if (dictation.session) await invoke("dictate_cancel", { session: dictation.session }).catch(() => {});
-  removeDictationSlot(dictation.slot);
+  for (const slot of dictation.slots.values()) slot.remove();
+  if (dictation.wrote) dictation.anchor?.remove();
+  else removeDictationSlot(dictation.anchor);
   dictation = null;
   syncWake().catch(() => {});
   document.getElementById("note-body")?.focus();

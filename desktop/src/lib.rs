@@ -1148,9 +1148,14 @@ async fn dictate_start<R: Runtime>(app: AppHandle<R>, continuous: Option<bool>, 
         return blocking(listen::dictate_start).await?.map(|_| 0);
     }
     // Written down piece by piece as the person pauses, and ended by itself after a silence.
-    let (words, ended) = (app.clone(), app.clone());
+    let (clips, words, ended) = (app.clone(), app.clone(), app.clone());
     blocking(move || {
-        dictation::start(note, move |w| drop(words.emit("dictation-words", w)), move |e| drop(ended.emit("dictation-ended", e)))
+        dictation::start(
+            note,
+            move |c| drop(clips.emit("dictation-clip", c)),
+            move |w| drop(words.emit("dictation-words", w)),
+            move |e| drop(ended.emit("dictation-ended", e)),
+        )
     })
     .await?
 }

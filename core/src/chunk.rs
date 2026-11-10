@@ -6,8 +6,13 @@ use crate::attribute::window_db;
 /// 20 ms frames at 16 kHz.
 pub const FRAME: usize = 320;
 const FRAMES_PER_S: usize = 50;
-/// A pause at least this long between words is a place to cut.
-const PAUSE_FRAMES: usize = 30;
+/// A pause this long ends a clip once it has a few seconds in it: the gap between sentences, not between
+/// words.
+const PAUSE_FRAMES: usize = 40;
+/// A clip shorter than this waits for a longer pause, so a sentence isn't split at a breath.
+const MIN_CLIP_FRAMES: usize = 3 * FRAMES_PER_S;
+/// A pause this long ends a clip however short it is.
+const LONG_PAUSE_FRAMES: usize = 75;
 /// Audio with no speech is let go in pieces this long, to notice a long silence.
 const SILENT_PIECE_FRAMES: usize = 3 * FRAMES_PER_S;
 /// Whisper reads 30 s at a time, so someone who doesn't pause is cut before that, at the quietest moment.
@@ -44,9 +49,9 @@ pub fn noise_level(db: &[f32]) -> f32 {
     sorted[sorted.len() / 20].max(-80.0)
 }
 
-/// Where to cut `pcm`, the audio not yet transcribed, if anywhere yet: in the middle of the first pause
-/// after some speech; after a few seconds of no speech at all; or, for someone talking without a break, at
-/// the quietest moment before Whisper's limit.
+/// Where to cut `pcm`, the audio not yet transcribed, if anywhere yet: in the middle of the first pause of
+/// 0.8 s once the clip has 3 s in it, or of 1.5 s at any length; after a few seconds of no speech at all; or,
+/// for someone talking without a break, at the quietest moment before Whisper's limit.
 pub fn find_cut(pcm: &[i16], noise_db: Option<f32>) -> Option<Cut> {
     let speech = speech_frames(pcm, noise_db);
     let Some(first) = speech.iter().position(|&s| s) else {
@@ -61,9 +66,9 @@ pub fn find_cut(pcm: &[i16], noise_db: Option<f32>) -> Option<Cut> {
             continue;
         }
         run += 1;
-        if run == PAUSE_FRAMES {
-            let middle = i + 1 - PAUSE_FRAMES / 2;
-            return Some(Cut { at: middle * FRAME, speech: true });
+        let pause_start = i + 1 - run;
+        if (run >= PAUSE_FRAMES && pause_start >= MIN_CLIP_FRAMES) || run >= LONG_PAUSE_FRAMES {
+            return Some(Cut { at: (pause_start + run / 2) * FRAME, speech: true });
         }
     }
     if speech.len() >= LONGEST_FRAMES {
@@ -102,12 +107,20 @@ mod tests {
 
     #[test]
     fn cuts_in_the_middle_of_a_pause_after_speech() {
-        let pcm = audio(&[(false, 0.5), (true, 2.0), (false, 1.0), (true, 1.0)]);
+        let pcm = audio(&[(false, 0.5), (true, 3.0), (false, 1.0), (true, 1.0)]);
         let cut = find_cut(&pcm, None).unwrap();
         assert!(cut.speech);
-        // The pause starts at 2.5 s; its first 0.6 s is enough, so the cut is about 0.3 s in.
+        // The pause starts at 3.5 s; 0.8 s of it is enough once the clip has 3 s, so the cut is 0.4 s in.
         let at_s = cut.at as f32 / 16_000.0;
-        assert!((2.7..2.9).contains(&at_s), "{at_s}");
+        assert!((3.8..4.0).contains(&at_s), "{at_s}");
+    }
+
+    #[test]
+    fn a_breath_early_in_a_sentence_isnt_a_cut() {
+        // A short clip waits through a 1 s pause, and is cut at a 1.5 s one.
+        assert_eq!(find_cut(&audio(&[(true, 1.0), (false, 1.0), (true, 1.0), (false, 0.3)]), Some(-40.0)), None);
+        let cut = find_cut(&audio(&[(true, 1.0), (false, 1.6), (true, 0.5)]), Some(-40.0)).unwrap();
+        assert!(cut.speech && (cut.at as f32 / 16_000.0 - 1.75).abs() < 0.05);
     }
 
     #[test]

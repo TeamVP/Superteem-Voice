@@ -1,6 +1,8 @@
-//! Dictation that runs until it's stopped: while the microphone keeps recording, each stretch of speech is
-//! written down as soon as there's a pause after it, cut in the middle of the pause so no word is lost.
-//! When a piece turns out to have nothing in it and the silence carries on, the dictation ends by itself.
+//! Dictation that runs until it's stopped. The microphone keeps recording; at each real pause the audio so
+//! far is clipped (in the middle of the pause, so no word is lost) and that clip is transcribed while the
+//! next one records. The page is told when a clip is cut, so it can hold the clip's place in the note, and
+//! again when its words are ready. When a clip turns out to have nothing in it and the silence carries on,
+//! the dictation ends by itself.
 
 use crate::{listen, notes, process};
 use serde::Serialize;
@@ -15,9 +17,18 @@ const END_AFTER_SILENCE_S: f32 = 2.5;
 /// Before anything is said, the person gets this long to start.
 const GRACE_S: u64 = 10;
 
+/// A clip was cut and is being written down.
+#[derive(Debug, Clone, Serialize)]
+pub struct Clip {
+    pub session: u64,
+    pub clip: u64,
+}
+
+/// A clip's words, empty when nothing was said in it.
 #[derive(Debug, Clone, Serialize)]
 pub struct Words {
     pub session: u64,
+    pub clip: u64,
     pub text: String,
 }
 
@@ -39,6 +50,7 @@ struct Session {
     /// The note whose dictation audio is kept, and the audio so far.
     keep_for: Option<String>,
     kept: Vec<i16>,
+    clips: u64,
 }
 
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
@@ -70,15 +82,20 @@ fn learn_noise(session: &mut Session, pcm: &[i16]) -> Option<f32> {
     session.noise_db
 }
 
-/// Starts a dictation, returning its number. `on_words` gets each piece as it's written down; `on_end`
-/// is told when it ends by itself.
-pub fn start(keep_for: Option<String>, on_words: impl Fn(Words) + Send + 'static, on_end: impl Fn(Ended) + Send + 'static) -> Result<u64, String> {
+/// Starts a dictation, returning its number. `on_clip` is told as each clip with speech in it is cut,
+/// `on_words` gets its words once written down, and `on_end` is told when it ends by itself.
+pub fn start(
+    keep_for: Option<String>,
+    on_clip: impl Fn(Clip) + Send + 'static,
+    on_words: impl Fn(Words) + Send + 'static,
+    on_end: impl Fn(Ended) + Send + 'static,
+) -> Result<u64, String> {
     if SESSION.lock().unwrap().is_some() {
         return Err("Already dictating.".into());
     }
     listen::dictate_start()?;
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    *SESSION.lock().unwrap() = Some(Session { id, started: Instant::now(), last_empty: false, heard: false, noise_db: None, keep_for, kept: Vec::new() });
+    *SESSION.lock().unwrap() = Some(Session { id, started: Instant::now(), last_empty: false, heard: false, noise_db: None, keep_for, kept: Vec::new(), clips: 0 });
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(Duration::from_millis(300));
@@ -93,16 +110,26 @@ pub fn start(keep_for: Option<String>, on_words: impl Fn(Words) + Send + 'static
                 if session.keep_for.is_some() {
                     session.kept.extend_from_slice(&piece);
                 }
-                // Written down without holding the session, so the level meter and stop stay quick.
-                drop(guard);
-                let text = if cut.speech { words(&piece).unwrap_or_default() } else { String::new() };
-                let mut guard = SESSION.lock().unwrap();
-                let Some(session) = guard.as_mut().filter(|s| s.id == id) else { return };
-                session.last_empty = text.is_empty();
-                if !text.is_empty() {
-                    session.heard = true;
-                    on_words(Words { session: id, text });
+                if !cut.speech {
+                    session.last_empty = true;
+                    continue;
                 }
+                session.clips += 1;
+                let clip = session.clips;
+                on_clip(Clip { session: id, clip });
+                // Written down without holding the session, so the level meter and stop stay quick; the
+                // microphone keeps recording the next clip meanwhile.
+                drop(guard);
+                let text = words(&piece).unwrap_or_default();
+                let mut guard = SESSION.lock().unwrap();
+                let Some(session) = guard.as_mut().filter(|s| s.id == id) else {
+                    // Stopped while this clip was written down: its words still go in.
+                    on_words(Words { session: id, clip, text });
+                    return;
+                };
+                session.last_empty = text.is_empty();
+                session.heard |= !text.is_empty();
+                on_words(Words { session: id, clip, text });
                 continue;
             }
             let quiet = chunk::trailing_silence_s(&pending, noise);
