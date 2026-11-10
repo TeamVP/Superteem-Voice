@@ -503,12 +503,13 @@ body:is([data-platform="android"], [data-platform="ios"]) .windows-only { displa
 .help-toggle { width: 26px; height: 26px; font-weight: 700; font-size: 13px; border: 1px solid var(--line); }
 /* The wordmark has a version for each theme, following the same choice as the colours. */
 /* "Voice by [Superteem]", as on the download page. */
-.brand img { display: block; height: 16.5px; width: auto; }
-/* The product name sits after the Superteem wordmark: "[Superteem] Voice". */
-.brand { display: inline-flex; align-items: center; gap: 7px; }
+/* All three sit on one baseline. The wordmark image's own baseline is its bottom edge, but the lettering's
+   baseline is 19.8% of the image height above that (the "p" descends below it), so it drops by that much. */
+.brand img { display: block; height: 16.5px; width: auto; transform: translateY(19.8%); }
+.brand { display: inline-flex; align-items: baseline; gap: 7px; }
 .brand .product { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; line-height: 1; color: var(--text); }
 .brand .by, .welcome-title .by { font: italic 500 0.8em/1 "Playfair Display", Georgia, serif; color: var(--muted); }
-.brand .by { font-size: 15px; margin: 0 -2px; transform: translateY(1px); }
+.brand .by { font-size: 15px; margin: 0 -2px; }
 .welcome-title .product { font-weight: 700; }
 .brand .logo-dark-mode, .welcome-logo .logo-dark-mode { display: none; }
 @media (prefers-color-scheme: dark) {
@@ -622,7 +623,7 @@ dialog.terms p { margin: 0; font-size: 14px; color: var(--soft); }
 .skip-link:hover { background: var(--raised); border-color: var(--line); color: var(--text); }
 .welcome-title { font-size: 34px; white-space: nowrap; }
 /* The logo stands in for the word: its "p" hangs below the line like the text's would. */
-.welcome-title .welcome-logo { display: inline-block; margin: 0; line-height: 0; vertical-align: -0.21em; }
+.welcome-title .welcome-logo { display: inline-block; margin: 0; line-height: 0; vertical-align: -0.214em; }
 .welcome-title .welcome-logo img { height: 1.08em; width: auto; }
 .welcome .legend { margin: 0 0 14px; }
 .welcome .actions { margin-top: 0; }
