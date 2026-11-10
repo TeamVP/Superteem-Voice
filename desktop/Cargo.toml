@@ -1,6 +1,6 @@
 [package]
 name = "superteem-voice"
-version = "0.6.5"
+version = "0.6.6"
 edition = "2021"
 license = "GPL-3.0-only"
 
@@ -31,6 +31,9 @@ minijinja = "3"
 minijinja-contrib = { version = "3", features = ["pycompat"] }
 # Checks downloaded models against their published fingerprints.
 sha2 = "0.10"
+# Voice model archives (.tar.bz2), unpacked on any platform; bzip2 in pure Rust.
+tar = "0.4"
+bzip2 = { version = "0.5", default-features = false, features = ["libbz2-rs-sys"] }
 # Choosing the folder exports go to.
 tauri-plugin-dialog = "2"
 # Memory and free disk space, to size the model's context and check a download fits.
@@ -68,5 +71,3 @@ opt-level = 2
 # the app. Windows only for now.
 [target.'cfg(windows)'.dependencies]
 sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }
-tar = "0.4"
-bzip2 = { version = "0.5", default-features = false, features = ["libbz2-rs-sys"] }
