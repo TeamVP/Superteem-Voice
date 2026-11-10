@@ -302,11 +302,9 @@ jobs:
         run: |
           echo "::warning::The iPhone signing secrets aren't set, so the app is only built for the Simulator."
           source desktop/build-env.sh
-          cd desktop/gen/apple
-          project=$(ls -d *.xcodeproj | head -n 1)
-          scheme=$(xcodebuild -list -json -project "$project" | jq -r '.project.schemes[] | select(endswith("_iOS"))' | head -n 1)
-          xcodebuild -project "$project" -scheme "$scheme" -configuration debug -sdk iphonesimulator -arch arm64 \
-            -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO build
+          cd desktop
+          # Through the Tauri CLI, as the Xcode project's build step asks the running CLI how to build the Rust.
+          npm run tauri -- ios build --target aarch64-sim --no-sign
       - name: Build for the App Store
         if: env.IOS_SIGNED == 'true'
         env:
