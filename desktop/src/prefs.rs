@@ -76,6 +76,12 @@ pub struct Prefs {
     pub llm_server_model: String,
     /// Templates offered first on a meeting or note, in order. Unset: the default few.
     pub starred_templates: Option<Vec<String>>,
+    /// Run language models on the graphics card when there is one that can. Unset: yes.
+    pub use_gpu: Option<bool>,
+    /// Read aloud with the downloaded natural voice instead of the system's.
+    pub natural_voice: bool,
+    /// Where exports go; empty for the Exports folder beside the meetings.
+    pub export_dir: String,
 }
 
 /// Starred until the person chooses their own.

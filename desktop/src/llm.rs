@@ -216,6 +216,8 @@ pub fn delete(file: &str) -> Result<(), String> {
 /// What this device can run: total memory, and the context and threads that suit it.
 #[derive(Debug, Clone, Serialize)]
 pub struct Device {
+    /// The graphics processor models can run on, such as "Apple M2 (Metal)"; None runs on the processor.
+    pub gpu: Option<String>,
     pub ram_gb: f32,
     pub context: u32,
     pub threads: i32,
@@ -231,7 +233,13 @@ pub fn device() -> Device {
     // Big cores only on phones; half the threads on a PC so the rest of it stays responsive.
     let threads = if cfg!(any(target_os = "android", target_os = "ios")) { cores.min(4) } else { (cores / 2).clamp(2, 8) } as i32;
     let context = if ram_gb >= 6.0 { 8192 } else { 4096 };
-    Device { ram_gb, context, threads, too_small: ram_gb < 2.5 }
+    let gpu = backend().ok().and_then(|_| {
+        llama_cpp_2::list_llama_ggml_backend_devices()
+            .into_iter()
+            .find(|d| !d.backend.eq_ignore_ascii_case("CPU") && !d.backend.eq_ignore_ascii_case("BLAS"))
+            .map(|d| format!("{} ({})", if d.description.is_empty() { &d.name } else { &d.description }, d.backend))
+    });
+    Device { gpu, ram_gb, context, threads, too_small: ram_gb < 2.5 }
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -276,7 +284,10 @@ impl Local {
     /// Loads a GGUF model. `ctx_tokens` is capped at what the model was trained for.
     pub fn load(path: &Path, ctx_tokens: u32, threads: i32, cancel: Arc<AtomicBool>) -> Result<Self, String> {
         let backend = backend()?;
-        let model = LlamaModel::load_from_file(backend, path, &LlamaModelParams::default())
+        // Every layer on the graphics processor when there is one and the person hasn't turned it off.
+        let layers = if crate::prefs::load().use_gpu.unwrap_or(true) { 999 } else { 0 };
+        let params = LlamaModelParams::default().with_n_gpu_layers(layers);
+        let model = LlamaModel::load_from_file(backend, path, &params)
             .map_err(|e| format!("Couldn't load {}: {e}", path.display()))?;
         let template = model.chat_template(None).map_err(|e| format!("The model has no chat template: {e}"))?;
         let ctx_tokens = ctx_tokens.min(model.n_ctx_train().max(512));

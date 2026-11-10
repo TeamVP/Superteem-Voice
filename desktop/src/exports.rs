@@ -32,7 +32,12 @@ const FADE_S: f64 = 0.01;
 const MUTED_DB: f32 = -150.0;
 
 /// Where exports are written: a folder beside the meetings.
+/// Where exports are written: the folder the person chose, while it's there, or one beside the meetings.
 pub fn dir() -> PathBuf {
+    let chosen = crate::prefs::load().export_dir;
+    if !chosen.is_empty() && std::path::Path::new(&chosen).is_dir() {
+        return PathBuf::from(chosen);
+    }
     library::root().join("Exports")
 }
 

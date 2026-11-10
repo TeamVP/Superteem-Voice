@@ -21,6 +21,11 @@ if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 New-Item -ItemType Directory -Force $installDir | Out-Null
 $exe = Join-Path $installDir 'superteem-voice.exe'
 Copy-Item (Join-Path $PSScriptRoot 'target\release\superteem-voice.exe') $exe -Force
+# The natural reading voice's libraries, loaded only when it's used.
+foreach ($dll in 'sherpa-onnx-c-api.dll', 'onnxruntime.dll') {
+    $built = Join-Path $PSScriptRoot "target\release\$dll"
+    if (Test-Path $built) { Copy-Item $built (Join-Path $installDir $dll) -Force }
+}
 
 $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
 $link.TargetPath = $exe

@@ -18,6 +18,7 @@ pub mod recorder;
 pub mod script;
 pub mod shell;
 pub mod transcribe;
+pub mod tts;
 pub mod update;
 pub mod vocabulary;
 pub mod voices;
@@ -1547,6 +1548,70 @@ fn move_analysis(state: State<AppState>, kind: String, id: String, template: Str
     analysis::shift(&analysis::Item::new(&kind, &id)?, &template, by)
 }
 
+/// Sets the folder exports go to; None goes back to the Exports folder beside the meetings.
+#[tauri::command]
+fn set_export_dir(path: Option<String>) -> Result<String, String> {
+    if let Some(p) = path.as_deref() {
+        if !Path::new(p).is_dir() {
+            return Err("That folder doesn't exist.".into());
+        }
+    }
+    prefs::update(|prefs| prefs.export_dir = path.unwrap_or_default())?;
+    Ok(exports::dir().to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn export_dir() -> String {
+    exports::dir().to_string_lossy().into_owned()
+}
+
+#[tauri::command]
+fn tts_status() -> tts::Status {
+    tts::status()
+}
+
+#[derive(Serialize, Clone)]
+struct TtsDownload {
+    fraction: f32,
+}
+
+#[tauri::command]
+async fn download_tts<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let handle = app.clone();
+    blocking(move || {
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        tts::download(&cancel, |fraction| drop(handle.emit("tts-download", TtsDownload { fraction })))
+    })
+    .await?
+}
+
+#[tauri::command]
+fn delete_tts() -> Result<(), String> {
+    tts::unload();
+    prefs::update(|p| p.natural_voice = false)?;
+    tts::delete()
+}
+
+/// Speech for `text` in the natural voice, as a WAV for the page to play.
+#[tauri::command]
+async fn natural_speak(text: String, speed: Option<f32>) -> Result<tauri::ipc::Response, String> {
+    let wav = blocking(move || tts::speak(&text, speed.unwrap_or(1.0))).await??;
+    Ok(tauri::ipc::Response::new(wav))
+}
+
+#[tauri::command]
+fn save_voice_settings(natural: Option<bool>, use_gpu: Option<bool>) -> Result<(), String> {
+    prefs::update(|p| {
+        if let Some(n) = natural {
+            p.natural_voice = n && tts::ready();
+        }
+        if let Some(g) = use_gpu {
+            p.use_gpu = Some(g);
+        }
+    })
+    .map(|_| ())
+}
+
 #[derive(Serialize)]
 struct LlmStatus {
     catalogue: &'static [llm::Catalogued],
@@ -1557,6 +1622,7 @@ struct LlmStatus {
     server: String,
     server_model: String,
     auto: bool,
+    use_gpu: bool,
     downloading: Option<String>,
     folder: String,
 }
@@ -1570,6 +1636,7 @@ fn llm_status(state: State<AppState>) -> LlmStatus {
         chosen: llm::chosen(&p.llm_model).and_then(|path| path.file_name().map(|n| n.to_string_lossy().into_owned())),
         device: llm::device(),
         auto: p.auto_analyse(),
+        use_gpu: p.use_gpu.unwrap_or(true),
         server: p.llm_server,
         server_model: p.llm_server_model,
         downloading: state.llm_downloading.lock().unwrap().clone(),
@@ -1791,8 +1858,14 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_opener::init());
     builder
         .plugin(capture_plugin())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .setup(|app| {
+            // On Windows the app opens filling the screen.
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.maximize();
+            }
             if cfg!(target_os = "android") {
                 let data = app.path().app_data_dir()?;
                 library::init(data.join("sessions"), data);
@@ -1898,6 +1971,13 @@ pub fn run() {
             open_link,
             dictation_problem,
             haptic,
+            tts_status,
+            set_export_dir,
+            export_dir,
+            download_tts,
+            delete_tts,
+            natural_speak,
+            save_voice_settings,
             import_track,
             sync_track,
             set_track_offset,

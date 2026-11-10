@@ -138,6 +138,22 @@ function exportMenu(choices, run) {
     menu.querySelector("button")?.focus();
   });
   menu.addEventListener("keydown", (e) => { if (e.key === "Escape") { close(); button.focus(); } });
+  // On a computer, where exports go, and a way to choose another folder.
+  if (isDesktop() && window.__TAURI__.dialog) {
+    const where = el("small", {}, "");
+    const showWhere = (path) => { where.textContent = `Saves to ${path.split(/[\\/]/).filter(Boolean).pop() ?? path}`; where.title = path; };
+    invoke("export_dir").then(showWhere).catch(() => {});
+    const change = el("button", { type: "button", role: "menuitem", class: "export-folder" }, el("strong", {}, "Choose the folder…"), where);
+    change.addEventListener("click", async () => {
+      close();
+      const current = await invoke("export_dir").catch(() => undefined);
+      const picked = await window.__TAURI__.dialog.open({ directory: true, defaultPath: current, title: "Export to this folder" }).catch(() => null);
+      if (typeof picked === "string") {
+        try { showWhere(await invoke("set_export_dir", { path: picked })); } catch (e) { showError(status, e); status.hidden = false; }
+      }
+    });
+    menu.append(change);
+  }
   for (const [format, label, detail] of choices) {
     const item = el("button", { type: "button", role: "menuitem" }, el("strong", {}, label), detail ? el("small", {}, detail) : null);
     item.addEventListener("click", async () => {
@@ -607,10 +623,10 @@ function renderNote(data, dictate) {
     return invoke("export_note", { id: note.id, format });
   });
   main.replaceChildren(
-    el("div", { class: "topbar" }, status, el("span", { class: "grow" }),
+    el("div", { class: "topbar" }, picker, status, el("span", { class: "grow" }),
       // The selection when there is one, else the whole note.
       readAloudButton(() => { const sel = getSelection().toString().trim(); return `${title.value}.\n${sel || noteText(body)}`; }, "Read the note aloud"),
-      exporter, picker, archive, remove),
+      exporter, archive, remove),
     exporter.status,
     el("div", { class: "note" }, title,
       data.id ? analysisStack("note", data.id, { speakers: ["Me"], go: (source) => selectInNote(body, source) }) : null, chip, body),
@@ -1664,7 +1680,8 @@ function renderSession(session, processingError, suggestion) {
   const exporter = exportMenu([...TRANSCRIPT_EXPORTS, ...(meta.compacted ? [] : [
     ["package", "Edit package", "Every track and the transcript mix as audio, with an EDL, Premiere and Resolve XML and a REAPER project"]])],
     (format) => invoke("export_session", { id, title: meetingTitle(id, meta.title), format }));
-  page.append(title, el("div", { class: "meta" },
+  // Like a note's: the status and the meeting's actions in a bar of their own across the top.
+  const topBar = el("div", { class: "topbar meta meeting-top" },
     picker,
     el("span", { title: dateText(meta.created) }, agoText(meta.created)),
     meta.duration_s ? el("span", { title: clock(meta.duration_s) }, `Length: ${lengthText(meta.duration_s)}`) : null,
@@ -1674,7 +1691,8 @@ function renderSession(session, processingError, suggestion) {
     isDesktop() ? el("button", { class: "icon-only", title: meta.compacted ? "Open this meeting's folder, with its transcript and exports" : "Open this meeting's folder, with its audio, transcript and exports",
       "aria-label": "Open this meeting's folder", onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
     session.model_ready && !session.needs_processing && !meta.compacted ? reprocess : null,
-    remove), exporter.status, confirmBox);
+    remove);
+  page.append(exporter.status, confirmBox, title);
 
   const processNow = el("button", { class: "primary" }, "Process now");
   processNow.addEventListener("click", () => processAgain(id));
@@ -2140,7 +2158,7 @@ function renderSession(session, processingError, suggestion) {
     player.nextClip = nextClip;
     requestAnimationFrame(() => player?.seek(keepTime));
   }
-  main.replaceChildren(el("div", { class: "review" }, page, streams.length ? tracks : null));
+  main.replaceChildren(topBar, el("div", { class: "review" }, page, streams.length ? tracks : null));
 }
 
 // ---------- Importing tracks
@@ -2247,7 +2265,7 @@ function importMenu(id, imported, label, page) {
         if (offset == null) return showError(box, "Type minutes:seconds, such as 1:02.5.");
         try { await invoke("set_track_offset", { id, name: imported.name, offsetS: offset }); processAgain(id); } catch (e) { showError(box, e); }
       });
-      page.querySelector(".meta")?.after(box);
+      page.querySelector("h1")?.before(box);
       input.focus();
     }],
     ["Remove this track", "Its lines leave the transcript", async () => {
@@ -3102,6 +3120,7 @@ async function showSettings() {
   page.append(el("h2", {}, "Analysis"), el("div", { class: "group" },
     linkRow("Summaries and action items", "The language model, and when it runs", () => showAnalysisSettings()),
     linkRow("Templates", "Summary, standup, interview, SOAP and your own", () => showTemplates())));
+  page.append(el("h2", {}, "Reading aloud"), await readingAloudGroup(() => showSettings()));
   page.append(el("h2", {}, "Voices"), el("div", { class: "group" },
     linkRow("Voice prints", prints.length ? `${prints.length} saved` : "None yet", () => showVoicePrints()),
     linkRow("Default microphone and voice print", prefs.enrol_input ?? "Not set up", () => showOnboarding(SETUP.voice)),

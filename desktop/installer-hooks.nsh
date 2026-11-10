@@ -22,3 +22,24 @@
     DeleteRegKey HKCU "Software\Superteem\Superteem Voice"
   ${EndIf}
 !macroend
+
+; The natural reading voice runs on sherpa-onnx, whose libraries the build puts beside the app. They're
+; installed with it; the app loads them only when the voice is used, so it starts without them.
+!macro STV_NATIVE_FILE NAME
+  !if /FileExists "${__FILEDIR__}\target\release\${NAME}"
+    File "${__FILEDIR__}\target\release\${NAME}"
+  !else if /FileExists "$%CARGO_TARGET_DIR%\release\${NAME}"
+    File "$%CARGO_TARGET_DIR%\release\${NAME}"
+  !endif
+!macroend
+
+!macro NSIS_HOOK_POSTINSTALL
+  SetOutPath $INSTDIR
+  !insertmacro STV_NATIVE_FILE "sherpa-onnx-c-api.dll"
+  !insertmacro STV_NATIVE_FILE "onnxruntime.dll"
+!macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  Delete "$INSTDIR\sherpa-onnx-c-api.dll"
+  Delete "$INSTDIR\onnxruntime.dll"
+!macroend

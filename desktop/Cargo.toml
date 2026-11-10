@@ -1,6 +1,6 @@
 [package]
 name = "superteem-voice"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 license = "GPL-3.0-only"
 
@@ -31,6 +31,8 @@ minijinja = "3"
 minijinja-contrib = { version = "3", features = ["pycompat"] }
 # Checks downloaded models against their published fingerprints.
 sha2 = "0.10"
+# Choosing the folder exports go to.
+tauri-plugin-dialog = "2"
 # Memory and free disk space, to size the model's context and check a download fits.
 sysinfo = { version = "0.33", default-features = false, features = ["system", "disk"] }
 
@@ -60,3 +62,10 @@ whisper-rs-sys = { path = "vendor/whisper-rs-sys" }
 
 [profile.release]
 opt-level = 2
+
+# A natural voice for reading aloud, downloaded when the person turns it on: Piper voices through
+# sherpa-onnx, offline. Its libraries are prebuilt DLLs installed beside the app. Windows only for now.
+[target.'cfg(windows)'.dependencies]
+sherpa-rs = { version = "=0.6.8", default-features = false, features = ["tts", "download-binaries"] }
+tar = "0.4"
+bzip2 = { version = "0.5", default-features = false, features = ["libbz2-rs-sys"] }

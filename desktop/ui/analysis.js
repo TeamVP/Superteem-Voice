@@ -451,6 +451,14 @@ async function showAnalysisSettings(message, setup = false) {
   const { device } = status;
   page.append(el("p", { class: "hint" }, `This ${isPhone() ? "phone" : "computer"} has ${device.ram_gb.toFixed(0)} GB of memory, so models read up to ${device.context.toLocaleString()} tokens at a time${device.too_small ? ". That's too little to run a model well here; a local server (below) can do it instead." : "."}`));
 
+  page.append(el("div", { class: "group" }, device.gpu
+    ? toggleRow("Use the graphics processor", `${device.gpu}. Summaries are made several times faster there.`, status.use_gpu, async (on) => {
+      await invoke("save_voice_settings", { useGpu: on });
+    })
+    : el("div", { class: "row" }, el("span", { class: "label" }, "Graphics processor",
+      el("small", {}, isDesktop() && platform === "windows"
+        ? "Models run on the processor on Windows for now. Graphics processor support is coming."
+        : "None that models can use here, so they run on the processor.")), el("span", { class: "value" }, "Processor"))));
   const installed = new Map(status.installed.map((i) => [i.file, i]));
   const group = el("div", { class: "group" });
   for (const m of status.catalogue) {
@@ -652,9 +660,20 @@ async function readAloud(button, text) {
   // The listener doesn't take the app's own voice for someone talking.
   invoke("listen_mute", { muted: true }).catch(() => {});
   try {
-    for (const piece of pieces) {
-      if (mine.cancelled) break;
-      await say(piece);
+    if (prefs.natural_voice && isDesktop()) {
+      // The natural voice makes the next piece while this one plays, so there's no gap between them.
+      let next = invoke("natural_speak", { text: pieces[0] });
+      for (let i = 0; i < pieces.length && !mine.cancelled; i++) {
+        const wav = await next;
+        if (i + 1 < pieces.length) next = invoke("natural_speak", { text: pieces[i + 1] });
+        if (mine.cancelled) break;
+        await playWav(wav, mine);
+      }
+    } else {
+      for (const piece of pieces) {
+        if (mine.cancelled) break;
+        await say(piece);
+      }
     }
   } catch (e) {
     showError(button.closest(".page") ?? main, e);
@@ -675,8 +694,24 @@ function say(text) {
   });
 }
 
+/// Plays a WAV the natural voice made; `mine.source` lets it be stopped.
+async function playWav(wav, mine) {
+  const audio = (playWav.context ||= new AudioContext());
+  if (audio.state === "suspended") await audio.resume();
+  const buffer = await audio.decodeAudioData(wav instanceof ArrayBuffer ? wav : new Uint8Array(wav).buffer);
+  return new Promise((resolve) => {
+    const source = audio.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audio.destination);
+    source.onended = resolve;
+    mine.source = source;
+    source.start();
+  });
+}
+
 function stopReading() {
   if (!reading) return;
+  try { reading.source?.stop(); } catch {}
   reading.cancelled = true;
   window.speechSynthesis?.cancel();
   if (platform === "android") invoke("stop_speaking").catch(() => {});
@@ -699,4 +734,53 @@ function analysisSpeech(card) {
     lines.push(`${time ? `At ${time}. ` : ""}${who && who !== "Unassigned" ? `${who}: ` : ""}${what}${when ? `, ${when}` : ""}.${done}`);
   }
   return lines.join("\n");
+}
+
+// ---------- Settings › Reading aloud
+
+let ttsProgress = null;
+listen("tts-download", (e) => {
+  ttsProgress = e.payload.fraction;
+  document.querySelectorAll("[data-tts-progress]").forEach((n) => { n.textContent = `${Math.round(ttsProgress * 100)}%`; });
+});
+
+/// The natural voice: download it once, then switch between it and the system's voice.
+async function readingAloudGroup(refresh) {
+  const status = await invoke("tts_status").catch(() => null);
+  const group = el("div", { class: "group" });
+  if (!status?.supported) {
+    group.append(el("div", { class: "row" }, el("span", { class: "label" }, "Voice",
+      el("small", {}, "Reads with this device's own voice. A downloadable natural voice is on Windows now, and coming here.")), el("span", { class: "value" }, "System")));
+    return group;
+  }
+  if (!status.ready) {
+    const get = el("button", { class: "primary pill" }, `Download (${Math.round(status.size / 1e6)} MB)`);
+    get.addEventListener("click", async () => {
+      get.disabled = true;
+      get.replaceChildren(el("span", { class: "spinner" }), " ", el("span", { "data-tts-progress": "" }, "Starting…"));
+      try {
+        await invoke("download_tts");
+        await invoke("save_voice_settings", { natural: true });
+        prefs.natural_voice = true;
+        refresh();
+      } catch (e) {
+        get.disabled = false;
+        get.textContent = "Try again";
+        showError(group, e);
+      }
+    });
+    group.append(el("div", { class: "row" }, el("span", { class: "label" }, "Natural voice",
+      el("small", {}, `${status.name}: a more natural voice for reading notes, transcripts and summaries aloud. Runs on this device, offline, once downloaded.`)), get));
+    return group;
+  }
+  group.append(
+    toggleRow("Natural voice", `${status.name}, downloaded. Off uses the system's voice.`, !!prefs.natural_voice, async (on) => {
+      await invoke("save_voice_settings", { natural: on });
+      prefs.natural_voice = on;
+    }),
+    el("div", { class: "row" }, el("span", { class: "label" }, "Try it"),
+      readAloudButton(() => "This is how notes, transcripts and summaries sound when they're read aloud.", "Hear the voice"),
+      el("button", { class: "icon-only danger", title: "Delete the natural voice", "aria-label": "Delete the natural voice",
+        onclick: async () => { await invoke("delete_tts").catch((e) => showError(group, e)); prefs.natural_voice = false; refresh(); } }, svg("trash", 16))));
+  return group;
 }

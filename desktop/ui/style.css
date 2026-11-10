@@ -190,6 +190,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 .page { width: 100%; max-width: 780px; margin: 0 auto; padding: 40px 40px 120px; }
 .topbar { display: flex; align-items: center; gap: 10px; padding: 12px 24px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .topbar .status { flex: 1; font-size: 13px; color: var(--muted); }
+.topbar.meeting-top { font-size: 13px; color: var(--muted); }
 h1 { font-size: 32px; line-height: 1.2; margin: 0 0 6px; outline: none; letter-spacing: -0.02em; }
 h1:empty::before { content: "Untitled"; color: var(--muted); }
 h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
