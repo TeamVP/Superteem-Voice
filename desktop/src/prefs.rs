@@ -74,9 +74,18 @@ pub struct Prefs {
     pub llm_server: String,
     /// The model name the server knows, such as "qwen2.5:3b".
     pub llm_server_model: String,
+    /// Templates offered first on a meeting or note, in order. Unset: the default few.
+    pub starred_templates: Option<Vec<String>>,
 }
 
+/// Starred until the person chooses their own.
+pub const DEFAULT_STARRED: &[&str] = &["meeting-summary", "executive-brief", "engineering-actions", "lecture-notes"];
+
 impl Prefs {
+    pub fn starred(&self) -> Vec<String> {
+        self.starred_templates.clone().unwrap_or_else(|| DEFAULT_STARRED.iter().map(|s| s.to_string()).collect())
+    }
+
     pub fn auto_analyse(&self) -> bool {
         self.auto_analyse.unwrap_or(!cfg!(any(target_os = "android", target_os = "ios")))
     }

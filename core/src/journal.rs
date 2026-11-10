@@ -87,6 +87,45 @@ pub fn read(path: &Path) -> io::Result<Recovered> {
     Ok(Recovered { records, valid_bytes: pos as u64, had_bad_tail: pos != data.len() })
 }
 
+/// Reads the records written since byte `from` of a journal that is still being written, for following a
+/// recording as it happens. Returns them and where the next read starts; a record still being written is
+/// left for next time. `from` is 0 the first time.
+pub fn read_since(path: &Path, from: u64) -> io::Result<(Vec<Record>, u64)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = fs::File::open(path)?;
+    let start = if from == 0 {
+        let mut head = [0u8; FILE_HEADER];
+        if file.read_exact(&mut head).is_err() {
+            return Ok((Vec::new(), 0));
+        }
+        if &head[..4] != MAGIC || head[4] != VERSION {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "not a journal file"));
+        }
+        FILE_HEADER as u64
+    } else {
+        from
+    };
+    file.seek(SeekFrom::Start(start))?;
+    let mut data = Vec::new();
+    file.read_to_end(&mut data)?;
+    let mut records = Vec::new();
+    let mut pos = 0usize;
+    while let Some(head) = data.get(pos..pos + 8) {
+        let len = u32::from_le_bytes(head[..4].try_into().unwrap()) as usize;
+        let crc = u32::from_le_bytes(head[4..].try_into().unwrap());
+        if !(8..=MAX_RECORD).contains(&len) {
+            break;
+        }
+        let Some(body) = data.get(pos + 8..pos + 8 + len) else { break };
+        if crc32fast::hash(body) != crc {
+            break;
+        }
+        records.push(Record { arrival_us: u64::from_le_bytes(body[..8].try_into().unwrap()), frame: body[8..].to_vec() });
+        pos += 8 + len;
+    }
+    Ok((records, start + pos as u64))
+}
+
 /// Removes a torn tail, for finalising a session interrupted by a crash.
 pub fn repair(path: &Path) -> io::Result<Recovered> {
     let recovered = read(path)?;
@@ -142,6 +181,22 @@ mod tests {
         assert_eq!(got.records.len(), 1);
         assert!(got.had_bad_tail);
         assert!(!read(&path).unwrap().had_bad_tail);
+    }
+
+    #[test]
+    fn following_a_journal_reads_each_record_once() {
+        let path = temp("follow");
+        write_three(&path);
+        let full = fs::read(&path).unwrap();
+        // Half-way through the second record: only the first is read, and the second comes next time.
+        fs::write(&path, &full[..FILE_HEADER + 26 + 10]).unwrap();
+        let (first, at) = read_since(&path, 0).unwrap();
+        assert_eq!(first.len(), 1);
+        fs::write(&path, &full).unwrap();
+        let (rest, end) = read_since(&path, at).unwrap();
+        assert_eq!(rest.iter().map(|r| r.frame[0]).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(end, full.len() as u64);
+        assert!(read_since(&path, end).unwrap().0.is_empty());
     }
 
     #[test]

@@ -24,6 +24,7 @@
   --ok: #1f7a45;
   --in-progress: #a35f00;
   --exported: #2563c9;
+  --fade-edge: rgba(120, 120, 120, 0.10);
   color-scheme: light;
 }
 /* Dark follows Windows unless the person picked a theme; the same values are repeated for an explicit pick. */
@@ -45,6 +46,7 @@
     --ok: #5cc489;
     --in-progress: #f0a64a;
     --exported: #7aa7f0;
+    --fade-edge: rgba(150, 150, 150, 0.08);
     color-scheme: dark;
   }
 }
@@ -65,6 +67,7 @@
   --ok: #5cc489;
   --in-progress: #f0a64a;
   --exported: #7aa7f0;
+  --fade-edge: rgba(150, 150, 150, 0.08);
   color-scheme: dark;
 }
 
@@ -155,6 +158,14 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 .search input { border: none; background: transparent; flex: 1; outline: none; color: var(--text); min-width: 0; }
 .items { flex: 1; overflow-y: auto; overflow-x: hidden; margin: 0 -6px; padding: 0 6px; }
+/* The list scrolls under 16px fades at its top and bottom: solid where it meets the search box and the
+   footer, a faint translucent grey at the list's edge. They mark where the list ends and soften items
+   scrolling out of sight. Sticky, so they stay at the edges while the list scrolls. */
+.items::before, .items::after {
+  content: ""; display: block; position: sticky; z-index: 1; height: 16px; margin: 0 -6px; pointer-events: none;
+}
+.items::before { top: 0; margin-bottom: -16px; background: linear-gradient(to bottom, var(--panel), var(--fade-edge)); }
+.items::after { bottom: 0; margin-top: -16px; background: linear-gradient(to top, var(--panel), var(--fade-edge)); }
 .group-label { font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; padding: 12px 8px 4px; }
 .item {
   display: flex; gap: 10px; align-items: flex-start; width: 100%; border: none; background: none;
@@ -241,6 +252,8 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
   padding: 8px 14px; border-radius: 10px; border: 1px dashed var(--accent, var(--line)); background: var(--raised);
   font-size: 14px; color: var(--soft); user-select: none; vertical-align: middle;
 }
+.dictation-slot .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); animation: rec-pulse 1.2s ease-in-out infinite; }
+@keyframes rec-pulse { 50% { opacity: 0.3; } }
 /* Freshly dictated words start green and fade into the text over 12 seconds. */
 .dictated { animation: dictated-fade 12s ease-in forwards; }
 @keyframes dictated-fade { from { color: var(--ok); } to { color: var(--text); } }
@@ -831,3 +844,19 @@ li:hover > .when-chip.empty, .when-chip.empty:focus-visible { opacity: 0.7; }
 }
 /* The iPhone draws the page under its status bar and home indicator, so the page keeps clear of them. */
 body[data-platform="ios"] { box-sizing: border-box; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.analysis-add .icon-only { width: 30px; height: 30px; color: var(--muted); }
+.row .star { color: var(--muted); flex: none; }
+.row .star.on { color: #e0a72e; }
+.analysis-menu .menu .menu-label { padding: 8px 10px 2px; }
+.read-aloud.on { color: var(--key); background: var(--highlight); }
+/* Importing a recording as a track. */
+.import-form { margin: 12px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
+.import-head { display: flex; align-items: center; justify-content: space-between; }
+.import-form .hint { margin: 0; }
+.import-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.import-row > span:first-child { min-width: 110px; color: var(--soft); font-size: 14px; }
+.import-row.check > span { min-width: 0; }
+.import-row input[type="text"] { padding: 5px 8px; }
+.import-row input[type="text"]:disabled { opacity: 0.5; }
+.track .name-wrap { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.track .name-wrap .icon-only { width: 22px; height: 22px; }

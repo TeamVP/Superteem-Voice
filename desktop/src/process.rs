@@ -145,6 +145,14 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
 
     progress("Aligning and finding speakers", 0.05);
     pipeline::align_sources(&mut sources, RATE);
+    // Tracks added afterwards, placed where they start on the meeting's timeline.
+    for import in crate::imports::load(dir) {
+        let pcm = crate::imports::placed(dir, &import)?;
+        if !pcm.is_empty() {
+            names.push(import.name.clone());
+            sources.push(pipeline::SourceTrack { pcm, clock: None, frames: 0, lost_frames: 0, duplicate_frames: 0, had_bad_tail: false });
+        }
+    }
     let window = RATE as usize * pipeline::WINDOW_MS / 1000;
     let levels: Vec<Vec<f32>> = sources.iter().map(|s| attribute::window_db(&s.pcm, window)).collect();
     let attribution = attribute::attribute(&levels, &Config::default());

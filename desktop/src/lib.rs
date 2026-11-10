@@ -3,7 +3,9 @@
 pub mod analysis;
 #[cfg(not(target_os = "android"))]
 pub mod capture;
+pub mod dictation;
 pub mod exports;
+pub mod imports;
 pub mod keyphrases;
 pub mod library;
 pub mod llm;
@@ -379,6 +381,8 @@ struct SessionView {
     audio_bytes: u64,
     /// Being recorded or processed, so it can't be compacted.
     busy: bool,
+    /// Tracks added after recording, with where each starts.
+    imports: Vec<imports::Import>,
 }
 
 #[derive(Serialize)]
@@ -426,6 +430,7 @@ fn get_session(state: State<AppState>, id: String) -> Result<SessionView, String
         voiceprints: prints.into_iter().map(|p| PrintChoice { id: p.id, name: p.name }).collect(),
         keyphrases: keyphrases::load_session(&dir),
         audio_bytes: library::audio_bytes(&dir),
+        imports: imports::load(&dir),
         busy,
         id,
         meta,
@@ -1138,12 +1143,23 @@ async fn set_wake(on: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn dictate_start() -> Result<(), String> {
-    blocking(listen::dictate_start).await?
+async fn dictate_start<R: Runtime>(app: AppHandle<R>, continuous: Option<bool>, note: Option<String>) -> Result<u64, String> {
+    if !continuous.unwrap_or(false) {
+        return blocking(listen::dictate_start).await?.map(|_| 0);
+    }
+    // Written down piece by piece as the person pauses, and ended by itself after a silence.
+    let (words, ended) = (app.clone(), app.clone());
+    blocking(move || {
+        dictation::start(note, move |w| drop(words.emit("dictation-words", w)), move |e| drop(ended.emit("dictation-ended", e)))
+    })
+    .await?
 }
 
 #[tauri::command]
-async fn dictate_stop(note: Option<String>) -> Result<String, String> {
+async fn dictate_stop(note: Option<String>, session: Option<u64>) -> Result<String, String> {
+    if let Some(id) = session.filter(|&s| s > 0) {
+        return blocking(move || dictation::stop(id)).await?;
+    }
     blocking(move || {
         let (words, pcm) = listen::dictate_stop()?;
         // The audio is kept only when the note asks, and only once the words are written down.
@@ -1213,8 +1229,28 @@ async fn vocab_test_stop() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn dictate_cancel() -> Result<(), String> {
+async fn dictate_cancel(session: Option<u64>) -> Result<(), String> {
+    if let Some(id) = session.filter(|&s| s > 0) {
+        return blocking(move || dictation::cancel(id)).await?;
+    }
     blocking(listen::dictate_cancel).await?
+}
+
+/// Reads text aloud with the system's voice, for platforms whose web view has none (Android).
+#[tauri::command]
+async fn speak_text(text: String) -> Result<(), String> {
+    blocking(move || recorder::speak(&text)).await?
+}
+
+#[tauri::command]
+async fn stop_speaking() -> Result<(), String> {
+    blocking(recorder::stop_speaking).await?
+}
+
+/// A short vibration, where the device has one: on Android, when dictation stops by itself.
+#[tauri::command]
+async fn haptic() -> Result<(), String> {
+    blocking(recorder::vibrate).await?
 }
 
 // Off the main thread, as on Android these call the capture plugin and wait for its answer.
@@ -1452,6 +1488,8 @@ struct AnalysesView {
     queue: AnalysisQueue,
     /// A model is installed here, or a server is chosen.
     ready: bool,
+    /// Template ids offered first, in order.
+    starred: Vec<String>,
 }
 
 #[tauri::command]
@@ -1463,6 +1501,7 @@ fn get_analyses(state: State<AppState>, kind: String, id: String) -> Result<Anal
         templates: analysis::templates().into_iter().filter(|t| t.applies_to.contains(&kind) && t.errors.is_empty()).map(|t| analysis::TemplateInfo { template: None, ..t }).collect(),
         queue: analysis_queue_state(&state),
         ready: !p.llm_server.trim().is_empty() || !llm::installed().is_empty(),
+        starred: p.starred(),
     })
 }
 
@@ -1593,6 +1632,69 @@ fn save_analysis_settings(model: Option<String>, auto: Option<bool>, server: Opt
     .map(|_| ())
 }
 
+/// Adds an audio track to a meeting. The body is the audio, 16 kHz mono 16-bit, decoded by the page; the
+/// headers say which meeting (`x-id`), the track's name (`x-label`, URI-encoded), where it starts
+/// (`x-offset`, seconds) and whether to find that by syncing (`x-sync`). The meeting is processed again.
+#[tauri::command]
+async fn import_track<R: Runtime>(app: AppHandle<R>, request: tauri::ipc::Request<'_>) -> Result<imports::Import, String> {
+    let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+    let id = header("x-id");
+    let label = percent_decode(&header("x-label"));
+    let offset: f64 = header("x-offset").parse().unwrap_or(0.0);
+    let sync_it = header("x-sync") == "1";
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("No audio was sent.".into()) };
+    let pcm: Vec<i16> = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+    let dir = library::session_dir(&id)?;
+    if library::load_meta(&dir).compacted {
+        return Err(process::COMPACTED.into());
+    }
+    let import = blocking(move || {
+        let state = app.state::<AppState>();
+        let _guard = state.edit.lock().unwrap();
+        imports::add(&dir, &label, &pcm, offset, sync_it)
+    })
+    .await??;
+    Ok(import)
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Finds where an imported track starts by matching it to the recorded tracks.
+#[tauri::command]
+async fn sync_track(state: State<'_, AppState>, id: String, name: String) -> Result<imports::Import, String> {
+    let dir = library::session_dir(&id)?;
+    let _guard = state.edit.lock().unwrap();
+    imports::sync(&dir, &name)
+}
+
+#[tauri::command]
+fn set_track_offset(state: State<AppState>, id: String, name: String, offset_s: f64) -> Result<(), String> {
+    let _guard = state.edit.lock().unwrap();
+    imports::set_offset(&library::session_dir(&id)?, &name, offset_s)
+}
+
+#[tauri::command]
+fn remove_track(state: State<AppState>, id: String, name: String) -> Result<(), String> {
+    let _guard = state.edit.lock().unwrap();
+    imports::remove(&library::session_dir(&id)?, &name)
+}
+
 fn open_dir(dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     shell::open(dir)
@@ -1608,9 +1710,29 @@ fn open_templates_folder() -> Result<(), String> {
     open_dir(&analysis::templates_dir())
 }
 
+#[derive(Serialize)]
+struct TemplateList {
+    templates: Vec<analysis::TemplateInfo>,
+    starred: Vec<String>,
+}
+
 #[tauri::command]
-fn list_templates() -> Vec<analysis::TemplateInfo> {
-    analysis::templates()
+fn list_templates() -> TemplateList {
+    TemplateList { templates: analysis::templates(), starred: prefs::load().starred() }
+}
+
+/// Stars or unstars a template, so it's offered first on meetings and notes.
+#[tauri::command]
+fn star_template(id: String, starred: bool) -> Result<(), String> {
+    prefs::update(|p| {
+        let mut list = p.starred();
+        list.retain(|t| t != &id);
+        if starred {
+            list.push(id);
+        }
+        p.starred_templates = Some(list);
+    })
+    .map(|_| ())
 }
 
 #[derive(Serialize)]
@@ -1770,6 +1892,13 @@ pub fn run() {
             install_update,
             open_link,
             dictation_problem,
+            haptic,
+            import_track,
+            sync_track,
+            set_track_offset,
+            remove_track,
+            speak_text,
+            stop_speaking,
             get_analyses,
             analyse,
             cancel_analysis,
@@ -1784,6 +1913,7 @@ pub fn run() {
             open_llm_folder,
             open_templates_folder,
             list_templates,
+            star_template,
             template_source,
             save_template,
             delete_template,

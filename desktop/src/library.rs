@@ -346,7 +346,7 @@ pub fn audio_files(dir: &Path) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = entries
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "wav" || x == "stvj"))
+        .filter(|p| p.is_file() && (p.extension().is_some_and(|x| x == "wav" || x == "stvj") || crate::imports::is_track_file(p)))
         .collect();
     files.sort();
     files

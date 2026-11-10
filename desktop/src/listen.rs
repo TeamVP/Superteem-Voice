@@ -335,8 +335,9 @@ mod imp {
     use std::thread::{self, JoinHandle};
     use std::time::Duration;
 
-    /// Dictation is capped at the two-minute lock, with a little spare for the last word.
-    const MAX_DICTATION: usize = 125 * RATE as usize;
+    /// Dictation is written down as it goes (see `dictation`), which keeps this buffer short; the cap only
+    /// stops it growing without end if that falls behind.
+    const MAX_DICTATION: usize = 600 * RATE as usize;
 
     #[derive(Default)]
     struct Ear {
@@ -606,6 +607,18 @@ mod imp {
         Ok(pcm)
     }
 
+    /// The audio dictated and not yet taken, while it carries on.
+    pub fn dictate_pending() -> Vec<i16> {
+        EAR.lock().unwrap().dictation.clone()
+    }
+
+    /// Lets go of the first `n` samples, once they're written down.
+    pub fn dictate_consume(n: usize) {
+        let mut ear = EAR.lock().unwrap();
+        let n = n.min(ear.dictation.len());
+        ear.dictation.drain(..n);
+    }
+
     /// The microphone level from 0 to 1, for the dictation meter.
     pub fn level() -> f32 {
         ((EAR.lock().unwrap().level_db + 70.0) / 70.0).clamp(0.0, 1.0)
@@ -651,6 +664,8 @@ mod imp {
     use std::sync::Mutex;
 
     static DICTATION: Mutex<Option<Recorder>> = Mutex::new(None);
+    /// Following the recording as it's written: where the next read starts, and the audio read but not taken.
+    static FOLLOW: Mutex<(u64, Vec<i16>)> = Mutex::new((0, Vec::new()));
     const PHONE: &str = "Phone microphone";
 
     pub fn dictate_start() -> Result<(), String> {
@@ -668,6 +683,7 @@ mod imp {
         match recorder::start(dir.clone(), &[device], false) {
             Ok(r) => {
                 *slot = Some(r);
+                *FOLLOW.lock().unwrap() = (0, Vec::new());
                 Ok(())
             }
             Err(e) => {
@@ -699,12 +715,52 @@ mod imp {
         if let Ok(dir) = stop() {
             let _ = std::fs::remove_dir_all(dir);
         }
+        *FOLLOW.lock().unwrap() = (0, Vec::new());
         Ok(())
     }
 
+    /// Reads what the capture service wrote since last time onto the audio waiting to be taken.
+    fn follow(dir: &Path) {
+        let Some(journal) = std::fs::read_dir(dir).ok().and_then(|d| d.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|x| x == "stvj"))) else { return };
+        let mut follow = FOLLOW.lock().unwrap();
+        let Ok((records, next)) = stv_core::journal::read_since(&journal, follow.0) else { return };
+        follow.0 = next;
+        for record in records {
+            let Ok(frame) = stv_core::protocol::Frame::decode(&record.frame) else { continue };
+            match frame.codec {
+                stv_core::protocol::Codec::ImaAdpcm => follow.1.extend(stv_core::adpcm::decode(&frame.payload).unwrap_or_default()),
+                stv_core::protocol::Codec::Opus => {}
+                _ => follow.1.extend(frame.payload.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]))),
+            }
+        }
+    }
+
+    pub fn dictate_pending() -> Vec<i16> {
+        let dir = DICTATION.lock().unwrap().as_ref().map(|r| r.dir().to_path_buf());
+        if let Some(dir) = dir {
+            follow(&dir);
+        }
+        FOLLOW.lock().unwrap().1.clone()
+    }
+
+    pub fn dictate_consume(n: usize) {
+        let mut follow = FOLLOW.lock().unwrap();
+        let n = n.min(follow.1.len());
+        follow.1.drain(..n);
+    }
+
+    /// Everything not yet taken. A dictation followed from the start returns only what's left; one that
+    /// wasn't (the vocabulary test) returns the whole recording.
     pub fn dictate_stop_audio() -> Result<Vec<i16>, String> {
         let dir = stop()?;
-        let pcm = recorded(&dir);
+        let followed = FOLLOW.lock().unwrap().0 > 0;
+        let pcm = if followed {
+            follow(&dir);
+            Ok(std::mem::take(&mut FOLLOW.lock().unwrap().1))
+        } else {
+            recorded(&dir)
+        };
+        *FOLLOW.lock().unwrap() = (0, Vec::new());
         let _ = std::fs::remove_dir_all(&dir);
         pcm
     }

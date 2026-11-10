@@ -73,6 +73,20 @@ mod imp {
     }
 
     /// The Mac's microphone privacy settings, or the app's page in the iPhone's Settings.
+    /// Computers don't vibrate; the page plays a chirp instead.
+    pub fn vibrate() -> Result<(), String> {
+        Ok(())
+    }
+
+    /// The page reads aloud itself where the web view has a voice.
+    pub fn speak(_text: &str) -> Result<(), String> {
+        Err("Read aloud in the page.".into())
+    }
+
+    pub fn stop_speaking() -> Result<(), String> {
+        Ok(())
+    }
+
     pub fn open_app_settings() -> Result<(), String> {
         if cfg!(target_os = "macos") {
             crate::shell::open("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
@@ -241,6 +255,25 @@ mod imp {
 
     pub fn open_app_settings() -> Result<(), String> {
         call::<Done>("openAppSettings", Empty {}).map(|_| ())
+    }
+
+    /// A short buzz, to say dictation stopped by itself.
+    pub fn vibrate() -> Result<(), String> {
+        call::<Done>("vibrate", Empty {}).map(|_| ())
+    }
+
+    #[derive(Serialize)]
+    struct Text<'a> {
+        text: &'a str,
+    }
+
+    /// Reads text aloud with the phone's voice, returning once it's said or stopped.
+    pub fn speak(text: &str) -> Result<(), String> {
+        call::<Done>("speak", Text { text }).map(|_| ())
+    }
+
+    pub fn stop_speaking() -> Result<(), String> {
+        call::<Done>("stopSpeaking", Empty {}).map(|_| ())
     }
 
     #[derive(Serialize)]

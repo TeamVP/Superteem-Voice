@@ -6,6 +6,10 @@
 /// language model and for templates.
 
 icon.more = '<circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"></circle>';
+icon.cog = '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>';
+icon.star = '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"></path>';
+icon["star-filled"] = '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" fill="currentColor"></path>';
+icon.speak = '<path d="M11 5L6 9H3v6h3l5 4z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"></path>';
 icon.sparkle = '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"></path>';
 
 /// The page showing analyses now: { kind, id, holder, ctx }.
@@ -77,19 +81,25 @@ function runAnalysis(page, template) {
   invoke("analyse", { kind: page.kind, id: page.id, template }).catch((e) => { page.errors.set(template, e); refreshAnalyses(); });
 }
 
+/// "Summaries and action items": the first time, setting up a model; after that, the person's starred
+/// templates to run, the rest below them, and a cog for the settings.
 function addAnalysis(page, data) {
   const used = new Set(data.entries.map((e) => e.template.id));
   const busy = (t) => data.queue.waiting.some((j) => isJob(j, page, t)) || isJob(data.queue.current, page, t);
-  const choices = data.templates.filter((t) => !used.has(t.id) && !busy(t.id));
   const bar = el("div", { class: "analysis-add" });
+  const label = el("span", { class: "with-icon" }, svg("sparkle", 16), "Summaries and action items");
+  const settings = el("button", { class: "icon-only", title: "Analysis settings: model and starred templates", "aria-label": "Analysis settings",
+    onclick: () => showAnalysisSettings() }, svg("cog", 16));
   if (!data.ready) {
-    bar.append(el("button", { class: "link with-icon", onclick: () => showAnalysisSettings() }, svg("sparkle", 16),
-      data.entries.length ? "Get a language model to make these again" : "Summaries and action items: get a language model"));
+    bar.append(el("button", { class: "link add-analysis", onclick: () => showAnalysisSettings(null, true) }, label));
     return bar;
   }
-  if (!choices.length) return bar;
-  bar.append(menuButton(el("span", { class: "with-icon" }, svg("sparkle", 16), data.entries.length ? "Add another analysis" : "Summarise"),
-    choices.map((t) => [t.name, t.description, () => runAnalysis(page, t.id)]), "link add-analysis"));
+  const starred = data.starred.map((id) => data.templates.find((t) => t.id === id)).filter(Boolean);
+  const others = data.templates.filter((t) => !data.starred.includes(t.id));
+  const choice = (t) => [t.name, busy(t.id) ? "Running" : used.has(t.id) ? "Make it again" : t.description, () => runAnalysis(page, t.id), busy(t.id)];
+  const choices = [...starred.map(choice)];
+  if (others.length) choices.push(starred.length ? "More templates" : "Templates", ...others.map(choice));
+  bar.append(menuButton(label, choices, "link add-analysis"), settings);
   return bar;
 }
 
@@ -109,7 +119,10 @@ function menuButton(label, choices, buttonClass = "icon-only") {
     menu.querySelector("button")?.focus();
   });
   menu.addEventListener("keydown", (e) => { if (e.key === "Escape") { close(); button.focus(); } });
-  for (const [text, detail, run, disabled] of choices) {
+  for (const c of choices) {
+    // A string between choices labels the ones after it.
+    if (typeof c === "string") { menu.append(el("div", { class: "menu-label" }, c)); continue; }
+    const [text, detail, run, disabled] = c;
     const item = el("button", { type: "button", role: "menuitem", disabled: !!disabled }, el("strong", {}, text), detail ? el("small", {}, detail) : null);
     item.addEventListener("click", () => { close(); run(); });
     menu.append(item);
@@ -190,7 +203,7 @@ function analysisCard(page, e, data, running, waiting) {
   const head = el("div", { class: "analysis-head" }, toggle,
     el("button", { class: "analysis-name", onclick: () => edit({ op: "collapse", collapsed: !e.collapsed }) }, e.template.name),
     e.collapsed && def ? el("span", { class: "digest" }, analysisDigest(def, e.result)) : null,
-    ...badges, el("span", { class: "grow" }), regenerate, more);
+    ...badges, el("span", { class: "grow" }), e.collapsed ? null : readAloudButton(() => analysisSpeech(card), "Read this aloud"), regenerate, more);
   card.append(head);
   if (error) card.append(el("p", { class: "danger analysis-error" }, `Couldn't make it again: ${error}`));
   if (e.collapsed) return card;
@@ -418,7 +431,8 @@ listen("llm-download", (e) => {
   });
 });
 
-async function showAnalysisSettings(message) {
+/// `setup` the first time, from a meeting or note: the page leads with choosing a model.
+async function showAnalysisSettings(message, setup = false) {
   leave();
   showPage();
   view = { kind: "analysis-settings" };
@@ -429,6 +443,11 @@ async function showAnalysisSettings(message) {
   page.append(el("p", { class: "hint" }, "Summaries, decisions, action items and other notes are made from transcripts by a small language model that runs on this device. ",
     "Download one once; after that it works offline and nothing is sent anywhere."));
   if (message) page.append(el("div", { class: "notice" }, message));
+  if (setup && !status.installed.length && !status.server) {
+    page.append(el("div", { class: "notice" }, el("strong", {}, "First, choose a model. "),
+      "It's a one-off download; after that, summaries and action items are made on this device, offline. Qwen2.5 1.5B is a good start. ",
+      "Then star the templates you use most, below, and they'll be one click away on every meeting and note."));
+  }
   const { device } = status;
   page.append(el("p", { class: "hint" }, `This ${isPhone() ? "phone" : "computer"} has ${device.ram_gb.toFixed(0)} GB of memory, so models read up to ${device.context.toLocaleString()} tokens at a time${device.too_small ? ". That's too little to run a model well here; a local server (below) can do it instead." : "."}`));
 
@@ -480,7 +499,7 @@ async function showAnalysisSettings(message) {
     toggleRow("Summarise meetings when they're processed", "Runs the Summary template in the background after each meeting. It waits while you record.", status.auto, async (on) => {
       await invoke("save_analysis_settings", { auto: on });
     }),
-    linkRow("Templates", "The kinds of notes that can be made, and your own", () => showTemplates())));
+    linkRow("Templates", "Star the ones you use, and make your own", () => showTemplates())));
 
   // A server the person runs: never used unless set here, and anything not on this computer is named first.
   const url = el("input", { type: "url", value: status.server, placeholder: "http://localhost:11434/v1", "aria-label": "Server address" });
@@ -518,10 +537,10 @@ async function showTemplates(message) {
   showPage();
   view = { kind: "templates" };
   refreshItems();
-  const all = await invoke("list_templates");
+  const { templates: all, starred } = await invoke("list_templates");
   const page = el("div", { class: "page" }, el("button", { class: "link back-link", onclick: () => showAnalysisSettings() }, "‹ Analysis"),
     el("h1", {}, "Templates"));
-  page.append(el("p", { class: "hint" }, "A template says what to pull out of a meeting or note and how to lay it out. Run any of them from the top of a meeting or note; each one stacks there and can be made again."));
+  page.append(el("p", { class: "hint" }, "A template says what to pull out of a meeting or note and how to lay it out. Star the ones you use: they're offered first under Summaries and action items on every meeting and note. Each one stacks there and can be made again."));
   if (message) page.append(el("div", { class: "notice" }, message));
   const group = el("div", { class: "group" });
   for (const t of all) {
@@ -530,7 +549,11 @@ async function showTemplates(message) {
       t.source !== "built-in" ? el("span", { class: "badge" }, t.source === "customised" ? "Customised" : "Yours") : null,
       el("small", {}, t.errors.length ? "" : `${t.description} · ${kinds}${t.manual_only ? " · Only when asked" : ""}`));
     if (t.errors.length) label.append(el("ul", { class: "danger template-errors" }, t.errors.map((e) => el("li", {}, e))));
-    const row = el("div", { class: "row" }, label);
+    const on = starred.includes(t.id);
+    const star = el("button", { class: `icon-only star${on ? " on" : ""}`, title: on ? "Starred: offered first on meetings and notes" : "Star it, to offer it first",
+      "aria-label": on ? `Unstar ${t.name}` : `Star ${t.name}`, "aria-pressed": String(on), disabled: !!t.errors.length,
+      onclick: async () => { await invoke("star_template", { id: t.id, starred: !on }).catch((e) => showError(page, e)); showTemplates(); } }, svg(on ? "star-filled" : "star", 18));
+    const row = el("div", { class: "row" }, star, label);
     row.append(el("button", { class: "pill", onclick: () => editTemplate(t) }, t.file ? "Edit" : "Customise"));
     if (t.file) {
       row.append(el("button", { class: "icon-only danger", title: t.source === "customised" ? "Back to the built-in" : "Delete", "aria-label": "Delete",
@@ -596,4 +619,84 @@ async function editTemplate(t) {
       } }, "Save")));
   main.replaceChildren(page);
   area.focus();
+}
+
+// ---------- Reading aloud
+
+/// The one thing being read aloud: { button, cancelled }.
+let reading = null;
+
+/// A button that reads aloud what `text()` returns, and stops when pressed again.
+function readAloudButton(text, what = "Read aloud") {
+  const button = el("button", { class: "icon-only read-aloud", type: "button", title: what, "aria-label": what, "aria-pressed": "false" }, svg("speak", 16));
+  button.addEventListener("mousedown", (e) => e.preventDefault());
+  button.addEventListener("click", () => {
+    if (reading?.button === button) return stopReading();
+    stopReading();
+    readAloud(button, text());
+  });
+  return button;
+}
+
+/// Says the text a sentence or two at a time, which keeps long text going where a voice gives up after a
+/// while, and lets it stop between them.
+async function readAloud(button, text) {
+  const pieces = (text ?? "").replace(/\s+\n/g, "\n").split(/(?<=[.!?:])\s+|\n+/).map((s) => s.trim()).filter(Boolean)
+    .reduce((out, s) => { if (out.length && (out.at(-1) + " " + s).length < 220) out[out.length - 1] += " " + s; else out.push(s); return out; }, []);
+  if (!pieces.length) return;
+  const mine = { button, cancelled: false };
+  reading = mine;
+  button.classList.add("on");
+  button.setAttribute("aria-pressed", "true");
+  button.title = "Stop reading";
+  // The listener doesn't take the app's own voice for someone talking.
+  invoke("listen_mute", { muted: true }).catch(() => {});
+  try {
+    for (const piece of pieces) {
+      if (mine.cancelled) break;
+      await say(piece);
+    }
+  } catch (e) {
+    showError(button.closest(".page") ?? main, e);
+  }
+  if (reading === mine) reading = null;
+  button.classList.remove("on");
+  button.setAttribute("aria-pressed", "false");
+  button.title = "Read aloud";
+  if (!reading) invoke("listen_mute", { muted: false }).catch(() => {});
+}
+
+function say(text) {
+  if (platform === "android" || !window.speechSynthesis) return invoke("speak_text", { text });
+  return new Promise((resolve) => {
+    const u = new SpeechSynthesisUtterance(text.replace(/[“”]/g, ""));
+    u.onend = u.onerror = () => resolve();
+    speechSynthesis.speak(u);
+  });
+}
+
+function stopReading() {
+  if (!reading) return;
+  reading.cancelled = true;
+  window.speechSynthesis?.cancel();
+  if (platform === "android") invoke("stop_speaking").catch(() => {});
+}
+
+/// An analysis card as it reads aloud: headings and points, who and when said as words, without the
+/// source chips and buttons.
+function analysisSpeech(card) {
+  const body = card.querySelector(".analysis-body");
+  if (!body) return "";
+  const lines = [card.querySelector(".analysis-name")?.textContent ?? ""];
+  for (const node of body.querySelectorAll(".analysis-section > h3, .analysis-section > p, .analysis-points > li, .notice")) {
+    if (node.tagName === "H3") { lines.push(`${node.textContent}.`); continue; }
+    if (node.tagName !== "LI") { lines.push(node.textContent); continue; }
+    const who = node.querySelector(".who-chip")?.textContent;
+    const what = [...node.querySelectorAll(":scope > .editable, :scope > .field-extra .editable")].map((n) => n.textContent).join(", ");
+    const when = node.querySelector(".when-chip:not(.empty)")?.textContent;
+    const done = node.classList.contains("done") ? " Done." : "";
+    const time = node.querySelector(".bookmark-time")?.textContent;
+    lines.push(`${time ? `At ${time}. ` : ""}${who && who !== "Unassigned" ? `${who}: ` : ""}${what}${when ? `, ${when}` : ""}.${done}`);
+  }
+  return lines.join("\n");
 }

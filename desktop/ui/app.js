@@ -204,6 +204,7 @@ function backToList() {
 
 /// Leaves whatever page was open: stops playback and polling, and saves a note being edited.
 function leave() {
+  stopReading();
   keyphrasePage?.stop();
   keyphrasePage = null;
   document.body.classList.remove("setup");
@@ -572,8 +573,8 @@ function renderNote(data, dictate) {
   const title = el("input", { class: "note-title", placeholder: "Title", value: data.title, "aria-label": "Title" });
   // An editable div rather than a textarea, so a dictation can hold its place in the text.
   const body = el("div", { class: "note-body", id: "note-body", contenteditable: "plaintext-only", role: "textbox", "aria-multiline": "true", "data-placeholder": isPhone()
-    ? "Start typing, or press Dictate to speak up to 2 minutes at a time. The words go where the cursor is when you press the tick."
-    : "Start typing, or press Dictate (Ctrl + Space) to speak up to 2 minutes at a time. The words go where the cursor is when you press the tick.", "aria-label": "Note" });
+    ? "Start typing, or press Dictate and talk. Your words appear at the cursor each time you pause, and it stops by itself when you finish."
+    : "Start typing, or press Dictate (Ctrl + Space) and talk. Your words appear at the cursor each time you pause, and it stops by itself when you finish.", "aria-label": "Note" });
   body.textContent = data.body;
   const chip = el("div", { class: "dictation-chip", id: "dictation-chip", hidden: true, "aria-live": "polite" });
   const changed = () => {
@@ -606,7 +607,10 @@ function renderNote(data, dictate) {
     return invoke("export_note", { id: note.id, format });
   });
   main.replaceChildren(
-    el("div", { class: "topbar" }, status, el("span", { class: "grow" }), exporter, picker, archive, remove),
+    el("div", { class: "topbar" }, status, el("span", { class: "grow" }),
+      // The selection when there is one, else the whole note.
+      readAloudButton(() => { const sel = getSelection().toString().trim(); return `${title.value}.\n${sel || noteText(body)}`; }, "Read the note aloud"),
+      exporter, picker, archive, remove),
     exporter.status,
     el("div", { class: "note" }, title,
       data.id ? analysisStack("note", data.id, { speakers: ["Me"], go: (source) => selectInNote(body, source) }) : null, chip, body),
@@ -760,36 +764,89 @@ function insertWords(body, range, words) {
   return span;
 }
 
-let dictation = null; // { levelTimer, limitTimer, busy }
+let dictation = null; // { session, slot, levelTimer, clockTimer, busy, wrote }
 
-/// One dictation runs hands-free for at most this long, then is written down.
-const DICTATION_LIMIT_S = 120;
+/// Words arrive while dictating, a piece at a time, each time the person pauses.
+listen("dictation-words", (e) => {
+  if (dictation?.session !== e.payload.session) return;
+  writeDictated(e.payload.text);
+});
+/// A silence after an empty piece ended it: the last words go in, and a chirp and a buzz say it stopped.
+listen("dictation-ended", (e) => {
+  if (dictation?.session !== e.payload.session || dictation.busy) return;
+  dictation.busy = true;
+  writeDictated(e.payload.text);
+  finishDictation();
+  stoppedSignal();
+});
 
+/// Puts a piece of dictation in just before the marker holding its place, so the next piece follows it.
+function writeDictated(words) {
+  const body = document.getElementById("note-body");
+  const slot = dictation?.slot;
+  if (!body || !slot?.isConnected || !words?.trim()) return;
+  const range = document.createRange();
+  range.setStartBefore(slot);
+  range.collapse(true);
+  insertWords(body, range, words);
+  dictation.wrote = true;
+  slot.scrollIntoView({ block: "nearest" });
+}
+
+/// A short falling chirp, and a buzz where the device has one, when dictation stops by itself.
+function stoppedSignal() {
+  try {
+    const audio = new (window.AudioContext || window.webkitAudioContext)();
+    const tone = audio.createOscillator();
+    const gain = audio.createGain();
+    tone.type = "sine";
+    tone.frequency.setValueAtTime(1320, audio.currentTime);
+    tone.frequency.exponentialRampToValueAtTime(660, audio.currentTime + 0.18);
+    gain.gain.setValueAtTime(0.0001, audio.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18, audio.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.25);
+    tone.connect(gain).connect(audio.destination);
+    tone.start();
+    tone.stop(audio.currentTime + 0.27);
+    setTimeout(() => audio.close().catch(() => {}), 500);
+  } catch {}
+  if (isPhone()) invoke("haptic").catch(() => {});
+}
+
+/// Dictation records until it's stopped, or until a silence after the person has finished. Each stretch of
+/// speech is written in at the cursor as soon as they pause, while the recording carries on.
 async function startDictation() {
   const body = document.getElementById("note-body");
   if (!body || dictation) return;
-  // Nothing goes into the text yet: the words land where the cursor is when the tick is pressed.
   dictation = {};
   document.getElementById("dictation-chip").hidden = true;
+  // Kept audio is filed under the note, so the note is saved as keeping it first.
+  const keep = !!prefs.keep_audio && !!note;
+  if (keep && (!note.id || !note.keepAudio)) {
+    note.keepAudio = true;
+    try {
+      note.id = await invoke("save_note", { id: note.id, title: note.title, body: note.body, keepAudio: true });
+      view.id = note.id;
+    } catch {}
+  }
   const live = document.getElementById("dictating");
-  const left = el("span", { class: "left" }, `${clock(DICTATION_LIMIT_S)} left`);
+  const elapsed = el("span", { class: "left" }, "0:00");
   const wave = el("span", { class: "wave" }, Array.from({ length: 5 }, () => el("span")));
-  const cancel = el("button", { class: "icon-btn cancel", title: "Cancel (Esc). Nothing is written and the audio is not kept.", "aria-label": "Cancel dictation", onclick: () => cancelDictation() }, svg("close", 18));
-  const keep = el("button", { class: "icon-btn keep", title: "Done (Ctrl + Space). Write it at the cursor.", "aria-label": "Finish dictation and keep it", onclick: () => stopDictation() }, svg("check", 18));
-  // The buttons don't take the cursor, so the tick writes where it was.
-  for (const b of [cancel, keep]) b.addEventListener("mousedown", (e) => e.preventDefault());
-  live.replaceChildren(el("span", { class: "rec" }, el("span", { class: "dot" })), el("span", {}, "Dictating"), wave, left, cancel, keep);
+  const cancel = el("button", { class: "icon-btn cancel", title: "Stop (Esc). What isn't written yet is dropped, and the audio isn't kept.", "aria-label": "Cancel dictation", onclick: () => cancelDictation() }, svg("close", 18));
+  const done = el("button", { class: "icon-btn keep", title: "Done (Ctrl + Space). It also stops by itself when you stop talking.", "aria-label": "Finish dictation", onclick: () => stopDictation() }, svg("check", 18));
+  for (const b of [cancel, done]) b.addEventListener("mousedown", (e) => e.preventDefault());
+  live.replaceChildren(el("span", { class: "rec" }, el("span", { class: "dot" })), el("span", {}, "Dictating"), wave, elapsed, cancel, done);
   live.hidden = false;
   document.getElementById("talk").hidden = true;
-  const ends = Date.now() + DICTATION_LIMIT_S * 1000;
-  dictation.limitTimer = setInterval(() => {
-    const s = Math.max(0, (ends - Date.now()) / 1000);
-    left.textContent = `${clock(Math.ceil(s))} left`;
-    if (s <= 0) stopDictation();
-  }, 250);
+  // The words go where the cursor was, on a line of their own, written in as they come.
+  dictation.slot = placeDictationSlot(body);
+  dictation.slot.replaceChildren(el("span", { class: "rec-dot" }), "Listening…");
+  const started = Date.now();
+  dictation.clockTimer = setInterval(() => { elapsed.textContent = clock((Date.now() - started) / 1000); }, 500);
   try {
-    await invoke("dictate_start");
+    dictation.session = await invoke("dictate_start", { continuous: true, note: keep ? note.id : null });
   } catch (e) {
+    removeDictationSlot(dictation.slot);
     endDictationUi();
     dictation = null;
     showDictationError(e);
@@ -817,47 +874,38 @@ async function startDictation() {
 
 function endDictationUi() {
   clearInterval(dictation?.levelTimer);
-  clearInterval(dictation?.limitTimer);
+  clearInterval(dictation?.clockTimer);
   const live = document.getElementById("dictating");
   if (live) live.hidden = true;
   const talk = document.getElementById("talk");
   if (talk) talk.hidden = false;
 }
 
-/// Writes what was said at the cursor, or at the end of the note when the cursor is elsewhere,
-/// keeping the audio when Settings asks.
-/// `byVoice` when ended with "Hey Superteem, stop recording", which is then left out of the words.
+/// Takes the place marker out, and says so when nothing was heard at all.
+function finishDictation() {
+  endDictationUi();
+  const chip = document.getElementById("dictation-chip");
+  const wrote = dictation?.wrote;
+  removeDictationSlot(dictation?.slot);
+  if (!wrote && chip) { chip.hidden = false; chip.textContent = "No speech heard."; setTimeout(() => (chip.hidden = true), 2500); }
+  dictation = null;
+  syncWake().catch(() => {});
+}
+
+/// Stops dictating and writes in what's left. `byVoice` when ended with "Hey Superteem, stop recording",
+/// which is then left out of the words.
 async function stopDictation(byVoice = false) {
   if (!dictation || dictation.busy) return;
   dictation.busy = true;
   endDictationUi();
-  const chip = document.getElementById("dictation-chip");
-  const body = document.getElementById("note-body");
-  const slot = body ? placeDictationSlot(body) : null;
+  dictation.slot?.replaceChildren(el("span", { class: "spinner" }), "Writing it down…");
   try {
-    // Kept audio is filed under the note, so the note must be saved as keeping it first.
-    const keep = !!prefs.keep_audio && !!note;
-    if (keep && (!note.id || !note.keepAudio)) {
-      note.keepAudio = true;
-      note.id = await invoke("save_note", { id: note.id, title: note.title, body: note.body, keepAudio: true });
-      view.id = note.id;
-    }
-    const heard = await invoke("dictate_stop", { note: keep ? note.id : null });
-    const words = byVoice ? withoutStopCommand(heard) : heard;
-    if (body && slot?.isConnected && words?.trim()) {
-      const range = document.createRange();
-      range.selectNode(slot);
-      insertWords(body, range, words);
-    } else {
-      removeDictationSlot(slot);
-    }
-    if (!words && chip) { chip.hidden = false; chip.textContent = "No speech heard."; setTimeout(() => (chip.hidden = true), 2500); }
+    const heard = dictation.session ? await invoke("dictate_stop", { session: dictation.session, note: null }) : "";
+    writeDictated(byVoice ? withoutStopCommand(heard) : heard);
   } catch (e) {
-    removeDictationSlot(slot);
     showDictationError(e);
   }
-  dictation = null;
-  syncWake().catch(() => {});
+  finishDictation();
 }
 
 /// The words of a dictation without the "Hey Superteem, stop recording" that ended it.
@@ -869,12 +917,13 @@ function withoutStopCommand(words) {
   return words.replace(/[\s,.!]*\b(stop|end|finish)\b[\w\s']*\b(record\w*|note|dictat\w*)\W*$/i, "").trim();
 }
 
-/// Throws away the dictation: nothing is written and the audio is dropped.
+/// Stops dictating and drops what isn't written in yet; words already written stay, to edit or undo.
 async function cancelDictation() {
   if (!dictation || dictation.busy) return;
   dictation.busy = true;
   endDictationUi();
-  await invoke("dictate_cancel").catch(() => {});
+  if (dictation.session) await invoke("dictate_cancel", { session: dictation.session }).catch(() => {});
+  removeDictationSlot(dictation.slot);
   dictation = null;
   syncWake().catch(() => {});
   document.getElementById("note-body")?.focus();
@@ -1585,6 +1634,7 @@ function renderSession(session, processingError, suggestion) {
     el("span", { title: dateText(meta.created) }, agoText(meta.created)),
     meta.duration_s ? el("span", { title: clock(meta.duration_s) }, `Length: ${lengthText(meta.duration_s)}`) : null,
     el("span", { class: "grow" }),
+    scriptLines.length ? readAloudButton(() => scriptLines.filter((l) => hasWords(l.text)).map((l) => `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? "Someone"}: ${l.text}`).join("\n"), "Read the transcript aloud") : null,
     session.segments.length ? exporter : null,
     isDesktop() ? el("button", { class: "icon-only", title: meta.compacted ? "Open this meeting's folder, with its transcript and exports" : "Open this meeting's folder, with its audio, transcript and exports",
       "aria-label": "Open this meeting's folder", onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
@@ -2001,7 +2051,11 @@ function renderSession(session, processingError, suggestion) {
           });
           return tick;
         }));
-      lanes.append(el("div", { class: "track" }, el("span", { class: "name", style: `color:${strong.get(stream) ?? "inherit"}` }, name), mute, bar));
+      // An imported track has a menu: sync it, say where it starts, or take it out.
+      const imported = session.imports?.find((i) => i.name === stream);
+      const nameEl = el("span", { class: "name", style: `color:${strong.get(stream) ?? "inherit"}`,
+        title: imported ? `Imported · starts at ${signedClock(imported.offset_s)}${imported.confidence != null ? ` · synced (${syncQuality(imported.confidence)})` : ""}` : name }, name);
+      lanes.append(el("div", { class: "track" }, imported ? el("span", { class: "name-wrap" }, nameEl, importMenu(id, imported, name, page)) : nameEl, mute, bar));
     }
     lanes.append(head);
     lanes.addEventListener("click", (e) => {
@@ -2045,12 +2099,126 @@ function renderSession(session, processingError, suggestion) {
       playButton,
       el("button", { class: "pill", "aria-label": "Forward 5 seconds", title: "Forward 5 seconds (Alt + →)", onclick: () => player?.seek(player.t + 5) }, "+5"),
       el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item (→)", onclick: nextClip }, svg("skip-forward", 16)),
-      timeLabel, el("span", { class: "grow" }), mixLabel));
+      timeLabel, el("span", { class: "grow" }), mixLabel,
+      meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id) }, svg("export", 14), "Import")));
     player.prevClip = prevClip;
     player.nextClip = nextClip;
     requestAnimationFrame(() => player?.seek(keepTime));
   }
   main.replaceChildren(el("div", { class: "review" }, page, streams.length ? tracks : null));
+}
+
+// ---------- Importing tracks
+
+/// Seconds as "1:02.5", with a minus sign before the meeting started.
+function signedClock(seconds) {
+  const sign = seconds < 0 ? "−" : "";
+  const s = Math.abs(seconds);
+  return `${sign}${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
+}
+
+/// "12.5", "1:02.5", "-0:05" or "−5" as seconds; null when it isn't a time.
+function parseStart(text) {
+  const t = text.trim().replace("−", "-");
+  const m = t.match(/^(-)?(?:(\d+):)?(\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const seconds = Number(m[2] ?? 0) * 60 + Number(m[3]);
+  return m[1] ? -seconds : seconds;
+}
+
+const syncQuality = (c) => (c >= 1.5 ? "a clear match" : c >= 1.15 ? "a fair match" : "a weak match: check it");
+
+/// Decodes any audio the web view can play into 16 kHz mono 16-bit samples.
+async function decodeTo16k(file) {
+  const context = new AudioContext();
+  let audio;
+  try {
+    audio = await context.decodeAudioData(await file.arrayBuffer());
+  } finally {
+    context.close().catch(() => {});
+  }
+  const offline = new OfflineAudioContext(1, Math.ceil(audio.duration * 16000), 16000);
+  const source = offline.createBufferSource();
+  source.buffer = audio;
+  source.connect(offline.destination);
+  source.start();
+  const out = (await offline.startRendering()).getChannelData(0);
+  const pcm = new Int16Array(out.length);
+  for (let i = 0; i < out.length; i++) pcm[i] = Math.max(-1, Math.min(1, out[i])) * 32767;
+  return new Uint8Array(pcm.buffer);
+}
+
+/// The form for adding a recording as a track: the file, its name, and where it starts, typed or found.
+function showImport(tracks, id) {
+  tracks.querySelector(".import-form")?.remove();
+  const file = el("input", { type: "file", accept: "audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm", "aria-label": "Audio file" });
+  const name = el("input", { type: "text", placeholder: "Track name, such as Phone", maxlength: "60", "aria-label": "Track name" });
+  const start = el("input", { type: "text", value: "0:00.0", class: "mono", size: "8", "aria-label": "Starts at" });
+  const sync = el("input", { type: "checkbox", checked: true });
+  const status = el("div", { class: "hint", role: "status" });
+  start.disabled = true;
+  sync.addEventListener("change", () => { start.disabled = sync.checked; });
+  file.addEventListener("change", () => { if (file.files[0] && !name.value) name.value = file.files[0].name.replace(/\.[^.]+$/, ""); });
+  const go = el("button", { class: "primary pill" }, "Import and transcribe");
+  go.addEventListener("click", async () => {
+    const chosen = file.files[0];
+    if (!chosen) return status.replaceChildren(el("span", { class: "danger" }, "Choose a recording first."));
+    const offset = sync.checked ? 0 : parseStart(start.value);
+    if (offset == null) return status.replaceChildren(el("span", { class: "danger" }, "Type the start as minutes:seconds, such as 1:02.5, or −0:05 if it started first."));
+    go.disabled = true;
+    try {
+      status.replaceChildren(el("span", { class: "spinner" }), " Reading the recording…");
+      const pcm = await decodeTo16k(chosen);
+      status.replaceChildren(el("span", { class: "spinner" }), sync.checked ? " Lining it up with the other tracks…" : " Adding it…");
+      const added = await invoke("import_track", pcm, { headers: {
+        "x-id": id, "x-label": encodeURIComponent(name.value.trim() || chosen.name), "x-offset": String(offset), "x-sync": sync.checked ? "1" : "0" } });
+      if (sync.checked) status.replaceChildren(`It starts at ${signedClock(added.offset_s)}, ${syncQuality(added.confidence ?? 0)}. Transcribing…`);
+      processAgain(id);
+    } catch (e) {
+      go.disabled = false;
+      status.replaceChildren(el("span", { class: "danger" }, `Couldn't import it: ${e?.message ?? e}`));
+    }
+  });
+  const form = el("div", { class: "import-form" },
+    el("div", { class: "import-head" }, el("strong", {}, "Import a recording"),
+      el("button", { class: "icon-only", "aria-label": "Close", onclick: () => form.remove() }, svg("close", 14))),
+    el("p", { class: "hint" }, "Another recording of this meeting, such as from a phone, becomes a track: it's transcribed with the others and its speakers are found the same way."),
+    el("label", { class: "import-row" }, el("span", {}, "Recording"), file),
+    el("label", { class: "import-row" }, el("span", {}, "Name"), name),
+    el("label", { class: "import-row check" }, sync, el("span", {}, "Sync it to the other tracks automatically")),
+    el("label", { class: "import-row" }, el("span", {}, "Or it starts at"), start, el("small", { class: "hint" }, "minutes:seconds into the meeting; −0:05 if it started first")),
+    el("div", { class: "import-row" }, go), status);
+  tracks.append(form);
+  form.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+/// The menu on an imported track's name.
+function importMenu(id, imported, label, page) {
+  const fail = (e) => showError(page, e);
+  return menuButton(svg("more", 14), [
+    ["Sync to the other tracks", `Starts at ${signedClock(imported.offset_s)} now`, async () => {
+      try {
+        await invoke("sync_track", { id, name: imported.name });
+        processAgain(id);
+      } catch (e) { fail(e); }
+    }],
+    ["Set where it starts", "Type the time yourself", () => {
+      const input = el("input", { type: "text", class: "mono", size: "8", value: signedClock(imported.offset_s).replace("−", "-"), "aria-label": "Starts at" });
+      const save = el("button", { class: "primary pill" }, "Save and transcribe");
+      const box = el("div", { class: "inline-form" }, `${label} starts at`, input, save,
+        el("button", { class: "pill", onclick: () => box.remove() }, "Cancel"));
+      save.addEventListener("click", async () => {
+        const offset = parseStart(input.value);
+        if (offset == null) return showError(box, "Type minutes:seconds, such as 1:02.5.");
+        try { await invoke("set_track_offset", { id, name: imported.name, offsetS: offset }); processAgain(id); } catch (e) { showError(box, e); }
+      });
+      page.querySelector(".meta")?.after(box);
+      input.focus();
+    }],
+    ["Remove this track", "Its lines leave the transcript", async () => {
+      try { await invoke("remove_track", { id, name: imported.name }); processAgain(id); } catch (e) { fail(e); }
+    }],
+  ]);
 }
 
 /// A phrase heard again this close to a marker made while recording is the same moment.
@@ -4187,12 +4355,19 @@ const remember = (key, value) => { try { localStorage.setItem(key, value); } cat
 
 /// Asks whether a newer version is out. Returns the release, or null when it couldn't be checked.
 /// `asked` shows the bar even for a version put off before.
+/// A day between automatic checks; the time of the last one survives restarts.
+const UPDATE_EVERY_MS = 24 * 60 * 60 * 1000;
+function lastUpdateCheck() {
+  try { return Number(localStorage.getItem("update-checked")) || 0; } catch { return 0; }
+}
+
 async function checkForUpdate(asked = false) {
   try {
     update = await invoke("check_update");
   } catch {
     return null;
   }
+  try { localStorage.setItem("update-checked", String(Date.now())); } catch {}
   if (asked && update.newer) remember("update-later", "");
   showUpdateBar();
   // Someone using the app by voice hears about it once, as they may never see the bar.
@@ -4271,7 +4446,11 @@ async function installUpdate() {
     // On a phone the list is home.
     if (matchMedia("(max-width: 720px)").matches) document.body.classList.add("show-list");
   }
-  // Checked a little after starting, so it doesn't slow the first page, and then twice a day.
+  // Checked a little after starting, so it doesn't slow the first page, and again whenever a day has
+  // passed since the last check: an hourly look, and on coming back to the app, catch a computer that slept.
   setTimeout(checkForUpdate, 8000);
-  setInterval(checkForUpdate, 12 * 60 * 60 * 1000);
+  const dueForCheck = () => { if (Date.now() - lastUpdateCheck() > UPDATE_EVERY_MS) checkForUpdate(); };
+  setInterval(dueForCheck, 60 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) dueForCheck(); });
+  window.addEventListener("focus", dueForCheck);
 })();

@@ -32,6 +32,11 @@ class UrlArgs {
 }
 
 @InvokeArg
+class SpeakArgs {
+    var text: String = ""
+}
+
+@InvokeArg
 class PermissionArgs {
     var ids: Array<String> = arrayOf()
 }
@@ -116,6 +121,60 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         } catch (e: Exception) {
             invoke.reject("No browser could open ${args.url}")
         }
+    }
+
+    // Reading text aloud with the phone's own voice, as Android's web view has none.
+    private var tts: android.speech.tts.TextToSpeech? = null
+    private var ttsReady = false
+    private val speaking = mutableMapOf<String, Invoke>()
+
+    private fun withTts(then: (android.speech.tts.TextToSpeech?) -> Unit) {
+        tts?.let { if (ttsReady) return then(it) }
+        tts = android.speech.tts.TextToSpeech(activity) { status ->
+            ttsReady = status == android.speech.tts.TextToSpeech.SUCCESS
+            tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                override fun onStart(id: String) {}
+                override fun onDone(id: String) { speaking.remove(id)?.resolve(JSObject()) }
+                @Deprecated("Deprecated in Java")
+                override fun onError(id: String) { speaking.remove(id)?.resolve(JSObject()) }
+                override fun onStop(id: String, interrupted: Boolean) { speaking.remove(id)?.resolve(JSObject()) }
+            })
+            then(if (ttsReady) tts else null)
+        }
+    }
+
+    /** Says the text, answering once it has been said or stopped. */
+    @Command
+    fun speak(invoke: Invoke) {
+        val args = invoke.parseArgs(SpeakArgs::class.java)
+        withTts { engine ->
+            if (engine == null) return@withTts invoke.reject("This phone has no text-to-speech voice.")
+            val id = "u" + SystemClock.elapsedRealtimeNanos()
+            speaking[id] = invoke
+            engine.speak(args.text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, id)
+        }
+    }
+
+    @Command
+    fun stopSpeaking(invoke: Invoke) {
+        tts?.stop()
+        speaking.values.forEach { it.resolve(JSObject()) }
+        speaking.clear()
+        invoke.resolve(JSObject())
+    }
+
+    /** A short buzz, to say dictation stopped by itself. */
+    @Command
+    fun vibrate(invoke: Invoke) {
+        val effect = android.os.VibrationEffect.createOneShot(120, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
+        if (Build.VERSION.SDK_INT >= 31) {
+            val manager = activity.getSystemService(android.os.VibratorManager::class.java)
+            manager?.defaultVibrator?.vibrate(effect)
+        } else {
+            @Suppress("DEPRECATION")
+            (activity.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator)?.vibrate(effect)
+        }
+        invoke.resolve(JSObject())
     }
 
     /** The app's page in Android settings, where access refused for good can be allowed. */
