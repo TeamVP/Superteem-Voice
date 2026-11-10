@@ -34,6 +34,8 @@ class UrlArgs {
 @InvokeArg
 class SpeakArgs {
     var text: String = ""
+    var rate: Float = 1f
+    var pitch: Float = 1f
 }
 
 @InvokeArg
@@ -151,6 +153,8 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             if (engine == null) return@withTts invoke.reject("This phone has no text-to-speech voice.")
             val id = "u" + SystemClock.elapsedRealtimeNanos()
             speaking[id] = invoke
+            engine.setSpeechRate(args.rate.coerceIn(0.5f, 2f))
+            engine.setPitch(args.pitch.coerceIn(0.5f, 2f))
             engine.speak(args.text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, id)
         }
     }

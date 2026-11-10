@@ -82,6 +82,16 @@ pub struct Prefs {
     pub natural_voice: bool,
     /// Where exports go; empty for the Exports folder beside the meetings.
     pub export_dir: String,
+    /// The natural voice that reads aloud (an id from `tts::VOICES`); empty for the first, Lessac.
+    pub tts_voice: String,
+    /// How fast to read aloud: 1 is normal. Unset: 1.
+    pub read_speed: Option<f32>,
+    /// The system voice's pitch: 1 is normal. Unset: 1.
+    pub read_pitch: Option<f32>,
+    /// The system voice chosen, by name; empty for the device's default.
+    pub system_voice: String,
+    /// Say who's speaking before each line when a transcript is read. Unset: yes.
+    pub read_speakers: Option<bool>,
 }
 
 /// Starred until the person chooses their own.

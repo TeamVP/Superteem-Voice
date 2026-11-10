@@ -10,10 +10,14 @@ icon.cog = '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0
 icon.star = '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"></path>';
 icon["star-filled"] = '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" fill="currentColor"></path>';
 icon.speak = '<path d="M11 5L6 9H3v6h3l5 4z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"></path>';
+icon["chevron-left"] = '<path d="M15 6l-6 6 6 6"></path>';
 icon.sparkle = '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"></path>';
 
 /// The page showing analyses now: { kind, id, holder, ctx }.
 let analysisPage = null;
+/// The meeting or note the Analysis settings were opened from, to go back to with the changes made there:
+/// { kind, id }.
+let analysisOrigin = null;
 /// "Reading part 2 of 3…", by job.
 const analysisProgress = new Map();
 const jobKey = (j) => `${j.kind}/${j.id}/${j.template}`;
@@ -35,6 +39,7 @@ listen("analysed", (e) => {
 function analysisStack(kind, id, ctx) {
   const holder = el("section", { class: "analyses", "aria-label": "Analyses" });
   analysisPage = { kind, id, holder, ctx, errors: new Map() };
+  analysisOrigin = null;
   refreshAnalyses();
   return holder;
 }
@@ -81,24 +86,30 @@ function runAnalysis(page, template) {
   invoke("analyse", { kind: page.kind, id: page.id, template }).catch((e) => { page.errors.set(template, e); refreshAnalyses(); });
 }
 
-/// "Summaries and action items": the first time, setting up a model; after that, the person's starred
+/// "Analysis templates": the first time, setting up a model; after that, the person's starred
 /// templates to run, the rest below them, and a cog for the settings.
 function addAnalysis(page, data) {
   const used = new Set(data.entries.map((e) => e.template.id));
   const busy = (t) => data.queue.waiting.some((j) => isJob(j, page, t)) || isJob(data.queue.current, page, t);
   const bar = el("div", { class: "analysis-add" });
-  const label = el("span", { class: "with-icon" }, svg("sparkle", 16), "Summaries and action items");
+  const label = el("span", { class: "with-icon" }, svg("sparkle", 16), "Analysis templates");
+  const from = () => { analysisOrigin = { kind: page.kind, id: page.id }; };
   const settings = el("button", { class: "icon-only", title: "Analysis settings: model and starred templates", "aria-label": "Analysis settings",
-    onclick: () => showAnalysisSettings() }, svg("cog", 16));
+    onclick: () => { from(); showAnalysisSettings(); } }, svg("cog", 16));
   if (!data.ready) {
-    bar.append(el("button", { class: "link add-analysis", onclick: () => showAnalysisSettings(null, true) }, label));
+    bar.append(el("button", { class: "link add-analysis", onclick: () => { from(); showAnalysisSettings(null, true); } }, label));
     return bar;
   }
-  const starred = data.starred.map((id) => data.templates.find((t) => t.id === id)).filter(Boolean);
+  // data.templates holds only those for this kind of page; a starred one for the other kind is shown, unusable.
+  const starred = data.starred.map((id) => data.templates.find((t) => t.id === id) ?? data.elsewhere?.find((t) => t.id === id)).filter(Boolean);
   const others = data.templates.filter((t) => !data.starred.includes(t.id));
-  const choice = (t) => [t.name, busy(t.id) ? "Running" : used.has(t.id) ? "Make it again" : t.description, () => runAnalysis(page, t.id), busy(t.id)];
+  const choice = (t) => {
+    if (!t.applies_to.includes(page.kind)) return [t.name, `For ${t.applies_to[0]}s only`, () => {}, true];
+    return [t.name, busy(t.id) ? "Running" : used.has(t.id) ? "Make it again" : t.description, () => runAnalysis(page, t.id), busy(t.id)];
+  };
   const choices = [...starred.map(choice)];
   if (others.length) choices.push(starred.length ? "More templates" : "Templates", ...others.map(choice));
+  choices.push(["Star or edit templates…", null, () => { from(); showTemplates(); }]);
   bar.append(menuButton(label, choices, "link add-analysis"), settings);
   return bar;
 }
@@ -203,15 +214,18 @@ function analysisCard(page, e, data, running, waiting) {
   const head = el("div", { class: "analysis-head" }, toggle,
     el("button", { class: "analysis-name", onclick: () => edit({ op: "collapse", collapsed: !e.collapsed }) }, e.template.name),
     e.collapsed && def ? el("span", { class: "digest" }, analysisDigest(def, e.result)) : null,
-    ...badges, el("span", { class: "grow" }), e.collapsed ? null : readAloudButton(() => analysisSpeech(card), "Read this aloud"), regenerate, more);
+    // Minimised, it can still be read aloud; making it again waits until it's open.
+    ...badges, el("span", { class: "grow" }), def ? readAloudButton(() => analysisSpeech(card), "Read this aloud") : null,
+    e.collapsed && !(running || waiting) ? null : regenerate, more);
   card.append(head);
   if (error) card.append(el("p", { class: "danger analysis-error" }, `Couldn't make it again: ${error}`));
-  if (e.collapsed) return card;
   if (!def) {
+    if (e.collapsed) return card;
     card.append(el("p", { class: "hint" }, "Its template is no longer available, so it can only be removed."));
     return card;
   }
-  const body = el("div", { class: "analysis-body" });
+  // Drawn when minimised too, hidden, so it can be read aloud.
+  const body = el("div", { class: "analysis-body", hidden: e.collapsed });
   if (def.notice) body.append(el("div", { class: "notice" }, def.notice));
   const chips = (evidence) => sourceChips(evidence, e.sources, page.ctx);
   def.fields.forEach((f, i) => {
@@ -234,6 +248,10 @@ function analysisCard(page, e, data, running, waiting) {
           editable(b.point, (v) => edit({ op: "set", field: "bookmarks", index, key: "point", value: v })),
           chips(b.evidence));
       }))));
+  }
+  if (e.collapsed) {
+    card.append(body);
+    return card;
   }
   const made = e.engine.kind === "local" ? "this device" : e.engine.host ?? "a server";
   const footer = el("div", { class: "analysis-foot" },
@@ -438,8 +456,7 @@ async function showAnalysisSettings(message, setup = false) {
   view = { kind: "analysis-settings" };
   refreshItems();
   const status = await invoke("llm_status");
-  const page = el("div", { class: "page" }, el("button", { class: "link back-link", onclick: () => showSettings() }, "‹ Settings"),
-    el("h1", {}, "Analysis"));
+  const page = el("div", { class: "page" }, backLinks("‹ Settings", () => showSettings()), el("h1", {}, "Analysis"));
   page.append(el("p", { class: "hint" }, "Summaries, decisions, action items and other notes are made from transcripts by a small language model that runs on this device. ",
     "Download one once; after that it works offline and nothing is sent anywhere."));
   if (message) page.append(el("div", { class: "notice" }, message));
@@ -507,7 +524,7 @@ async function showAnalysisSettings(message, setup = false) {
     toggleRow("Summarise meetings when they're processed", "Runs the Summary template in the background after each meeting. It waits while you record.", status.auto, async (on) => {
       await invoke("save_analysis_settings", { auto: on });
     }),
-    linkRow("Templates", "Star the ones you use, and make your own", () => showTemplates())));
+    linkRow("Analysis templates", "Star the ones you use, and make your own", () => showTemplates())));
 
   // A server the person runs: never used unless set here, and anything not on this computer is named first.
   const url = el("input", { type: "url", value: status.server, placeholder: "http://localhost:11434/v1", "aria-label": "Server address" });
@@ -538,6 +555,17 @@ async function showAnalysisSettings(message, setup = false) {
   main.replaceChildren(page);
 }
 
+/// The back link, and when the settings were opened from a meeting or note, a way straight back to it.
+function backLinks(text, back) {
+  const links = el("div", { class: "back-links" }, el("button", { class: "link back-link", onclick: back }, text));
+  if (analysisOrigin) {
+    const { kind, id } = analysisOrigin;
+    links.append(el("button", { class: "pill with-icon back-to", onclick: () => (kind === "note" ? openNote(id) : openSession(id)) },
+      svg("chevron-left", 14), `Back to the ${kind}`));
+  }
+  return links;
+}
+
 // ---------- Settings › Templates
 
 async function showTemplates(message) {
@@ -546,9 +574,8 @@ async function showTemplates(message) {
   view = { kind: "templates" };
   refreshItems();
   const { templates: all, starred } = await invoke("list_templates");
-  const page = el("div", { class: "page" }, el("button", { class: "link back-link", onclick: () => showAnalysisSettings() }, "‹ Analysis"),
-    el("h1", {}, "Templates"));
-  page.append(el("p", { class: "hint" }, "A template says what to pull out of a meeting or note and how to lay it out. Star the ones you use: they're offered first under Summaries and action items on every meeting and note. Each one stacks there and can be made again."));
+  const page = el("div", { class: "page" }, backLinks("‹ Analysis", () => showAnalysisSettings()), el("h1", {}, "Analysis templates"));
+  page.append(el("p", { class: "hint" }, "A template says what to pull out of a meeting or note and how to lay it out. Star the ones you use: they're offered first under Analysis templates on every meeting and note. Each one stacks there and can be made again."));
   if (message) page.append(el("div", { class: "notice" }, message));
   const group = el("div", { class: "group" });
   for (const t of all) {
@@ -586,7 +613,7 @@ async function showTemplates(message) {
     const headings = [...rows.querySelectorAll(".heading-row")].map((r) => [r.querySelector("input").value.trim(), r.querySelector("select").value]).filter(([t]) => t);
     try {
       await invoke("new_template", { name: name.value.trim(), headings });
-      showTemplates(`"${name.value.trim()}" is ready to use.`);
+      showTemplates(`"${name.value.trim()}" is ready, and starred, so it's offered first under Analysis templates on every meeting and note.`);
     } catch (e) {
       showError(form, e);
     }
@@ -611,7 +638,7 @@ async function editTemplate(t) {
   view = { kind: "template-edit" };
   const area = el("textarea", { class: "template-source mono", spellcheck: "false", "aria-label": "Template" }, source);
   const result = el("div", { role: "status" });
-  const page = el("div", { class: "page" }, el("button", { class: "link back-link", onclick: () => showTemplates() }, "‹ Templates"),
+  const page = el("div", { class: "page" }, backLinks("‹ Analysis templates", () => showTemplates()),
     el("h1", {}, file ? t.name : `Customise ${t.name}`),
     el("p", { class: "hint" }, file ? "Changes take effect the next time it runs." : "Saving makes your own copy, which replaces the built-in until you delete it."),
     area, result,
@@ -619,8 +646,8 @@ async function editTemplate(t) {
       el("button", { class: "pill", onclick: () => showTemplates() }, "Cancel"),
       el("button", { class: "primary pill", onclick: async () => {
         try {
-          await invoke("save_template", { source: area.value, file });
-          showTemplates("Saved.");
+          const saved = await invoke("save_template", { source: area.value, file, was: t.id });
+          showTemplates(`Saved. "${saved.name}" is used from now on, the next time it's made${analysisOrigin ? ", including with Make again" : ""}.`);
         } catch (e) {
           result.replaceChildren(el("pre", { class: "danger template-errors" }, String(e)));
         }
@@ -689,6 +716,10 @@ function say(text) {
   if (platform === "android" || !window.speechSynthesis) return invoke("speak_text", { text });
   return new Promise((resolve) => {
     const u = new SpeechSynthesisUtterance(text.replace(/[“”]/g, ""));
+    u.rate = prefs.read_speed ?? 1;
+    u.pitch = prefs.read_pitch ?? 1;
+    const chosen = prefs.system_voice && speechSynthesis.getVoices().find((v) => v.name === prefs.system_voice);
+    if (chosen) u.voice = chosen;
     u.onend = u.onerror = () => resolve();
     speechSynthesis.speak(u);
   });
@@ -738,49 +769,138 @@ function analysisSpeech(card) {
 
 // ---------- Settings › Reading aloud
 
-let ttsProgress = null;
 listen("tts-download", (e) => {
-  ttsProgress = e.payload.fraction;
-  document.querySelectorAll("[data-tts-progress]").forEach((n) => { n.textContent = `${Math.round(ttsProgress * 100)}%`; });
+  document.querySelectorAll("[data-tts-progress]").forEach((n) => {
+    if (n.dataset.ttsProgress === e.payload.id) n.textContent = `${Math.round(e.payload.fraction * 100)}%`;
+  });
 });
 
-/// The natural voice: download it once, then switch between it and the system's voice.
-async function readingAloudGroup(refresh) {
+/// The system's voices, which some web views only list a moment after loading.
+function systemVoices() {
+  if (!window.speechSynthesis) return Promise.resolve([]);
+  const now = speechSynthesis.getVoices();
+  if (now.length) return Promise.resolve(now);
+  return new Promise((resolve) => {
+    const done = () => resolve(speechSynthesis.getVoices());
+    speechSynthesis.addEventListener("voiceschanged", done, { once: true });
+    setTimeout(done, 800);
+  });
+}
+
+const speedText = (s) => (Math.abs(s - 1) < 0.01 ? "Normal" : `${s.toFixed(2).replace(/0$/, "")}×`);
+
+/// One line for the Settings row: which voice, at what speed.
+async function readingAloudSummary() {
   const status = await invoke("tts_status").catch(() => null);
-  const group = el("div", { class: "group" });
-  if (!status?.supported) {
-    group.append(el("div", { class: "row" }, el("span", { class: "label" }, "Voice",
-      el("small", {}, "Reads with this device's own voice. A downloadable natural voice is on Windows now, and coming here.")), el("span", { class: "value" }, "System")));
-    return group;
+  const natural = prefs.natural_voice && status?.voices.find((v) => v.id === status.chosen && v.ready);
+  const speed = prefs.read_speed ?? 1;
+  return `${natural ? `${natural.name}, natural voice` : prefs.system_voice || "The system's voice"}${Math.abs(speed - 1) < 0.01 ? "" : ` · ${speedText(speed)}`}`;
+}
+
+async function saveReading(change) {
+  await invoke("save_voice_settings", change);
+  Object.assign(prefs, {
+    ...(change.natural != null && { natural_voice: change.natural }),
+    ...(change.voice != null && { tts_voice: change.voice }),
+    ...(change.speed != null && { read_speed: change.speed }),
+    ...(change.pitch != null && { read_pitch: change.pitch }),
+    ...(change.systemVoice != null && { system_voice: change.systemVoice }),
+    ...(change.readSpeakers != null && { read_speakers: change.readSpeakers }),
+  });
+}
+
+/// A slider from 0.5 to 2 with its value beside it, saved when let go.
+function rateSlider(label, hint, value, save) {
+  const shown = el("span", { class: "value mono" }, speedText(value));
+  const input = el("input", { type: "range", min: "0.5", max: "2", step: "0.05", value: String(value), "aria-label": label });
+  input.addEventListener("input", () => { shown.textContent = speedText(Number(input.value)); });
+  input.addEventListener("change", () => save(Number(input.value)));
+  const reset = el("button", { class: "link", type: "button", onclick: () => { input.value = "1"; shown.textContent = speedText(1); save(1); } }, "Reset");
+  return el("div", { class: "row slider-row" }, el("span", { class: "label" }, label, hint ? el("small", {}, hint) : null),
+    el("div", { class: "slider" }, input, shown, reset));
+}
+
+/// Settings › Reading aloud: the voice, natural or the system's, how fast it reads, and what it says.
+async function showReadingSettings(message) {
+  leave();
+  showPage();
+  view = { kind: "reading-settings" };
+  refreshItems();
+  const [status, voices] = await Promise.all([invoke("tts_status").catch(() => null), systemVoices()]);
+  const page = el("div", { class: "page" }, backLinks("‹ Settings", () => showSettings()), el("h1", {}, "Reading aloud"));
+  page.append(el("p", { class: "hint" }, "Notes, transcripts and analyses can be read aloud with the speaker button beside them. Choose the voice and how it reads here."));
+  if (message) page.append(el("div", { class: "notice" }, message));
+  const sample = "This is how notes, transcripts and summaries sound when they're read aloud.";
+  const natural = !!prefs.natural_voice && !!status?.voices.some((v) => v.id === status.chosen && v.ready);
+
+  // The voice: the system's, or one of the natural ones, downloaded once.
+  const group = el("div", { class: "group voice-list", role: "radiogroup", "aria-label": "Voice" });
+  const pick = (on, title, about, choose, extra = []) => {
+    const radio = el("input", { type: "radio", name: "reading-voice", checked: on, "aria-label": title });
+    radio.addEventListener("change", choose);
+    return el("label", { class: `row voice-row${on ? " chosen" : ""}` }, radio,
+      el("span", { class: "label" }, title, on ? el("span", { class: "badge ok" }, "Reading") : null, el("small", {}, about)), ...extra);
+  };
+  const systemNames = voices.filter((v) => /^en/i.test(v.lang)).map((v) => v.name);
+  group.append(pick(!natural, "The system's voice", status?.supported
+    ? "Built into this device. Nothing to download."
+    : "Built into this device. Natural voices are on Windows now, and coming here.",
+  async () => { await saveReading({ natural: false }); showReadingSettings(); }));
+  for (const v of status?.supported ? status.voices : []) {
+    const on = natural && status.chosen === v.id;
+    const size = `${Math.round(v.size / 1e6)} MB`;
+    const extra = [];
+    if (status.downloading === v.id) {
+      extra.push(el("span", { class: "value" }, el("span", { class: "spinner" }), " ", el("span", { "data-tts-progress": v.id }, "Starting…")),
+        el("button", { class: "pill", type: "button", onclick: (e) => { e.preventDefault(); invoke("cancel_tts_download"); } }, "Stop"));
+    } else if (v.ready) {
+      extra.push(el("button", { class: "icon-only danger", type: "button", title: `Delete ${v.name}`, "aria-label": `Delete ${v.name}`,
+        onclick: async (e) => { e.preventDefault(); await invoke("delete_tts", { id: v.id }).catch((err) => showError(page, err)); await refreshPrefs(); showReadingSettings(); } }, svg("trash", 16)));
+    } else {
+      extra.push(el("button", { class: "pill", type: "button", disabled: !!status.downloading, onclick: (e) => { e.preventDefault(); getVoice(v); } }, `Download (${size})`));
+    }
+    const row = pick(on, `${v.name}${v.id === status.voices[0].id ? " (recommended)" : ""}`, `Natural voice · ${v.about}`, async () => {
+      if (!v.ready) return getVoice(v);
+      await saveReading({ voice: v.id, natural: true });
+      showReadingSettings();
+    }, extra);
+    if (!v.ready) row.querySelector("input").disabled = !!status.downloading;
+    group.append(row);
   }
-  if (!status.ready) {
-    const get = el("button", { class: "primary pill" }, `Download (${Math.round(status.size / 1e6)} MB)`);
-    get.addEventListener("click", async () => {
-      get.disabled = true;
-      get.replaceChildren(el("span", { class: "spinner" }), " ", el("span", { "data-tts-progress": "" }, "Starting…"));
-      try {
-        await invoke("download_tts");
-        await invoke("save_voice_settings", { natural: true });
-        prefs.natural_voice = true;
-        refresh();
-      } catch (e) {
-        get.disabled = false;
-        get.textContent = "Try again";
-        showError(group, e);
-      }
-    });
-    group.append(el("div", { class: "row" }, el("span", { class: "label" }, "Natural voice",
-      el("small", {}, `${status.name}: a more natural voice for reading notes, transcripts and summaries aloud. Runs on this device, offline, once downloaded.`)), get));
-    return group;
+  async function getVoice(v) {
+    const run = invoke("download_tts", { id: v.id });
+    setTimeout(() => showReadingSettings(), 150);
+    try {
+      await run;
+      await saveReading({ voice: v.id, natural: true });
+      if (view.kind === "reading-settings") showReadingSettings(`${v.name} is ready, and reads from now on.`);
+    } catch (e) {
+      if (view.kind === "reading-settings") showReadingSettings(String(e));
+    }
   }
-  group.append(
-    toggleRow("Natural voice", `${status.name}, downloaded. Off uses the system's voice.`, !!prefs.natural_voice, async (on) => {
-      await invoke("save_voice_settings", { natural: on });
-      prefs.natural_voice = on;
-    }),
-    el("div", { class: "row" }, el("span", { class: "label" }, "Try it"),
-      readAloudButton(() => "This is how notes, transcripts and summaries sound when they're read aloud.", "Hear the voice"),
-      el("button", { class: "icon-only danger", title: "Delete the natural voice", "aria-label": "Delete the natural voice",
-        onclick: async () => { await invoke("delete_tts").catch((e) => showError(group, e)); prefs.natural_voice = false; refresh(); } }, svg("trash", 16))));
-  return group;
+  page.append(el("h2", {}, "Voice"), group);
+  if (status?.supported) page.append(el("p", { class: "hint" }, "Natural voices run on this device, offline, once downloaded. Choose the system's voice to read without one."));
+
+  // How it reads.
+  const how = el("div", { class: "group" },
+    rateSlider("Speed", "How fast it reads", prefs.read_speed ?? 1, (s) => saveReading({ speed: s })));
+  if (!natural) {
+    how.append(rateSlider("Pitch", "The system's voice only", prefs.read_pitch ?? 1, (s) => saveReading({ pitch: s })));
+    if (systemNames.length > 1) {
+      const select = el("select", { "aria-label": "System voice" }, el("option", { value: "" }, "This device's default"),
+        systemNames.map((n) => el("option", { value: n, selected: n === prefs.system_voice }, n)));
+      select.addEventListener("change", () => saveReading({ systemVoice: select.value }));
+      how.append(el("div", { class: "row stack-narrow" }, el("span", { class: "label" }, "System voice", el("small", {}, "The English voices this device has")), select));
+    }
+  }
+  how.append(
+    toggleRow("Say who's speaking", "Reading a transcript, say each speaker's name before what they said.", prefs.read_speakers ?? true,
+      (on) => saveReading({ readSpeakers: on })),
+    el("div", { class: "row" }, el("span", { class: "label" }, "Try it", el("small", {}, "With the settings above")), readAloudButton(() => sample, "Hear the voice")));
+  page.append(el("h2", {}, "How it reads"), how);
+  main.replaceChildren(page);
+}
+
+async function refreshPrefs() {
+  try { prefs = await invoke("get_prefs"); } catch {}
 }

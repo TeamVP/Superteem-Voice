@@ -1245,7 +1245,9 @@ async fn dictate_cancel(session: Option<u64>) -> Result<(), String> {
 /// Reads text aloud with the system's voice, for platforms whose web view has none (Android).
 #[tauri::command]
 async fn speak_text(text: String) -> Result<(), String> {
-    blocking(move || recorder::speak(&text)).await?
+    let p = prefs::load();
+    let (rate, pitch) = (p.read_speed.unwrap_or(1.0), p.read_pitch.unwrap_or(1.0));
+    blocking(move || recorder::speak(&text, rate, pitch)).await?
 }
 
 #[tauri::command]
@@ -1496,18 +1498,27 @@ struct AnalysesView {
     ready: bool,
     /// Template ids offered first, in order.
     starred: Vec<String>,
+    /// Starred templates for the other kind of page, shown in the menu but not usable here.
+    elsewhere: Vec<analysis::TemplateInfo>,
 }
 
 #[tauri::command]
 fn get_analyses(state: State<AppState>, kind: String, id: String) -> Result<AnalysesView, String> {
     let item = analysis::Item::new(&kind, &id)?;
     let p = prefs::load();
+    let starred = p.starred();
+    let (templates, elsewhere): (Vec<_>, Vec<_>) = analysis::templates()
+        .into_iter()
+        .filter(|t| t.errors.is_empty())
+        .map(|t| analysis::TemplateInfo { template: None, ..t })
+        .partition(|t| t.applies_to.contains(&kind));
     Ok(AnalysesView {
         entries: analysis::view(&item),
-        templates: analysis::templates().into_iter().filter(|t| t.applies_to.contains(&kind) && t.errors.is_empty()).map(|t| analysis::TemplateInfo { template: None, ..t }).collect(),
+        templates,
         queue: analysis_queue_state(&state),
         ready: !p.llm_server.trim().is_empty() || !llm::installed().is_empty(),
-        starred: p.starred(),
+        elsewhere: elsewhere.into_iter().filter(|t| starred.contains(&t.id)).collect(),
+        starred,
     })
 }
 
@@ -1572,38 +1583,77 @@ fn tts_status() -> tts::Status {
 
 #[derive(Serialize, Clone)]
 struct TtsDownload {
+    id: String,
     fraction: f32,
 }
 
 #[tauri::command]
-async fn download_tts<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+async fn download_tts<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(), String> {
     let handle = app.clone();
     blocking(move || {
-        let cancel = std::sync::atomic::AtomicBool::new(false);
-        tts::download(&cancel, |fraction| drop(handle.emit("tts-download", TtsDownload { fraction })))
+        let voice = id.clone();
+        tts::download(&id, |fraction| drop(handle.emit("tts-download", TtsDownload { id: voice.clone(), fraction })))
     })
     .await?
 }
 
 #[tauri::command]
-fn delete_tts() -> Result<(), String> {
-    tts::unload();
-    prefs::update(|p| p.natural_voice = false)?;
-    tts::delete()
+fn cancel_tts_download() {
+    tts::cancel_download();
 }
 
-/// Speech for `text` in the natural voice, as a WAV for the page to play.
 #[tauri::command]
-async fn natural_speak(text: String, speed: Option<f32>) -> Result<tauri::ipc::Response, String> {
-    let wav = blocking(move || tts::speak(&text, speed.unwrap_or(1.0))).await??;
+fn delete_tts(id: String) -> Result<(), String> {
+    tts::delete(&id)?;
+    if !tts::any_ready() {
+        prefs::update(|p| p.natural_voice = false)?;
+    }
+    Ok(())
+}
+
+/// Speech for `text` in the chosen natural voice at the chosen speed, as a WAV for the page to play.
+#[tauri::command]
+async fn natural_speak(text: String) -> Result<tauri::ipc::Response, String> {
+    let speed = prefs::load().read_speed.unwrap_or(1.0);
+    let wav = blocking(move || tts::speak(&text, speed)).await??;
     Ok(tauri::ipc::Response::new(wav))
 }
 
+/// Reading aloud and model settings; each is left as it is when not given.
 #[tauri::command]
-fn save_voice_settings(natural: Option<bool>, use_gpu: Option<bool>) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+fn save_voice_settings(
+    natural: Option<bool>,
+    voice: Option<String>,
+    speed: Option<f32>,
+    pitch: Option<f32>,
+    system_voice: Option<String>,
+    read_speakers: Option<bool>,
+    use_gpu: Option<bool>,
+) -> Result<(), String> {
+    if let Some(v) = &voice {
+        if !tts::VOICES.iter().any(|x| x.id == v) {
+            return Err("That voice isn't one Voice offers.".into());
+        }
+    }
     prefs::update(|p| {
+        if let Some(v) = voice {
+            p.tts_voice = v;
+        }
         if let Some(n) = natural {
-            p.natural_voice = n && tts::ready();
+            p.natural_voice = n && tts::ready(tts::chosen_in(p));
+        }
+        if let Some(s) = speed {
+            p.read_speed = Some(s.clamp(0.5, 2.0));
+        }
+        if let Some(s) = pitch {
+            p.read_pitch = Some(s.clamp(0.5, 2.0));
+        }
+        if let Some(v) = system_voice {
+            p.system_voice = v.chars().take(200).collect();
+        }
+        if let Some(r) = read_speakers {
+            p.read_speakers = Some(r);
         }
         if let Some(g) = use_gpu {
             p.use_gpu = Some(g);
@@ -1705,15 +1755,22 @@ fn save_analysis_settings(model: Option<String>, auto: Option<bool>, server: Opt
 }
 
 /// Adds an audio track to a meeting. The body is the audio, 16 kHz mono 16-bit, decoded by the page; the
-/// headers say which meeting (`x-id`), the track's name (`x-label`, URI-encoded), where it starts
-/// (`x-offset`, seconds) and whether to find that by syncing (`x-sync`). The meeting is processed again.
+/// headers say which meeting (`x-id`), the track's name (`x-label`, URI-encoded) and how to place it
+/// (`x-place`): "time" at the time of day it started (`x-started-at`, Unix seconds), fine-tuned by its sound
+/// when `x-refine` is 1; "sound" by matching it anywhere; or "at" a point in the meeting (`x-offset`, seconds).
 #[tauri::command]
 async fn import_track<R: Runtime>(app: AppHandle<R>, request: tauri::ipc::Request<'_>) -> Result<imports::Import, String> {
     let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
     let id = header("x-id");
     let label = percent_decode(&header("x-label"));
-    let offset: f64 = header("x-offset").parse().unwrap_or(0.0);
-    let sync_it = header("x-sync") == "1";
+    let place = match header("x-place").as_str() {
+        "time" => imports::Place::Time {
+            started_at: header("x-started-at").parse().map_err(|_| "When it started wasn't sent.")?,
+            refine: header("x-refine") == "1",
+        },
+        "sound" => imports::Place::Sound,
+        _ => imports::Place::At(header("x-offset").parse().unwrap_or(0.0)),
+    };
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("No audio was sent.".into()) };
     let pcm: Vec<i16> = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
     let dir = library::session_dir(&id)?;
@@ -1723,7 +1780,7 @@ async fn import_track<R: Runtime>(app: AppHandle<R>, request: tauri::ipc::Reques
     let import = blocking(move || {
         let state = app.state::<AppState>();
         let _guard = state.edit.lock().unwrap();
-        imports::add(&dir, &label, &pcm, offset, sync_it)
+        imports::add(&dir, &label, &pcm, place)
     })
     .await??;
     Ok(import)
@@ -1747,12 +1804,20 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Finds where an imported track starts by matching it to the recorded tracks.
+/// Finds where an imported track fits by matching its sound to the recorded tracks: `near` where it is now,
+/// or anywhere.
 #[tauri::command]
-async fn sync_track(state: State<'_, AppState>, id: String, name: String) -> Result<imports::Import, String> {
+async fn sync_track(state: State<'_, AppState>, id: String, name: String, near: Option<bool>) -> Result<imports::Import, String> {
     let dir = library::session_dir(&id)?;
     let _guard = state.edit.lock().unwrap();
-    imports::sync(&dir, &name)
+    imports::sync(&dir, &name, near.unwrap_or(true))
+}
+
+/// Places an imported track by the time of day it started (Unix seconds).
+#[tauri::command]
+fn set_track_start(state: State<AppState>, id: String, name: String, started_at: f64) -> Result<(), String> {
+    let _guard = state.edit.lock().unwrap();
+    imports::set_start_time(&library::session_dir(&id)?, &name, started_at)
 }
 
 #[tauri::command]
@@ -1818,9 +1883,29 @@ fn template_source(id: String) -> Result<TemplateSource, String> {
     analysis::template_source(&id).map(|(source, file)| TemplateSource { source, file })
 }
 
+#[derive(Serialize)]
+struct SavedTemplate {
+    file: String,
+    id: String,
+    name: String,
+}
+
+/// Saves a template. `was` is the id it had: when the edit changed it, its star moves with it, so it stays
+/// offered first on meetings and notes.
 #[tauri::command]
-fn save_template(source: String, file: Option<String>) -> Result<String, String> {
-    analysis::save_template(&source, file.as_deref())
+fn save_template(source: String, file: Option<String>, was: Option<String>) -> Result<SavedTemplate, String> {
+    let file = analysis::save_template(&source, file.as_deref())?;
+    let t = stv_core::analysis::parse(&source).map_err(|e| e.join("
+"))?;
+    if let Some(was) = was.filter(|w| *w != t.id) {
+        prefs::update(|p| {
+            let list = p.starred();
+            if list.contains(&was) {
+                p.starred_templates = Some(list.into_iter().map(|s| if s == was { t.id.clone() } else { s }).collect());
+            }
+        })?;
+    }
+    Ok(SavedTemplate { file, id: t.id, name: t.name })
 }
 
 #[tauri::command]
@@ -1830,7 +1915,10 @@ fn delete_template(file: String) -> Result<(), String> {
 
 #[tauri::command]
 fn new_template(name: String, headings: Vec<(String, stv_core::analysis::HeadingKind)>) -> Result<String, String> {
-    analysis::new_template(&name, &headings)
+    let id = analysis::new_template(&name, &headings)?;
+    // Someone who makes a template means to use it: it's starred, so it's offered first.
+    star_template(id.clone(), true)?;
+    Ok(id)
 }
 
 fn capture_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
@@ -1975,11 +2063,13 @@ pub fn run() {
             set_export_dir,
             export_dir,
             download_tts,
+            cancel_tts_download,
             delete_tts,
             natural_speak,
             save_voice_settings,
             import_track,
             sync_track,
+            set_track_start,
             set_track_offset,
             remove_track,
             speak_text,

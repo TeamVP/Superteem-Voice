@@ -125,7 +125,7 @@ function lengthText(seconds) {
 function exportMenu(choices, run) {
   const wrap = el("span", { class: "export-menu" });
   const button = el("button", { class: "link export-button", type: "button", "aria-haspopup": "menu", "aria-expanded": "false", title: "Export" },
-    svg("export", 16), "Export");
+    svg("export", 16), el("span", { class: "wide-only" }, "Export"));
   const menu = el("div", { class: "menu", role: "menu", hidden: true });
   const status = el("div", { class: "export-status", role: "status", "aria-live": "polite", hidden: true });
   const close = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outside, true); };
@@ -1683,10 +1683,11 @@ function renderSession(session, processingError, suggestion) {
   // Like a note's: the status and the meeting's actions in a bar of their own across the top.
   const topBar = el("div", { class: "topbar meta meeting-top" },
     picker,
-    el("span", { title: dateText(meta.created) }, agoText(meta.created)),
-    meta.duration_s ? el("span", { title: clock(meta.duration_s) }, `Length: ${lengthText(meta.duration_s)}`) : null,
+    // On a phone this drops to its own line under the status and the buttons.
+    el("span", { class: "top-info" }, el("span", { title: dateText(meta.created) }, agoText(meta.created)),
+      meta.duration_s ? el("span", { title: clock(meta.duration_s) }, el("span", { class: "wide-only" }, "Length: "), lengthText(meta.duration_s)) : null),
     el("span", { class: "grow" }),
-    scriptLines.length ? readAloudButton(() => scriptLines.filter((l) => hasWords(l.text)).map((l) => `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? "Someone"}: ${l.text}`).join("\n"), "Read the transcript aloud") : null,
+    scriptLines.length ? readAloudButton(() => scriptLines.filter((l) => hasWords(l.text)).map((l) => (prefs.read_speakers ?? true ? `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? "Someone"}: ${l.text}` : l.text)).join("\n"), "Read the transcript aloud") : null,
     session.segments.length ? exporter : null,
     isDesktop() ? el("button", { class: "icon-only", title: meta.compacted ? "Open this meeting's folder, with its transcript and exports" : "Open this meeting's folder, with its audio, transcript and exports",
       "aria-label": "Open this meeting's folder", onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
@@ -2059,7 +2060,7 @@ function renderSession(session, processingError, suggestion) {
         return b;
       };
       mixLabel.replaceChildren(
-        option("transcript", "Transcript mix", "Hear what the transcript used: each track is muted where its sound is greyed out"),
+        option("transcript", ["Transcript", el("span", { class: "wide-only" }, " mix")], "Hear what the transcript used: each track is muted where its sound is greyed out"),
         option("manual", "Manual", "Every track plays; mute them yourself with M"));
     };
     drawMix();
@@ -2107,8 +2108,8 @@ function renderSession(session, processingError, suggestion) {
       // An imported track has a menu: sync it, say where it starts, or take it out.
       const imported = session.imports?.find((i) => i.name === stream);
       const nameEl = el("span", { class: "name", style: `color:${strong.get(stream) ?? "inherit"}`,
-        title: imported ? `Imported · starts at ${signedClock(imported.offset_s)}${imported.confidence != null ? ` · synced (${syncQuality(imported.confidence)})` : ""}` : name }, name);
-      lanes.append(el("div", { class: "track" }, imported ? el("span", { class: "name-wrap" }, nameEl, importMenu(id, imported, name, page)) : nameEl, mute, bar));
+        title: imported ? `${name} · imported · ${placedText(imported, meta.created)}` : name }, name);
+      lanes.append(el("div", { class: "track" }, imported ? el("span", { class: "name-wrap" }, nameEl, importMenu(id, imported, name, page, meta.created)) : nameEl, mute, bar));
     }
     lanes.append(head);
     lanes.addEventListener("click", (e) => {
@@ -2124,6 +2125,7 @@ function renderSession(session, processingError, suggestion) {
         head.style.left = `${rect.left - lanesRect.left + (rect.width * t) / duration}px`;
       }
       timeLabel.textContent = `${clock(t)} / ${clock(duration)}`;
+      if (meta.created) timeLabel.title = `${dayClock(meta.created + t)} by the time of day`;
       playButton.replaceChildren(svg(playing ? "pause" : "play", 18));
       playButton.setAttribute("aria-label", playing ? "Pause" : "Play");
       for (const { seg, line } of lineEls) line.classList.toggle("playing", playing && t >= seg.start_s && t < seg.end_s);
@@ -2153,7 +2155,7 @@ function renderSession(session, processingError, suggestion) {
       el("button", { class: "pill", "aria-label": "Forward 5 seconds", title: "Forward 5 seconds (Alt + →)", onclick: () => player?.seek(player.t + 5) }, "+5"),
       el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item (→)", onclick: nextClip }, svg("skip-forward", 16)),
       timeLabel, el("span", { class: "grow" }), mixLabel,
-      meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id) }, svg("export", 14), "Import")));
+      meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id, meta.created), "aria-label": "Import a recording" }, svg("export", 14), el("span", { class: "wide-only" }, "Import"))));
     player.prevClip = prevClip;
     player.nextClip = nextClip;
     requestAnimationFrame(() => player?.seek(keepTime));
@@ -2201,31 +2203,120 @@ async function decodeTo16k(file) {
   return new Uint8Array(pcm.buffer);
 }
 
-/// The form for adding a recording as a track: the file, its name, and where it starts, typed or found.
-function showImport(tracks, id) {
+/// "14:30:05" for a time of day in Unix seconds.
+function dayClock(unix) {
+  return new Date(unix * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
+/// A time of day typed as "14:30", "14:30:05" or "2:30:05 pm", on the meeting's day (or the day either side,
+/// whichever is closest to the meeting), as Unix seconds; null when it isn't a time.
+function parseDayClock(text, meetingStart) {
+  const m = text.trim().toLowerCase().match(/^(\d{1,2})[:.](\d{2})(?:[:.](\d{2}(?:\.\d+)?))?\s*(am|pm)?$/);
+  if (!m) return null;
+  let hours = Number(m[1]);
+  if (m[4] === "pm" && hours < 12) hours += 12;
+  if (m[4] === "am" && hours === 12) hours = 0;
+  if (hours > 23 || Number(m[2]) > 59) return null;
+  const day = new Date(meetingStart * 1000);
+  day.setHours(hours, Number(m[2]), 0, 0);
+  const at = day.getTime() / 1000 + Number(m[3] ?? 0);
+  return [at - 86400, at, at + 86400].reduce((a, b) => (Math.abs(b - meetingStart) < Math.abs(a - meetingStart) ? b : a));
+}
+
+/// When a recording started, from its file: a date and time in its name, as phones and recorders write them
+/// ("20261111_143005", "2026-11-11 14.30.05"), or else when the file was last changed less its length.
+/// { at, from } or null.
+function recordingStart(file, seconds) {
+  const m = file.name.match(/(20\d\d)[-_.]?(\d\d)[-_.]?(\d\d)[ T_-]?(\d\d)[-_.:h]?(\d\d)[-_.:m]?(\d\d)/);
+  if (m) {
+    const at = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])).getTime() / 1000;
+    if (Number.isFinite(at)) return { at, from: "the file's name" };
+  }
+  if (file.lastModified && seconds) return { at: file.lastModified / 1000 - seconds, from: "when the file was saved, less its length" };
+  return null;
+}
+
+/// How long a recording lasts, from its file, without decoding it all.
+function audioSeconds(file) {
+  return new Promise((resolve) => {
+    const audio = new Audio();
+    const url = URL.createObjectURL(file);
+    const done = (v) => { URL.revokeObjectURL(url); resolve(v); };
+    audio.preload = "metadata";
+    audio.onloadedmetadata = () => done(Number.isFinite(audio.duration) ? audio.duration : null);
+    audio.onerror = () => done(null);
+    setTimeout(() => done(null), 4000);
+    audio.src = url;
+  });
+}
+
+/// How an imported track was placed, for its title and menu.
+function placedText(imported, meetingStart) {
+  const how = imported.placed_by === "sound" ? `matched by its sound (${syncQuality(imported.confidence ?? 0)})`
+    : imported.placed_by === "hand" ? "placed by hand" : "placed by the time of day";
+  const drift = imported.rate && imported.rate !== 1 ? ` · its clock ran ${Math.abs((imported.rate - 1) * 100).toFixed(2)} % ${imported.rate > 1 ? "slow" : "fast"}` : "";
+  return `Starts ${dayClock(meetingStart + imported.offset_s)}, ${signedClock(imported.offset_s)} into the meeting · ${how}${drift}`;
+}
+
+/// The form for adding a recording as a track: the file, its name, and where it goes. The time of day it
+/// started places it first, read from the file and changeable; matching its sound can then fine-tune it.
+function showImport(tracks, id, meetingStart) {
   tracks.querySelector(".import-form")?.remove();
   const file = el("input", { type: "file", accept: "audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm", "aria-label": "Audio file" });
   const name = el("input", { type: "text", placeholder: "Track name, such as Phone", maxlength: "60", "aria-label": "Track name" });
-  const start = el("input", { type: "text", value: "0:00.0", class: "mono", size: "8", "aria-label": "Starts at" });
-  const sync = el("input", { type: "checkbox", checked: true });
+  const how = el("select", { "aria-label": "How to place it" },
+    el("option", { value: "time" }, "By the time of day it started"),
+    el("option", { value: "sound" }, "By matching its sound anywhere"),
+    el("option", { value: "at" }, "At a point in the meeting"));
+  const when = el("input", { type: "text", class: "mono", size: "10", value: dayClock(meetingStart), "aria-label": "Started at, time of day" });
+  const whenFrom = el("small", { class: "hint" }, `The meeting started at ${dayClock(meetingStart)}.`);
+  const refine = el("input", { type: "checkbox", checked: true });
+  const at = el("input", { type: "text", value: "0:00.0", class: "mono", size: "8", "aria-label": "Starts at" });
   const status = el("div", { class: "hint", role: "status" });
-  start.disabled = true;
-  sync.addEventListener("change", () => { start.disabled = sync.checked; });
-  file.addEventListener("change", () => { if (file.files[0] && !name.value) name.value = file.files[0].name.replace(/\.[^.]+$/, ""); });
+  const timeRows = [
+    el("label", { class: "import-row" }, el("span", {}, "It started at"), when, whenFrom),
+    el("label", { class: "import-row check" }, refine, el("span", {}, "Then fine-tune it by matching its sound nearby",
+      el("small", { class: "hint" }, " Takes up a call's delay and clocks that run apart. Leave it off for two sides of a call that share no sound."))),
+  ];
+  const atRow = el("label", { class: "import-row" }, el("span", {}, "It starts at"), at, el("small", { class: "hint" }, "minutes:seconds into the meeting; −0:05 if it started first"));
+  const showRows = () => {
+    timeRows.forEach((r) => { r.hidden = how.value !== "time"; });
+    atRow.hidden = how.value !== "at";
+  };
+  how.addEventListener("change", showRows);
+  file.addEventListener("change", async () => {
+    const chosen = file.files[0];
+    if (!chosen) return;
+    if (!name.value) name.value = chosen.name.replace(/\.[^.]+$/, "");
+    const found = recordingStart(chosen, await audioSeconds(chosen));
+    if (!found) return;
+    when.value = dayClock(found.at);
+    const apart = Math.abs(found.at - meetingStart);
+    whenFrom.textContent = `From ${found.from}. The meeting started at ${dayClock(meetingStart)}.${apart > 6 * 3600 ? " That's hours apart: check it." : ""}`;
+  });
   const go = el("button", { class: "primary pill" }, "Import and transcribe");
   go.addEventListener("click", async () => {
     const chosen = file.files[0];
     if (!chosen) return status.replaceChildren(el("span", { class: "danger" }, "Choose a recording first."));
-    const offset = sync.checked ? 0 : parseStart(start.value);
-    if (offset == null) return status.replaceChildren(el("span", { class: "danger" }, "Type the start as minutes:seconds, such as 1:02.5, or −0:05 if it started first."));
+    const headers = { "x-id": id, "x-label": encodeURIComponent(name.value.trim() || chosen.name), "x-place": how.value };
+    if (how.value === "time") {
+      const started = parseDayClock(when.value, meetingStart);
+      if (started == null) return status.replaceChildren(el("span", { class: "danger" }, "Type the time it started as hours:minutes:seconds, such as 14:30:05."));
+      headers["x-started-at"] = String(started);
+      headers["x-refine"] = refine.checked ? "1" : "0";
+    } else if (how.value === "at") {
+      const offset = parseStart(at.value);
+      if (offset == null) return status.replaceChildren(el("span", { class: "danger" }, "Type the start as minutes:seconds, such as 1:02.5, or −0:05 if it started first."));
+      headers["x-offset"] = String(offset);
+    }
     go.disabled = true;
     try {
       status.replaceChildren(el("span", { class: "spinner" }), " Reading the recording…");
       const pcm = await decodeTo16k(chosen);
-      status.replaceChildren(el("span", { class: "spinner" }), sync.checked ? " Lining it up with the other tracks…" : " Adding it…");
-      const added = await invoke("import_track", pcm, { headers: {
-        "x-id": id, "x-label": encodeURIComponent(name.value.trim() || chosen.name), "x-offset": String(offset), "x-sync": sync.checked ? "1" : "0" } });
-      if (sync.checked) status.replaceChildren(`It starts at ${signedClock(added.offset_s)}, ${syncQuality(added.confidence ?? 0)}. Transcribing…`);
+      status.replaceChildren(el("span", { class: "spinner" }), how.value === "at" || (how.value === "time" && !refine.checked) ? " Adding it…" : " Matching its sound to the other tracks…");
+      const added = await invoke("import_track", pcm, { headers });
+      const missed = how.value === "time" && refine.checked && added.placed_by !== "sound" ? " Its sound didn't clearly match nearby, so it's placed by the time of day." : "";
+      status.replaceChildren(`${placedText(added, meetingStart)}.${missed} Transcribing…`);
       processAgain(id);
     } catch (e) {
       go.disabled = false;
@@ -2235,39 +2326,55 @@ function showImport(tracks, id) {
   const form = el("div", { class: "import-form" },
     el("div", { class: "import-head" }, el("strong", {}, "Import a recording"),
       el("button", { class: "icon-only", "aria-label": "Close", onclick: () => form.remove() }, svg("close", 14))),
-    el("p", { class: "hint" }, "Another recording of this meeting, such as from a phone, becomes a track: it's transcribed with the others and its speakers are found the same way."),
+    el("p", { class: "hint" }, "Another recording of this meeting becomes a track: a phone in the room, or the other side of a call recorded by the person on it. It's transcribed with the others, so the transcript has everyone."),
     el("label", { class: "import-row" }, el("span", {}, "Recording"), file),
     el("label", { class: "import-row" }, el("span", {}, "Name"), name),
-    el("label", { class: "import-row check" }, sync, el("span", {}, "Sync it to the other tracks automatically")),
-    el("label", { class: "import-row" }, el("span", {}, "Or it starts at"), start, el("small", { class: "hint" }, "minutes:seconds into the meeting; −0:05 if it started first")),
+    el("label", { class: "import-row" }, el("span", {}, "Place it"), how),
+    ...timeRows, atRow,
     el("div", { class: "import-row" }, go), status);
+  showRows();
   tracks.append(form);
   form.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 /// The menu on an imported track's name.
-function importMenu(id, imported, label, page) {
+function importMenu(id, imported, label, page, meetingStart) {
   const fail = (e) => showError(page, e);
+  const inline = (text, input, save) => {
+    const button = el("button", { class: "primary pill" }, "Save and transcribe");
+    const box = el("div", { class: "inline-form" }, `${label} ${text}`, input, button,
+      el("button", { class: "pill", onclick: () => box.remove() }, "Cancel"));
+    button.addEventListener("click", () => save(box));
+    page.querySelector("h1")?.before(box);
+    input.focus();
+  };
+  const match = (near) => async () => {
+    try {
+      await invoke("sync_track", { id, name: imported.name, near });
+      processAgain(id);
+    } catch (e) { fail(e); }
+  };
   return menuButton(svg("more", 14), [
-    ["Sync to the other tracks", `Starts at ${signedClock(imported.offset_s)} now`, async () => {
-      try {
-        await invoke("sync_track", { id, name: imported.name });
-        processAgain(id);
-      } catch (e) { fail(e); }
+    "Where it goes",
+    ["Fine-tune by its sound", "Matches it to the other tracks near where it is, and finds clocks that ran apart", match(true)],
+    ["Match its sound anywhere", "When the time of day is far out", match(false)],
+    ["Set the time of day it started", dayClock(meetingStart + imported.offset_s), () => {
+      const input = el("input", { type: "text", class: "mono", size: "10", value: dayClock(meetingStart + imported.offset_s), "aria-label": "Started at, time of day" });
+      inline("started at", input, async (box) => {
+        const started = parseDayClock(input.value, meetingStart);
+        if (started == null) return showError(box, "Type hours:minutes:seconds, such as 14:30:05.");
+        try { await invoke("set_track_start", { id, name: imported.name, startedAt: started }); processAgain(id); } catch (e) { showError(box, e); }
+      });
     }],
-    ["Set where it starts", "Type the time yourself", () => {
+    ["Set where it starts in the meeting", `${signedClock(imported.offset_s)} now`, () => {
       const input = el("input", { type: "text", class: "mono", size: "8", value: signedClock(imported.offset_s).replace("−", "-"), "aria-label": "Starts at" });
-      const save = el("button", { class: "primary pill" }, "Save and transcribe");
-      const box = el("div", { class: "inline-form" }, `${label} starts at`, input, save,
-        el("button", { class: "pill", onclick: () => box.remove() }, "Cancel"));
-      save.addEventListener("click", async () => {
+      inline("starts at", input, async (box) => {
         const offset = parseStart(input.value);
         if (offset == null) return showError(box, "Type minutes:seconds, such as 1:02.5.");
         try { await invoke("set_track_offset", { id, name: imported.name, offsetS: offset }); processAgain(id); } catch (e) { showError(box, e); }
       });
-      page.querySelector("h1")?.before(box);
-      input.focus();
     }],
+    "This track",
     ["Remove this track", "Its lines leave the transcript", async () => {
       try { await invoke("remove_track", { id, name: imported.name }); processAgain(id); } catch (e) { fail(e); }
     }],
@@ -3058,7 +3165,7 @@ function trainedText(prints) {
 }
 
 function linkRow(label, value, onClick) {
-  return el("button", { class: "row", style: "width:100%;border-radius:0;border:none;border-bottom:1px solid var(--line);text-align:left", onclick: onClick },
+  return el("button", { class: "row link-row", style: "width:100%;border-radius:0;border:none;border-bottom:1px solid var(--line);text-align:left", onclick: onClick },
     el("span", { class: "label" }, label), el("span", { class: "value" }, value ?? ""), el("span", { "aria-hidden": "true", class: "value" }, "›"));
 }
 
@@ -3118,9 +3225,10 @@ async function showSettings() {
   page.append(el("h2", {}, "Transcription"), el("div", { class: "group" },
     linkRow("Vocabulary", terms.length ? `${terms.length} word${terms.length === 1 ? "" : "s"}` : "Spell names and acronyms your way", () => showVocabulary())));
   page.append(el("h2", {}, "Analysis"), el("div", { class: "group" },
-    linkRow("Summaries and action items", "The language model, and when it runs", () => showAnalysisSettings()),
-    linkRow("Templates", "Summary, standup, interview, SOAP and your own", () => showTemplates())));
-  page.append(el("h2", {}, "Reading aloud"), await readingAloudGroup(() => showSettings()));
+    linkRow("Model and when it runs", "The language model that makes analyses", () => showAnalysisSettings()),
+    linkRow("Analysis templates", "Summary, standup, interview, SOAP and your own", () => showTemplates())));
+  page.append(el("h2", {}, "Reading aloud"), el("div", { class: "group" },
+    linkRow("Voice and speed", await readingAloudSummary(), () => showReadingSettings())));
   page.append(el("h2", {}, "Voices"), el("div", { class: "group" },
     linkRow("Voice prints", prints.length ? `${prints.length} saved` : "None yet", () => showVoicePrints()),
     linkRow("Default microphone and voice print", prefs.enrol_input ?? "Not set up", () => showOnboarding(SETUP.voice)),
@@ -4507,4 +4615,41 @@ async function installUpdate() {
   setInterval(dueForCheck, 60 * 60 * 1000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) dueForCheck(); });
   window.addEventListener("focus", dueForCheck);
+})();
+
+// ---------- Names of icon buttons on touch screens
+
+/// A touch screen has no hover, so holding a button that shows only an icon says what it does, the way
+/// hovering does with a mouse. Letting go after that doesn't press it.
+(() => {
+  let timer = null;
+  let tip = null;
+  let held = null;
+  const hide = () => { clearTimeout(timer); tip?.remove(); tip = null; };
+  document.addEventListener("touchstart", (e) => {
+    hide();
+    const target = e.target.closest?.("button, [role=menuitem], a, label.voice-row");
+    const name = target?.getAttribute("title") || (target && !target.innerText.trim() ? target.getAttribute("aria-label") : null);
+    if (!name) return;
+    timer = setTimeout(() => {
+      held = target;
+      tip = el("div", { class: "touch-tip", role: "tooltip" }, name);
+      document.body.append(tip);
+      const r = target.getBoundingClientRect();
+      const w = tip.getBoundingClientRect().width;
+      tip.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+      tip.style.top = `${r.top > 60 ? r.top - 40 : r.bottom + 8}px`;
+      navigator.vibrate?.(10);
+    }, 500);
+  }, { passive: true });
+  const end = () => { clearTimeout(timer); if (tip) setTimeout(hide, 900); };
+  document.addEventListener("touchend", end, { passive: true });
+  document.addEventListener("touchcancel", hide, { passive: true });
+  document.addEventListener("touchmove", () => clearTimeout(timer), { passive: true });
+  // The press after a long hold only showed the name.
+  document.addEventListener("click", (e) => {
+    if (held && e.target.closest?.("button, [role=menuitem], a, label.voice-row") === held) { e.preventDefault(); e.stopPropagation(); }
+    held = null;
+  }, true);
+  document.addEventListener("contextmenu", (e) => { if (tip) e.preventDefault(); });
 })();

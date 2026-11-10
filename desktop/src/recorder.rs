@@ -79,7 +79,7 @@ mod imp {
     }
 
     /// The page reads aloud itself where the web view has a voice.
-    pub fn speak(_text: &str) -> Result<(), String> {
+    pub fn speak(_text: &str, _rate: f32, _pitch: f32) -> Result<(), String> {
         Err("Read aloud in the page.".into())
     }
 
@@ -262,14 +262,16 @@ mod imp {
         call::<Done>("vibrate", Empty {}).map(|_| ())
     }
 
-    #[derive(Serialize)]
-    struct Text<'a> {
-        text: &'a str,
+    /// Reads text aloud with the phone's voice, returning once it's said or stopped.
+    pub fn speak(text: &str, rate: f32, pitch: f32) -> Result<(), String> {
+        call::<Done>("speak", Speak { text, rate, pitch }).map(|_| ())
     }
 
-    /// Reads text aloud with the phone's voice, returning once it's said or stopped.
-    pub fn speak(text: &str) -> Result<(), String> {
-        call::<Done>("speak", Text { text }).map(|_| ())
+    #[derive(Serialize)]
+    struct Speak<'a> {
+        text: &'a str,
+        rate: f32,
+        pitch: f32,
     }
 
     pub fn stop_speaking() -> Result<(), String> {

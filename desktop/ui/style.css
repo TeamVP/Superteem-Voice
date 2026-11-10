@@ -858,3 +858,58 @@ body[data-platform="ios"] { box-sizing: border-box; padding: env(safe-area-inset
 .import-row input[type="text"]:disabled { opacity: 0.5; }
 .track .name-wrap { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
 .track .name-wrap .icon-only { width: 22px; height: 22px; }
+
+/* Back to the meeting or note the settings were opened from */
+.back-links { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.back-links .back-link { margin-bottom: 0; }
+
+/* Reading aloud */
+.voice-row { cursor: pointer; }
+.voice-row input[type="radio"] { flex: none; width: 18px; height: 18px; accent-color: var(--key); margin: 0; }
+.voice-row input[type="radio"]:disabled { opacity: 0.4; }
+.voice-row.chosen { background: color-mix(in srgb, var(--tint-2) 30%, transparent); }
+.slider { display: flex; align-items: center; gap: 10px; }
+.slider input[type="range"] { width: 180px; accent-color: var(--key); }
+.slider .value { min-width: 52px; text-align: right; }
+.import-row[hidden] { display: none; }
+.import-row small.hint { display: block; flex-basis: 100%; }
+.import-row.check small.hint { display: inline; }
+
+@media (max-width: 640px) {
+  .slider-row, .row.stack-narrow { flex-wrap: wrap; }
+  .slider-row .label, .row.stack-narrow .label { flex-basis: 100%; }
+  .slider { flex: 1; }
+  .slider input[type="range"] { flex: 1; width: auto; min-width: 0; }
+  .row.stack-narrow select { flex: 1; min-width: 0; }
+}
+
+/* Narrow screens: labels keep their line, details go under them, and wordy buttons become icons */
+.touch-tip { position: fixed; z-index: 1000; max-width: min(320px, calc(100vw - 16px)); padding: 6px 10px; border-radius: 8px;
+  background: var(--text, #222); color: var(--bg, #fff); font-size: 13px; line-height: 1.3; pointer-events: none;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 25%); }
+.row .label > .value { display: block; }
+@media (max-width: 640px) {
+  .wide-only { display: none; }
+  .row .label { min-width: 0; }
+  .link-row { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; row-gap: 2px; }
+  .link-row > .label { grid-column: 1; }
+  .link-row > .value:not([aria-hidden]) { grid-column: 1; grid-row: 2; font-size: 12px; text-align: left; }
+  .link-row > .value:not([aria-hidden]):empty { display: none; }
+  .link-row > .value[aria-hidden] { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+  .row:has(> .label + .value:not([aria-hidden])):not(.link-row) { flex-wrap: wrap; }
+  .row > .label + .value:not([aria-hidden]) { margin-left: auto; }
+  .row:has(> .label + .pill), .row:has(> .label + button.primary) { flex-wrap: wrap; }
+  .row:has(> .label + .pill) > .label, .row:has(> .label + button.primary) > .label { flex: 1 1 60%; }
+}
+.meeting-top .top-info { display: inline-flex; gap: inherit; align-items: center; }
+@media (max-width: 640px) {
+  .meeting-top .top-info { order: 9; flex-basis: 100%; font-size: 12px; gap: 12px; }
+  .meeting-top .grow { min-width: 0; }
+}
+@media (max-width: 640px) {
+  .transport { gap: 8px; }
+  .transport .grow { min-width: 0; }
+  /* A note's saved time goes under its status and buttons, as a meeting's date does. */
+  .topbar:has(> .status-picker) > .status { order: 9; flex-basis: 100%; font-size: 12px; }
+  .topbar:has(> .status-picker) > .grow { min-width: 0; }
+}
