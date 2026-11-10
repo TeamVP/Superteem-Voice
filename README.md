@@ -33,9 +33,9 @@ Get the latest Windows installer, Mac disk image and Android APK from **[voice.s
 | Device | Requires | File |
 | --- | --- | --- |
 | Windows | Windows 10 or 11, 64-bit | `Voice-by-Superteem-Setup-x64.exe` |
-| Mac | macOS 11 or later, Apple silicon | `Voice-by-Superteem-macOS.dmg` |
+| Mac | macOS 13.3 or later, Apple silicon | `Voice-by-Superteem-macOS.dmg` |
 | Android | Android 10 or later | `Voice-by-Superteem-Android.apk` |
-| iPhone | iOS 15 or later | Through TestFlight and the App Store, once signing is set up |
+| iPhone | iOS 16.4 or later | Through TestFlight and the App Store, once signing is set up |
 
 ## Repository layout
 

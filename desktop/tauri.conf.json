@@ -35,11 +35,12 @@
     "category": "Productivity",
     "icon": ["icons/icon.png", "icons/icon.ico"],
     "macOS": {
-      "minimumSystemVersion": "11.0",
+      "minimumSystemVersion": "13.3",
       "entitlements": "Entitlements.plist"
     },
     "iOS": {
-      "minimumSystemVersion": "15.0"
+      "minimumSystemVersion": "16.4",
+      "frameworks": ["Accelerate", "AudioToolbox", "AVFAudio", "CoreBluetooth"]
     },
     "windows": {
       "nsis": {
