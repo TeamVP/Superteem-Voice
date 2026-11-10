@@ -1,4 +1,5 @@
-//! Phase 1 harness for analysis templates: runs the default template (summary, takeaways, action items)
+//! Phase 1 harness for analysis templates: runs the default template (summary, decisions, action items,
+//! open questions, bookmarks written up)
 //! over a saved meeting or note with a local GGUF model, and prints the result, what checking changed and
 //! how long it took.
 //!
@@ -9,7 +10,7 @@
 //! libraries work side by side.
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use stv_core::analysis::{self, Context, LineIn, Turn};
+use stv_core::analysis::{self, Bookmark, Context, LineIn, Turn};
 use superteem_voice_lib::{library, llm, notes, process, transcribe, vocabulary};
 
 fn arg(args: &[String], name: &str) -> Option<String> {
@@ -34,6 +35,7 @@ struct Input {
     duration_s: f64,
     speakers: Vec<String>,
     is_note: bool,
+    bookmarks: Vec<Bookmark>,
 }
 
 fn meeting(dir: &Path) -> Input {
@@ -53,13 +55,21 @@ fn meeting(dir: &Path) -> Input {
             t.text += " [action item]";
         }
     }
+    // Bookmarks, with anything typed or said there, are written up from what was being said.
+    let bookmarks: Vec<Bookmark> = meta
+        .markers
+        .iter()
+        .filter(|m| !m.removed && m.kind.is_empty() && m.text != "Action item")
+        .enumerate()
+        .map(|(i, m)| Bookmark { n: i + 1, at_s: m.at_s, note: m.text.clone() })
+        .collect();
     let mut speakers: Vec<String> = Vec::new();
     for t in &turns {
         if !speakers.contains(&t.speaker) {
             speakers.push(t.speaker.clone());
         }
     }
-    Input { turns, title: meta.title, duration_s: meta.duration_s, speakers, is_note: false }
+    Input { turns, title: meta.title, duration_s: meta.duration_s, speakers, is_note: false, bookmarks }
 }
 
 fn note(path: &Path) -> Input {
@@ -70,6 +80,7 @@ fn note(path: &Path) -> Input {
         duration_s: 0.0,
         speakers: vec![analysis::ME.into()],
         is_note: true,
+        bookmarks: Vec::new(),
     }
 }
 
@@ -105,6 +116,7 @@ fn main() {
         speakers: &input.speakers,
         glossary: &glossary,
         is_note: input.is_note,
+        bookmarks: &input.bookmarks,
     };
 
     let loading = Instant::now();
@@ -116,18 +128,21 @@ fn main() {
 
     match &result {
         Ok(a) => {
-            println!("{}", analysis::to_markdown(a, &input.turns, "Summary and action items"));
+            println!("{}", analysis::to_markdown(a, &input.turns, &input.bookmarks, "Summary"));
             for w in &a.warnings {
                 println!("! {w}");
             }
-            for p in a.takeaways.iter().filter(|p| p.check) {
+            for p in a.decisions.iter().chain(&a.open_questions).filter(|p| p.check) {
                 println!("? check source: {}", p.text);
             }
             for i in a.action_items.iter().filter(|i| i.check) {
-                println!("? check source: {}", i.task);
+                println!("? check source: {}", i.what);
+            }
+            for b in a.bookmarks.iter().filter(|b| b.check) {
+                println!("? check source: bookmark {}", b.bookmark);
             }
             if let Some(out) = arg(&args, "--json") {
-                let json = serde_json::json!({ "analysis": a, "turns": input.turns });
+                let json = serde_json::json!({ "analysis": a, "turns": input.turns, "bookmarks": input.bookmarks });
                 std::fs::write(&out, serde_json::to_string_pretty(&json).unwrap()).expect("write --json");
             }
         }

@@ -2,27 +2,38 @@
  "note": "Hand labels for the eval. Turn numbers are after joining a speaker's consecutive lines and dropping filler.",
  "action_items": [
   {
-   "task": "Send the updated pricing sheet to Dana",
-   "owner": "Raj",
-   "deadline": "by Friday"
+   "who": "Raj",
+   "what": "Send the updated pricing sheet to Dana",
+   "when": "by Friday"
   },
   {
-   "task": "Remove the free month from the billing system",
-   "owner": "Mei",
-   "deadline": "before the first of next month"
+   "who": "Mei",
+   "what": "Remove the free month from the billing system",
+   "when": "before the first of next month"
   },
   {
-   "task": "Rewrite the FAQ page about the promotion",
-   "owner": "Unassigned",
-   "deadline": null
+   "who": "Unassigned",
+   "what": "Rewrite the FAQ page about the promotion",
+   "when": null
   },
   {
-   "task": "Check with legal whether existing customers keep the free month",
-   "owner": "Alice",
-   "deadline": "next week"
+   "who": "Alice",
+   "what": "Check with legal whether existing customers keep the free month",
+   "when": "next week"
   }
  ],
  "must_not": [
   "meeting was cancelled"
+ ],
+ "decisions": [
+  "Keep the 15% annual discount",
+  "End the extra free month promotion"
+ ],
+ "open_questions": [
+  "Do existing customers on the free month keep it until renewal?"
+ ],
+ "bookmarks": [
+  "00:40: decision to keep 15% and drop the free month",
+  "01:17: open question about existing customers keeping the free month"
  ]
 }
