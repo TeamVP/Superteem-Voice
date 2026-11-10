@@ -40,7 +40,7 @@
     },
     "iOS": {
       "minimumSystemVersion": "16.4",
-      "frameworks": ["Accelerate", "AudioToolbox", "AVFAudio", "CoreBluetooth", "Foundation", "Metal", "MetalKit"]
+      "frameworks": ["Accelerate", "AudioToolbox", "AVFAudio", "CoreBluetooth"]
     },
     "windows": {
       "nsis": {
