@@ -1,5 +1,5 @@
-//! Starts, watches and stops capture. Windows records in this process; Android records in the
-//! Kotlin foreground service, which writes the same journals into the session folder.
+//! Starts, watches and stops capture. Windows, the Mac and the iPhone record in this process; Android
+//! records in the Kotlin foreground service, which writes the same journals into the session folder.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -62,7 +62,8 @@ mod imp {
         Ok(Inputs { default: chosen.or_else(capture::default_input), devices })
     }
 
-    /// Windows asks for nothing up front: the microphone is used as it is.
+    /// Nothing is asked up front. Windows uses the microphone as it is; the Mac and the iPhone ask the
+    /// first time a microphone starts, with the reason in the app's Info.plist.
     pub fn permissions() -> Result<serde_json::Value, String> {
         Ok(serde_json::json!({ "permissions": [] }))
     }
@@ -71,13 +72,70 @@ mod imp {
         Ok(())
     }
 
+    /// The Mac's microphone privacy settings, or the app's page in the iPhone's Settings.
     pub fn open_app_settings() -> Result<(), String> {
-        Err("There are no app permissions to change on Windows.".into())
+        if cfg!(target_os = "macos") {
+            crate::shell::open("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        } else if cfg!(target_os = "ios") {
+            open_url("app-settings:")
+        } else {
+            Err("There are no app permissions to change on Windows.".into())
+        }
     }
 
     /// Opens a web page in the default browser.
+    #[cfg(not(target_os = "ios"))]
     pub fn open_url(url: &str) -> Result<(), String> {
-        std::process::Command::new("explorer").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+        crate::shell::open(url)
+    }
+
+    #[cfg(target_os = "ios")]
+    static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+    /// The app, for opening links through the system.
+    #[cfg(target_os = "ios")]
+    pub fn set_app(app: tauri::AppHandle) {
+        let _ = APP.set(app);
+    }
+
+    #[cfg(target_os = "ios")]
+    pub fn open_url(url: &str) -> Result<(), String> {
+        use tauri_plugin_opener::OpenerExt;
+        let app = APP.get().ok_or("The app hasn't started yet.")?;
+        app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+    }
+
+    /// The iPhone gives an app silence from the microphone until it says it records, and stops it when the
+    /// screen locks unless it also plays. So the app's audio session plays and records, through the speaker
+    /// rather than the earpiece, from a Bluetooth headset when one is connected.
+    #[cfg(target_os = "ios")]
+    pub fn start_audio_session() -> Result<(), String> {
+        use objc2::msg_send;
+        use objc2::runtime::{AnyClass, AnyObject, Bool};
+        use std::ptr::null_mut;
+
+        #[link(name = "AVFAudio", kind = "framework")]
+        extern "C" {}
+
+        const ALLOW_BLUETOOTH: usize = 0x4;
+        const DEFAULT_TO_SPEAKER: usize = 0x8;
+        let session_class = AnyClass::get(c"AVAudioSession").ok_or("AVAudioSession is missing.")?;
+        let string_class = AnyClass::get(c"NSString").ok_or("NSString is missing.")?;
+        unsafe {
+            let session: *mut AnyObject = msg_send![session_class, sharedInstance];
+            // AVAudioSessionCategoryPlayAndRecord is this string.
+            let category: *mut AnyObject = msg_send![string_class, stringWithUTF8String: c"AVAudioSessionCategoryPlayAndRecord".as_ptr()];
+            let no_error = null_mut::<*mut AnyObject>();
+            let set: Bool = msg_send![session, setCategory: category, withOptions: ALLOW_BLUETOOTH | DEFAULT_TO_SPEAKER, error: no_error];
+            if !set.as_bool() {
+                return Err("The audio session couldn't be set to record.".into());
+            }
+            let active: Bool = msg_send![session, setActive: Bool::YES, error: no_error];
+            if !active.as_bool() {
+                return Err("The audio session couldn't start.".into());
+            }
+        }
+        Ok(())
     }
 
     pub fn start(dir: PathBuf, devices: &[String], pins: bool) -> Result<Recorder, String> {

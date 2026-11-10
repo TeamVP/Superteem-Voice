@@ -475,15 +475,12 @@ pub fn export_note(id: &str, format: &str) -> Result<PathBuf, String> {
     }
 }
 
-/// Shows an exported file or folder in File Explorer.
+/// Shows an exported file or folder in File Explorer or Finder.
 pub fn reveal(path: &Path) -> Result<(), String> {
-    if cfg!(target_os = "android") {
-        return Err("Folders can't be opened on Android.".into());
-    }
     if !path.starts_with(dir()) {
         return Err("Only exports can be shown.".into());
     }
-    std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn().map(|_| ()).map_err(|e| e.to_string())
+    crate::shell::reveal(path)
 }
 
 #[cfg(test)]

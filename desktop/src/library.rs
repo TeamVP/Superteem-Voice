@@ -31,18 +31,21 @@ fn env_dir(var: &str) -> PathBuf {
     std::env::var_os(var).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Defaults to the Windows locations when `init` was not called, as in tests and the self-test.
+/// Defaults to the computer's own locations when `init` was not called, as on Windows and the Mac and in
+/// tests and the self-test: Documents\Superteem Voice on Windows, ~/Documents/Superteem Voice on the Mac.
 pub fn root() -> PathBuf {
     match PATHS.get() {
         Some(p) => p.sessions.clone(),
-        None => env_dir("USERPROFILE").join("Documents").join("Superteem Voice"),
+        None if cfg!(windows) => env_dir("USERPROFILE").join("Documents").join("Superteem Voice"),
+        None => env_dir("HOME").join("Documents").join("Superteem Voice"),
     }
 }
 
 pub fn data_dir() -> PathBuf {
     match PATHS.get() {
         Some(p) => p.data.clone(),
-        None => env_dir("LOCALAPPDATA").join("Superteem Voice"),
+        None if cfg!(windows) => env_dir("LOCALAPPDATA").join("Superteem Voice"),
+        None => env_dir("HOME").join("Library").join("Application Support").join("Superteem Voice"),
     }
 }
 
@@ -292,13 +295,13 @@ pub fn list(query: &str, busy: &[String]) -> Vec<Summary> {
     out
 }
 
-/// On Windows the folder goes to the Recycle Bin, so it can be restored. Android has no recycle bin,
-/// so the page warns that deletion there is permanent.
+/// On Windows the folder goes to the Recycle Bin and on the Mac to the Trash, so it can be restored. Phones
+/// have neither, so the page warns that deletion there is permanent.
 pub fn delete(id: &str) -> Result<(), String> {
     let dir = session_dir(id)?;
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     return trash::delete(dir).map_err(|e| e.to_string());
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     return fs::remove_dir_all(dir).map_err(|e| e.to_string());
 }
 

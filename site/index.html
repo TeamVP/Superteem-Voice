@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Voice by Superteem</title>
-  <meta name="description" content="Voice notes transcribed on your own device. No cloud. Download Voice by Superteem for Windows and Android.">
+  <meta name="description" content="Voice notes transcribed on your own device. No cloud. Download Voice by Superteem for Windows, Mac and Android.">
   <link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="brand/appicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -171,6 +171,17 @@
         <p class="how">Run the installer. While the app is unsigned, Windows may say the publisher is unknown: choose <b>More info</b>, then <b>Run anyway</b>.</p>
       </article>
 
+      <article class="card" data-device="mac">
+        <div class="card-head">
+          <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="4" width="16" height="11" rx="2"/><path d="M2 19h20"/></svg></div>
+          <div><h2>Mac</h2><p class="needs">macOS 11 or later, Apple silicon</p></div>
+          <span class="yours-tag">Your device</span>
+        </div>
+        <p class="what">Notes, meetings recorded from several microphones at once, and the option of voice commands.</p>
+        <a class="download" data-file="Voice-by-Superteem-macOS.dmg" aria-disabled="true">Download for Mac</a>
+        <p class="how">Open the disk image and drag the app into <b>Applications</b>. If macOS says it can’t check the app, open <b>System Settings › Privacy &amp; Security</b> and choose <b>Open Anyway</b>.</p>
+      </article>
+
       <article class="card" data-device="android">
         <div class="card-head">
           <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg></div>
@@ -206,7 +217,7 @@
         </div>
         <div class="point">
           <h3>Your files, in plain formats</h3>
-          <p>Each meeting is a folder of audio and transcripts as text, Markdown and subtitles (SRT). On Windows they live in <b>Documents\Superteem Voice</b>.</p>
+          <p>Each meeting is a folder of audio and transcripts as text, Markdown and subtitles (SRT). On Windows and the Mac they live in <b>Documents\Superteem Voice</b>.</p>
         </div>
         <div class="point">
           <h3>Open source</h3>
@@ -228,7 +239,7 @@
         </div>
         <div class="point">
           <h3>Voice commands</h3>
-          <p>On Windows, say “Hey Superteem, start meeting”, “take a note” or “bookmark that” without touching the keyboard.</p>
+          <p>On Windows and the Mac, say “Hey Superteem, start meeting”, “take a note” or “bookmark that” without touching the keyboard.</p>
         </div>
         <div class="point">
           <h3>Voice Pin</h3>
@@ -250,7 +261,7 @@
 
     // Point out the card for the device this page is open on.
     const ua = navigator.userAgent;
-    const yours = /Android/i.test(ua) ? "android" : /Windows/i.test(ua) ? "windows" : null;
+    const yours = /Android/i.test(ua) ? "android" : /Windows/i.test(ua) ? "windows" : /Macintosh/i.test(ua) && navigator.maxTouchPoints < 2 ? "mac" : null;
     if (yours) document.querySelector(`[data-device="${yours}"]`).classList.add("yours");
 
     const links = [...document.querySelectorAll(".download[data-file]")];

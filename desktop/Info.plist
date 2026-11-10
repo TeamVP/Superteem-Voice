@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the Mac app's Info.plist by the Tauri bundler. macOS shows these reasons when it asks. -->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Voice by Superteem records your notes and meetings and transcribes them on this Mac. Nothing is uploaded.</string>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>Voice by Superteem records from Voice Pins over Bluetooth.</string>
+</dict>
+</plist>

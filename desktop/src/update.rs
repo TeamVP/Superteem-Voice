@@ -1,6 +1,7 @@
 //! Finds out whether a newer version has been released. The download page publishes the latest release's
 //! details beside its files, which is asked first, as GitHub limits how often one address may ask it.
-//! On Windows the new installer is downloaded and run; on Android the new APK opens in the browser.
+//! On Windows the new installer is downloaded and run, and on the Mac the new disk image is downloaded and
+//! opened; on Android the new APK opens in the browser. The iPhone gets updates from the App Store.
 
 use serde::Serialize;
 
@@ -12,7 +13,11 @@ const USER_AGENT: &str = concat!("voice-by-superteem/", env!("CARGO_PKG_VERSION"
 /// This device's file in each release.
 #[cfg(target_os = "android")]
 const FILE: &str = "Voice-by-Superteem-Android.apk";
-#[cfg(not(target_os = "android"))]
+#[cfg(target_os = "macos")]
+const FILE: &str = "Voice-by-Superteem-macOS.dmg";
+#[cfg(target_os = "ios")]
+const FILE: &str = "Voice-by-Superteem-iOS.ipa";
+#[cfg(not(any(target_os = "android", target_os = "macos", target_os = "ios")))]
 const FILE: &str = "Voice-by-Superteem-Setup-x64.exe";
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,7 +72,8 @@ pub fn check() -> Result<Update, String> {
         None => SITE.to_string(),
     };
     Ok(Update {
-        newer: asset.is_some() && is_newer(&latest, current()),
+        // The App Store updates the iPhone app; a file from the release can't be installed there.
+        newer: asset.is_some() && is_newer(&latest, current()) && cfg!(not(target_os = "ios")),
         current: current().to_string(),
         latest,
         download,
@@ -76,18 +82,19 @@ pub fn check() -> Result<Update, String> {
 }
 
 /// Gets the newer version. On Windows the installer is downloaded and started, and this returns once it's
-/// running so the app can close; on Android the APK download opens in the browser, and Android offers to
-/// install it.
+/// running so the app can close; on the Mac the disk image is downloaded and opened in Finder, to drag the
+/// new app over this one; on Android the APK download opens in the browser, and Android offers to install
+/// it.
 pub fn install(update: &Update, progress: impl Fn(f32)) -> Result<(), String> {
     if !update.download.starts_with(SITE) && !update.download.starts_with("https://github.com/TeamVP/") {
         return Err("That download isn't from the Voice by Superteem site.".into());
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = progress;
         crate::recorder::open_url(&update.download)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         use std::io::{Read, Write};
         let response = crate::transcribe::agent()?
@@ -96,7 +103,8 @@ pub fn install(update: &Update, progress: impl Fn(f32)) -> Result<(), String> {
             .call()
             .map_err(|e| format!("The download failed: {e}"))?;
         let total: Option<u64> = response.header("Content-Length").and_then(|v| v.parse().ok());
-        let path = std::env::temp_dir().join(format!("Voice-by-Superteem-{}-Setup-x64.exe", update.latest));
+        let name = if cfg!(target_os = "macos") { "macOS.dmg" } else { "Setup-x64.exe" };
+        let path = std::env::temp_dir().join(format!("Voice-by-Superteem-{}-{name}", update.latest));
         let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
         let mut reader = response.into_reader();
         let mut buf = vec![0u8; 64 * 1024];
@@ -113,10 +121,14 @@ pub fn install(update: &Update, progress: impl Fn(f32)) -> Result<(), String> {
             }
         }
         drop(file);
-        // The installer is a few megabytes; anything much smaller is an error page.
+        // The installer and disk image are a few megabytes; anything much smaller is an error page.
         if total.is_some_and(|t| t != done) || done < 1_000_000 {
             let _ = std::fs::remove_file(&path);
             return Err("The download was incomplete. Try again.".into());
+        }
+        // Finder shows the disk image's window, with the app beside a link to Applications.
+        if cfg!(target_os = "macos") {
+            return crate::shell::open(&path).map_err(|e| format!("The disk image couldn't open: {e}"));
         }
         // Passive: it runs with a progress bar and nothing to click, then opens the app again.
         std::process::Command::new(&path)

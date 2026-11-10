@@ -1,4 +1,4 @@
-//! Records Windows input devices and BLE pins to journals, one file per stream.
+//! Records the computer's or iPhone's input devices and BLE pins to journals, one file per stream.
 
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Adapter, Manager, Peripheral};
@@ -219,7 +219,7 @@ async fn scan_for_pins(shared: Arc<Shared>) -> Result<(), String> {
     adapter.start_scan(ScanFilter { services: vec![PIN_SERVICE] }).await.map_err(|e| e.to_string())?;
     shared.update("pins", |s| {
         s.state = "searching".into();
-        s.detail = "Pair pins in Windows Bluetooth settings first".into();
+        s.detail = if cfg!(windows) { "Pair pins in Windows Bluetooth settings first" } else { "Looking for pins nearby" }.into();
     });
     let mut seen = HashSet::new();
     let mut tasks = Vec::new();

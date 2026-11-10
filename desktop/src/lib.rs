@@ -1,4 +1,4 @@
-//! Voice by Superteem, shared by Windows and Android.
+//! Voice by Superteem, shared by Windows, the Mac, Android and the iPhone.
 
 #[cfg(not(target_os = "android"))]
 pub mod capture;
@@ -12,6 +12,7 @@ pub mod probe;
 pub mod process;
 pub mod recorder;
 pub mod script;
+pub mod shell;
 pub mod transcribe;
 pub mod update;
 pub mod vocabulary;
@@ -150,6 +151,10 @@ fn processing_queue(state: State<AppState>) -> QueueState {
 fn platform() -> &'static str {
     if cfg!(target_os = "android") {
         "android"
+    } else if cfg!(target_os = "ios") {
+        "ios"
+    } else if cfg!(target_os = "macos") {
+        "macos"
     } else {
         "windows"
     }
@@ -192,12 +197,12 @@ fn model_info() -> ModelInfo {
 /// Opens the folder the speech model goes in, creating it, so the file can be put there by hand.
 #[tauri::command]
 fn open_models_folder() -> Result<(), String> {
-    if cfg!(target_os = "android") {
-        return Err("Folders can't be opened on Android.".into());
+    if cfg!(any(target_os = "android", target_os = "ios")) {
+        return shell::open("");
     }
     let dir = library::models_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::process::Command::new("explorer").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+    shell::open(dir)
 }
 
 #[tauri::command]
@@ -1243,7 +1248,8 @@ async fn check_update() -> Result<update::Update, String> {
     blocking(update::check).await?
 }
 
-/// Gets the newer version. On Windows the installer starts and the app closes so it can be replaced.
+/// Gets the newer version. On Windows the installer starts and the app closes so it can be replaced; on the
+/// Mac the disk image opens and the app closes, so the new copy can be dragged over it.
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     let update = blocking(update::check).await??;
@@ -1252,7 +1258,7 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     }
     let progress = app.clone();
     blocking(move || update::install(&update, |f| drop(progress.emit("update-progress", f)))).await??;
-    if cfg!(not(target_os = "android")) {
+    if cfg!(any(windows, target_os = "macos")) {
         app.exit(0);
     }
     Ok(())
@@ -1314,10 +1320,7 @@ fn open_folder(id: Option<String>) -> Result<(), String> {
         Some(id) => library::session_dir(&id)?,
         None => library::root(),
     };
-    if cfg!(target_os = "android") {
-        return Err("Folders can't be opened on Android.".into());
-    }
-    std::process::Command::new("explorer").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+    shell::open(dir)
 }
 
 fn capture_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
@@ -1339,13 +1342,27 @@ fn capture_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // The iPhone opens web pages and its Settings app through the system, which this plugin asks.
+    #[cfg(target_os = "ios")]
+    let builder = builder.plugin(tauri_plugin_opener::init());
+    builder
         .plugin(capture_plugin())
         .manage(AppState::default())
         .setup(|app| {
             if cfg!(target_os = "android") {
                 let data = app.path().app_data_dir()?;
                 library::init(data.join("sessions"), data);
+            }
+            // Meetings and notes go in the app's Documents folder, which the Files app shows under On My
+            // iPhone. The model, voice prints and preferences stay in its private Application Support.
+            #[cfg(target_os = "ios")]
+            {
+                library::init(app.path().document_dir()?, app.path().app_data_dir()?);
+                recorder::set_app(app.handle().clone());
+                if let Err(e) = recorder::start_audio_session() {
+                    eprintln!("The audio session didn't start: {e}");
+                }
             }
             let handle = app.handle().clone();
             let phrases = handle.clone();
