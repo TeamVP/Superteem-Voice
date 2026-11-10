@@ -78,6 +78,8 @@ jobs:
           . desktop/build-env.ps1
           Push-Location desktop
           npm ci --no-audit --no-fund
+          # The natural voice's DLLs, which the installer packs from here (installer-hooks.nsh).
+          $env:STV_NATIVE_DIR = Join-Path $PWD 'target/release'
           npm run tauri -- build --bundles nsis
           if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
           Pop-Location

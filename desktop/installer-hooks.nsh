@@ -26,10 +26,14 @@
 ; The natural reading voice runs on sherpa-onnx, whose libraries the build puts beside the app. They're
 ; installed with it; the app loads them only when the voice is used, so it starts without them.
 !macro STV_NATIVE_FILE NAME
-  !if /FileExists "${__FILEDIR__}\target\release\${NAME}"
-    File "${__FILEDIR__}\target\release\${NAME}"
-  !else if /FileExists "$%CARGO_TARGET_DIR%\release\${NAME}"
-    File "$%CARGO_TARGET_DIR%\release\${NAME}"
+  ; STV_NATIVE_DIR is the build's output folder, set by the release build (Tauri compiles a copy of this
+  ; file elsewhere, so a path relative to it doesn't work). A build that sets it must have the file.
+  !if "$%STV_NATIVE_DIR%" != "${U+24}%STV_NATIVE_DIR%"
+    !if /FileExists "$%STV_NATIVE_DIR%\${NAME}"
+      File "$%STV_NATIVE_DIR%\${NAME}"
+    !else
+      !error "${NAME} isn't in $%STV_NATIVE_DIR%"
+    !endif
   !endif
 !macroend
 
