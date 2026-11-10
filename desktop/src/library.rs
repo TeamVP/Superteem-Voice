@@ -141,6 +141,9 @@ pub struct Meta {
     /// The audio was deleted to save space; only the transcript is left, so it can't be processed again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub compacted: bool,
+    /// The language it's in, as a code ("cy"); empty for the person's primary language.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub language: String,
 }
 
 /// Workflow states a note or meeting can be in. Empty is the default: no status yet.

@@ -913,3 +913,25 @@ body[data-platform="ios"] { box-sizing: border-box; padding: env(safe-area-inset
   .topbar:has(> .status-picker) > .status { order: 9; flex-basis: 100%; font-size: 12px; }
   .topbar:has(> .status-picker) > .grow { min-width: 0; }
 }
+
+/* Adding a voice; languages */
+.add-voice input[type="text"], .add-voice input[type="url"], .add-voice input[type="number"], .add-voice select { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
+.add-voice input[type="number"] { width: 80px; }
+.add-voice .add-voice-model { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; }
+.add-voice .add-voice-model input { flex: 1; min-width: 220px; }
+.add-voice .or { color: var(--muted); font-size: 13px; }
+.language-row input[type="checkbox"] { flex: none; width: 18px; height: 18px; accent-color: var(--key); margin: 0; }
+@media (max-width: 640px) {
+  .add-voice .add-voice-model { justify-content: flex-start; }
+  .add-voice .add-voice-model input { min-width: 0; flex-basis: 100%; }
+  .row.stack-narrow > input, .row.stack-narrow > .add-voice-model { flex-basis: 100%; }
+}
+
+/* A note's or meeting's language, beside its status */
+.language-picker { padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--soft); font-size: 13px; max-width: 160px; }
+.note-title[dir="rtl"], .note-body[dir="rtl"] { text-align: right; }
+@media (max-width: 640px) {
+  /* The language picker sits on the second line, with the date, so the status and icons keep the first. */
+  .topbar:has(> .status-picker) > .language-picker { order: 10; }
+  .topbar:has(> .status-picker) > .status, .meeting-top .top-info { flex-basis: calc(100% - 180px); flex-grow: 1; }
+}

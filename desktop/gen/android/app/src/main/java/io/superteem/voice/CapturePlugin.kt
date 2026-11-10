@@ -36,6 +36,7 @@ class SpeakArgs {
     var text: String = ""
     var rate: Float = 1f
     var pitch: Float = 1f
+    var language: String = ""
 }
 
 @InvokeArg
@@ -155,6 +156,10 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             speaking[id] = invoke
             engine.setSpeechRate(args.rate.coerceIn(0.5f, 2f))
             engine.setPitch(args.pitch.coerceIn(0.5f, 2f))
+            // A note's own language, where the phone has a voice for it; otherwise the phone's language.
+            val wanted = if (args.language.isEmpty()) java.util.Locale.getDefault() else java.util.Locale.forLanguageTag(args.language)
+            if (engine.isLanguageAvailable(wanted) >= android.speech.tts.TextToSpeech.LANG_AVAILABLE) engine.setLanguage(wanted)
+            else engine.setLanguage(java.util.Locale.getDefault())
             engine.speak(args.text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, id)
         }
     }

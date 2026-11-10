@@ -72,7 +72,7 @@ pub struct Prefs {
     /// An OpenAI-compatible server to run analyses on instead of this device, such as Ollama; empty when
     /// analyses run here. Never used unless chosen.
     pub llm_server: String,
-    /// The model name the server knows, such as "qwen2.5:3b".
+    /// The model name the server knows, such as "qwen3:1.7b".
     pub llm_server_model: String,
     /// Templates offered first on a meeting or note, in order. Unset: the default few.
     pub starred_templates: Option<Vec<String>>,
@@ -92,12 +92,57 @@ pub struct Prefs {
     pub system_voice: String,
     /// Say who's speaking before each line when a transcript is read. Unset: yes.
     pub read_speakers: Option<bool>,
+    /// Languages the person uses, as codes ("en", "cy"); empty means English only.
+    pub languages: Vec<String>,
+    /// The one they use most, which notes and meetings are in unless they say otherwise. Empty: English.
+    pub primary_language: String,
+    /// The voice that reads each language, by code: a natural voice's id, or "system". A language not here
+    /// reads with the main voice when it speaks that language.
+    pub voice_for: std::collections::BTreeMap<String, String>,
 }
 
 /// Starred until the person chooses their own.
 pub const DEFAULT_STARRED: &[&str] = &["meeting-summary", "executive-brief", "engineering-actions", "lecture-notes"];
 
+/// The languages people can choose for now, as codes and their names.
+pub const LANGUAGES: &[(&str, &str)] = &[
+    ("ar", "Arabic"),
+    ("en", "English"),
+    ("zh", "Chinese (Mandarin)"),
+    ("fr", "French"),
+    ("hi", "Hindi"),
+    ("es", "Spanish"),
+    ("tr", "Turkish"),
+    ("cy", "Welsh"),
+];
+
+/// A language for a note or meeting: one of `LANGUAGES`, or empty for the person's primary language.
+pub fn check_language(language: &str) -> Result<String, String> {
+    if language.is_empty() || LANGUAGES.iter().any(|(c, _)| *c == language) {
+        Ok(language.to_string())
+    } else {
+        Err("That language isn't one Voice offers yet.".into())
+    }
+}
+
 impl Prefs {
+    /// The person's languages, the primary one among them.
+    pub fn languages(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.languages.iter().filter(|l| LANGUAGES.iter().any(|(c, _)| c == l)).cloned().collect();
+        if out.is_empty() {
+            out.push("en".into());
+        }
+        let primary = self.primary_language();
+        if !out.contains(&primary) {
+            out.insert(0, primary);
+        }
+        out
+    }
+
+    pub fn primary_language(&self) -> String {
+        if LANGUAGES.iter().any(|(c, _)| *c == self.primary_language) { self.primary_language.clone() } else { "en".into() }
+    }
+
     pub fn starred(&self) -> Vec<String> {
         self.starred_templates.clone().unwrap_or_else(|| DEFAULT_STARRED.iter().map(|s| s.to_string()).collect())
     }

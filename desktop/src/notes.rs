@@ -18,6 +18,8 @@ pub struct Note {
     pub archived: bool,
     /// Where the note is in the person's own workflow; empty when not set.
     pub status: String,
+    /// The language it's in, as a code ("cy"); empty for the person's primary language.
+    pub language: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -146,6 +148,13 @@ pub fn set_archived(id: &str, archived: bool) -> Result<(), String> {
 pub fn set_status(id: &str, status: &str) -> Result<(), String> {
     let mut note = load(id)?;
     note.status = library::check_status(status)?;
+    library::write_json(&path(id)?, &note)
+}
+
+/// Like a status, a language doesn't count as an edit.
+pub fn set_language(id: &str, language: &str) -> Result<(), String> {
+    let mut note = load(id)?;
+    note.language = crate::prefs::check_language(language)?;
     library::write_json(&path(id)?, &note)
 }
 

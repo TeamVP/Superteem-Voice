@@ -79,7 +79,7 @@ mod imp {
     }
 
     /// The page reads aloud itself where the web view has a voice.
-    pub fn speak(_text: &str, _rate: f32, _pitch: f32) -> Result<(), String> {
+    pub fn speak(_text: &str, _rate: f32, _pitch: f32, _language: &str) -> Result<(), String> {
         Err("Read aloud in the page.".into())
     }
 
@@ -263,8 +263,9 @@ mod imp {
     }
 
     /// Reads text aloud with the phone's voice, returning once it's said or stopped.
-    pub fn speak(text: &str, rate: f32, pitch: f32) -> Result<(), String> {
-        call::<Done>("speak", Speak { text, rate, pitch }).map(|_| ())
+    /// `language` is a BCP 47 tag such as "cy" or "zh-CN"; empty for the phone's own.
+    pub fn speak(text: &str, rate: f32, pitch: f32, language: &str) -> Result<(), String> {
+        call::<Done>("speak", Speak { text, rate, pitch, language }).map(|_| ())
     }
 
     #[derive(Serialize)]
@@ -272,6 +273,7 @@ mod imp {
         text: &'a str,
         rate: f32,
         pitch: f32,
+        language: &'a str,
     }
 
     pub fn stop_speaking() -> Result<(), String> {

@@ -466,6 +466,15 @@ fn set_session_status(state: State<AppState>, id: String, status: String) -> Res
 }
 
 #[tauri::command]
+fn set_session_language(state: State<AppState>, id: String, language: String) -> Result<(), String> {
+    let language = prefs::check_language(&language)?;
+    edit_session(&state, &id, |meta, _| {
+        meta.language = language;
+        Ok(())
+    })
+}
+
+#[tauri::command]
 fn rename_session(state: State<AppState>, id: String, title: String) -> Result<(), String> {
     edit_session(&state, &id, |meta, _| {
         meta.title = title.trim().to_string();
@@ -1132,6 +1141,11 @@ fn set_note_status(id: String, status: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn set_note_language(id: String, language: String) -> Result<(), String> {
+    notes::set_language(&id, &language)
+}
+
+#[tauri::command]
 fn delete_note(id: String) -> Result<(), String> {
     notes::delete(&id)?;
     analysis::forget_note(&id);
@@ -1244,10 +1258,11 @@ async fn dictate_cancel(session: Option<u64>) -> Result<(), String> {
 
 /// Reads text aloud with the system's voice, for platforms whose web view has none (Android).
 #[tauri::command]
-async fn speak_text(text: String) -> Result<(), String> {
+async fn speak_text(text: String, language: Option<String>) -> Result<(), String> {
     let p = prefs::load();
     let (rate, pitch) = (p.read_speed.unwrap_or(1.0), p.read_pitch.unwrap_or(1.0));
-    blocking(move || recorder::speak(&text, rate, pitch)).await?
+    let language = language.unwrap_or_default();
+    blocking(move || recorder::speak(&text, rate, pitch, &language)).await?
 }
 
 #[tauri::command]
@@ -1326,10 +1341,12 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Opens one of the app's own web pages, such as what changed in a release.
+/// Opens one of the app's own web pages, such as what changed in a release, or sherpa-onnx's collection of
+/// voices to add.
 #[tauri::command]
 async fn open_link(url: String) -> Result<(), String> {
-    if !url.starts_with(update::SITE) && !url.starts_with("https://github.com/TeamVP/Superteem-Voice") {
+    let allowed = [update::SITE, "https://github.com/TeamVP/Superteem-Voice", "https://k2-fsa.github.io/sherpa/onnx/tts/"];
+    if !allowed.iter().any(|a| url.starts_with(a)) {
         return Err("Only the app's own pages can be opened.".into());
     }
     blocking(move || recorder::open_url(&url)).await?
@@ -1597,6 +1614,13 @@ async fn download_tts<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(), S
     .await?
 }
 
+/// Adds a voice the person chose from sherpa-onnx's collection; progress goes out as "tts-download".
+#[tauri::command]
+async fn add_tts_voice<R: Runtime>(app: AppHandle<R>, voice: tts::NewVoice) -> Result<tts::Voice, String> {
+    let handle = app.clone();
+    blocking(move || tts::add(voice, |fraction| drop(handle.emit("tts-download", TtsDownload { id: "new".into(), fraction })))).await?
+}
+
 #[tauri::command]
 fn cancel_tts_download() {
     tts::cancel_download();
@@ -1605,18 +1629,62 @@ fn cancel_tts_download() {
 #[tauri::command]
 fn delete_tts(id: String) -> Result<(), String> {
     tts::delete(&id)?;
-    if !tts::any_ready() {
+    if !tts::voices().iter().any(tts::ready) {
         prefs::update(|p| p.natural_voice = false)?;
     }
     Ok(())
 }
 
-/// Speech for `text` in the chosen natural voice at the chosen speed, as a WAV for the page to play.
+/// The natural voice that reads `language`, or None when the system's voice does.
 #[tauri::command]
-async fn natural_speak(text: String) -> Result<tauri::ipc::Response, String> {
+fn reading_voice(language: Option<String>) -> Option<tts::Voice> {
+    tts::for_language(&prefs::load(), language.as_deref())
+}
+
+/// Speech for `text` in a natural voice (`voice`, else the main one) at the chosen speed, as a WAV for the
+/// page to play.
+#[tauri::command]
+async fn natural_speak(text: String, voice: Option<String>) -> Result<tauri::ipc::Response, String> {
     let speed = prefs::load().read_speed.unwrap_or(1.0);
-    let wav = blocking(move || tts::speak(&text, speed)).await??;
+    let wav = blocking(move || match voice {
+        Some(id) => tts::speak_as(&tts::find_voice(&id)?, &text, speed),
+        None => tts::speak(&text, speed),
+    })
+    .await??;
     Ok(tauri::ipc::Response::new(wav))
+}
+
+#[derive(Serialize)]
+struct Languages {
+    /// Every language that can be chosen: (code, name).
+    all: &'static [(&'static str, &'static str)],
+    chosen: Vec<String>,
+    primary: String,
+}
+
+#[tauri::command]
+fn get_languages() -> Languages {
+    let p = prefs::load();
+    Languages { all: prefs::LANGUAGES, chosen: p.languages(), primary: p.primary_language() }
+}
+
+/// The languages the person uses and the primary one, which must be among them.
+#[tauri::command]
+fn save_languages(languages: Vec<String>, primary: String) -> Result<Languages, String> {
+    let known = |l: &String| prefs::LANGUAGES.iter().any(|(c, _)| c == l);
+    if !known(&primary) {
+        return Err("That language isn't one Voice offers yet.".into());
+    }
+    let mut chosen: Vec<String> = languages.into_iter().filter(known).collect();
+    chosen.dedup();
+    if !chosen.contains(&primary) {
+        chosen.insert(0, primary.clone());
+    }
+    prefs::update(|p| {
+        p.languages = chosen;
+        p.primary_language = primary;
+    })?;
+    Ok(get_languages())
 }
 
 /// Reading aloud and model settings; each is left as it is when not given.
@@ -1630,9 +1698,16 @@ fn save_voice_settings(
     system_voice: Option<String>,
     read_speakers: Option<bool>,
     use_gpu: Option<bool>,
+    voice_for: Option<(String, String)>,
 ) -> Result<(), String> {
+    if let Some((lang, v)) = &voice_for {
+        prefs::check_language(lang)?;
+        if !(v.is_empty() || v == "system" || tts::voices().iter().any(|x| x.id == *v)) {
+            return Err("That voice isn't in the list.".into());
+        }
+    }
     if let Some(v) = &voice {
-        if !tts::VOICES.iter().any(|x| x.id == v) {
+        if !tts::voices().iter().any(|x| x.id == *v) {
             return Err("That voice isn't one Voice offers.".into());
         }
     }
@@ -1641,7 +1716,7 @@ fn save_voice_settings(
             p.tts_voice = v;
         }
         if let Some(n) = natural {
-            p.natural_voice = n && tts::ready(tts::chosen_in(p));
+            p.natural_voice = n && tts::ready(&tts::chosen_in(p, &tts::voices()));
         }
         if let Some(s) = speed {
             p.read_speed = Some(s.clamp(0.5, 2.0));
@@ -1657,6 +1732,13 @@ fn save_voice_settings(
         }
         if let Some(g) = use_gpu {
             p.use_gpu = Some(g);
+        }
+        if let Some((lang, v)) = voice_for {
+            if v.is_empty() {
+                p.voice_for.remove(&lang);
+            } else {
+                p.voice_for.insert(lang, v);
+            }
         }
     })
     .map(|_| ())
@@ -2064,6 +2146,12 @@ pub fn run() {
             export_dir,
             download_tts,
             cancel_tts_download,
+            add_tts_voice,
+            reading_voice,
+            set_note_language,
+            set_session_language,
+            get_languages,
+            save_languages,
             delete_tts,
             natural_speak,
             save_voice_settings,

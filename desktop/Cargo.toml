@@ -1,6 +1,6 @@
 [package]
 name = "superteem-voice"
-version = "0.6.4"
+version = "0.6.5"
 edition = "2021"
 license = "GPL-3.0-only"
 
@@ -63,9 +63,10 @@ whisper-rs-sys = { path = "vendor/whisper-rs-sys" }
 [profile.release]
 opt-level = 2
 
-# A natural voice for reading aloud, downloaded when the person turns it on: Piper voices through
-# sherpa-onnx, offline. Its libraries are prebuilt DLLs installed beside the app. Windows only for now.
+# Natural voices for reading aloud, each downloaded when the person chooses it: Piper, Kokoro and Matcha
+# models through sherpa-onnx (k2-fsa's own crate), offline. Its libraries are prebuilt DLLs installed beside
+# the app. Windows only for now.
 [target.'cfg(windows)'.dependencies]
-sherpa-rs = { version = "=0.6.8", default-features = false, features = ["tts", "download-binaries"] }
+sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }
 tar = "0.4"
 bzip2 = { version = "0.5", default-features = false, features = ["libbz2-rs-sys"] }

@@ -215,7 +215,7 @@ function analysisCard(page, e, data, running, waiting) {
     el("button", { class: "analysis-name", onclick: () => edit({ op: "collapse", collapsed: !e.collapsed }) }, e.template.name),
     e.collapsed && def ? el("span", { class: "digest" }, analysisDigest(def, e.result)) : null,
     // Minimised, it can still be read aloud; making it again waits until it's open.
-    ...badges, el("span", { class: "grow" }), def ? readAloudButton(() => analysisSpeech(card), "Read this aloud") : null,
+    ...badges, el("span", { class: "grow" }), def ? readAloudButton(() => analysisSpeech(card), "Read this aloud", { lang: () => page.ctx.lang?.() }) : null,
     e.collapsed && !(running || waiting) ? null : regenerate, more);
   card.append(head);
   if (error) card.append(el("p", { class: "danger analysis-error" }, `Couldn't make it again: ${error}`));
@@ -462,7 +462,7 @@ async function showAnalysisSettings(message, setup = false) {
   if (message) page.append(el("div", { class: "notice" }, message));
   if (setup && !status.installed.length && !status.server) {
     page.append(el("div", { class: "notice" }, el("strong", {}, "First, choose a model. "),
-      "It's a one-off download; after that, summaries and action items are made on this device, offline. Qwen2.5 1.5B is a good start. ",
+      "It's a one-off download; after that, summaries and action items are made on this device, offline. Qwen3 1.7B is a good start. ",
       "Then star the templates you use most, below, and they'll be one click away on every meeting and note."));
   }
   const { device } = status;
@@ -480,6 +480,7 @@ async function showAnalysisSettings(message, setup = false) {
   const group = el("div", { class: "group" });
   for (const m of status.catalogue) {
     const have = installed.has(m.file);
+    if (!m.offered && !have) continue;
     const chosen = status.chosen === m.file && !status.server;
     const label = el("span", { class: "label" }, m.name, chosen ? el("span", { class: "badge ok" }, "In use") : null,
       el("small", {}, `${m.about} ${gb(m.size)} · ${m.licence}${device.ram_gb < m.min_ram_gb ? " · May be slow with this much memory" : ""}`));
@@ -528,7 +529,7 @@ async function showAnalysisSettings(message, setup = false) {
 
   // A server the person runs: never used unless set here, and anything not on this computer is named first.
   const url = el("input", { type: "url", value: status.server, placeholder: "http://localhost:11434/v1", "aria-label": "Server address" });
-  const model = el("input", { type: "text", value: status.server_model, placeholder: "qwen2.5:3b", "aria-label": "Model name on the server" });
+  const model = el("input", { type: "text", value: status.server_model, placeholder: "qwen3:1.7b", "aria-label": "Model name on the server" });
   const confirmBox = el("div", { class: "notice confirm", hidden: true });
   const saveServer = async () => {
     try {
@@ -662,20 +663,25 @@ async function editTemplate(t) {
 let reading = null;
 
 /// A button that reads aloud what `text()` returns, and stops when pressed again.
-function readAloudButton(text, what = "Read aloud") {
-  const button = el("button", { class: "icon-only read-aloud", type: "button", title: what, "aria-label": what, "aria-pressed": "false" }, svg("speak", 16));
+/// `lang`: the language code what's read is in, or a function giving it; unset for the main voice.
+function readAloudButton(text, what = "Read aloud", { label, lang } = {}) {
+  const button = label
+    ? el("button", { class: "pill with-icon read-aloud", type: "button", title: what, "aria-pressed": "false" }, svg("play", 14), label)
+    : el("button", { class: "icon-only read-aloud", type: "button", title: what, "aria-label": what, "aria-pressed": "false" }, svg("speak", 16));
+  // A labelled button says Stop while it reads.
+  if (label) button.reading = (on) => button.replaceChildren(svg(on ? "pause" : "play", 14), on ? "Stop" : label);
   button.addEventListener("mousedown", (e) => e.preventDefault());
   button.addEventListener("click", () => {
     if (reading?.button === button) return stopReading();
     stopReading();
-    readAloud(button, text());
+    readAloud(button, text(), typeof lang === "function" ? lang() : lang);
   });
   return button;
 }
 
 /// Says the text a sentence or two at a time, which keeps long text going where a voice gives up after a
 /// while, and lets it stop between them.
-async function readAloud(button, text) {
+async function readAloud(button, text, lang) {
   const pieces = (text ?? "").replace(/\s+\n/g, "\n").split(/(?<=[.!?:])\s+|\n+/).map((s) => s.trim()).filter(Boolean)
     .reduce((out, s) => { if (out.length && (out.at(-1) + " " + s).length < 220) out[out.length - 1] += " " + s; else out.push(s); return out; }, []);
   if (!pieces.length) return;
@@ -684,22 +690,25 @@ async function readAloud(button, text) {
   button.classList.add("on");
   button.setAttribute("aria-pressed", "true");
   button.title = "Stop reading";
+  button.reading?.(true);
   // The listener doesn't take the app's own voice for someone talking.
   invoke("listen_mute", { muted: true }).catch(() => {});
   try {
-    if (prefs.natural_voice && isDesktop()) {
+    // The natural voice for this language, if there is one; otherwise the system's voice reads.
+    const voice = isDesktop() ? await invoke("reading_voice", { language: lang ?? null }).catch(() => null) : null;
+    if (voice) {
       // The natural voice makes the next piece while this one plays, so there's no gap between them.
-      let next = invoke("natural_speak", { text: pieces[0] });
+      let next = invoke("natural_speak", { text: pieces[0], voice: voice.id });
       for (let i = 0; i < pieces.length && !mine.cancelled; i++) {
         const wav = await next;
-        if (i + 1 < pieces.length) next = invoke("natural_speak", { text: pieces[i + 1] });
+        if (i + 1 < pieces.length) next = invoke("natural_speak", { text: pieces[i + 1], voice: voice.id });
         if (mine.cancelled) break;
         await playWav(wav, mine);
       }
     } else {
       for (const piece of pieces) {
         if (mine.cancelled) break;
-        await say(piece);
+        await say(piece, lang);
       }
     }
   } catch (e) {
@@ -709,17 +718,23 @@ async function readAloud(button, text) {
   button.classList.remove("on");
   button.setAttribute("aria-pressed", "false");
   button.title = "Read aloud";
+  button.reading?.(false);
   if (!reading) invoke("listen_mute", { muted: false }).catch(() => {});
 }
 
-function say(text) {
-  if (platform === "android" || !window.speechSynthesis) return invoke("speak_text", { text });
+function say(text, lang) {
+  const tag = lang ? languageTag(lang) : "";
+  if (platform === "android" || !window.speechSynthesis) return invoke("speak_text", { text, language: tag || null });
   return new Promise((resolve) => {
     const u = new SpeechSynthesisUtterance(text.replace(/[“”]/g, ""));
     u.rate = prefs.read_speed ?? 1;
     u.pitch = prefs.read_pitch ?? 1;
-    const chosen = prefs.system_voice && speechSynthesis.getVoices().find((v) => v.name === prefs.system_voice);
+    // The voice chosen in Settings, unless the text is in a language it doesn't speak: then one that does.
+    const all = speechSynthesis.getVoices();
+    const speaks = (v) => !lang || v.lang.toLowerCase().startsWith(lang);
+    const chosen = (prefs.system_voice && all.find((v) => v.name === prefs.system_voice && speaks(v))) || (lang && lang !== "en" ? all.find(speaks) : null);
     if (chosen) u.voice = chosen;
+    if (tag) u.lang = tag;
     u.onend = u.onerror = () => resolve();
     speechSynthesis.speak(u);
   });
@@ -820,7 +835,10 @@ function rateSlider(label, hint, value, save) {
     el("div", { class: "slider" }, input, shown, reset));
 }
 
-/// Settings › Reading aloud: the voice, natural or the system's, how fast it reads, and what it says.
+/// What a voice is, as its row says: "British English, female".
+const voiceAbout = (v) => [v.language, v.gender?.toLowerCase()].filter(Boolean).join(", ");
+
+/// Settings › Reading aloud: how it reads, then the voice, natural or the system's, and adding one.
 async function showReadingSettings(message) {
   leave();
   showPage();
@@ -828,10 +846,33 @@ async function showReadingSettings(message) {
   refreshItems();
   const [status, voices] = await Promise.all([invoke("tts_status").catch(() => null), systemVoices()]);
   const page = el("div", { class: "page" }, backLinks("‹ Settings", () => showSettings()), el("h1", {}, "Reading aloud"));
-  page.append(el("p", { class: "hint" }, "Notes, transcripts and analyses can be read aloud with the speaker button beside them. Choose the voice and how it reads here."));
+  page.append(el("p", { class: "hint" }, "Notes, transcripts and analyses can be read aloud with the speaker button beside them. Choose how it reads and the voice here."));
   if (message) page.append(el("div", { class: "notice" }, message));
   const sample = "This is how notes, transcripts and summaries sound when they're read aloud.";
   const natural = !!prefs.natural_voice && !!status?.voices.some((v) => v.id === status.chosen && v.ready);
+  const chosenVoice = natural ? status.voices.find((v) => v.id === status.chosen) : null;
+
+  // How it reads.
+  const how = el("div", { class: "group" },
+    rateSlider("Speed", "How fast it reads", prefs.read_speed ?? 1, (s) => saveReading({ speed: s })));
+  const systemNames = voices.filter((v) => /^en/i.test(v.lang)).map((v) => v.name);
+  if (!natural) {
+    how.append(rateSlider("Pitch", "The system's voice only", prefs.read_pitch ?? 1, (s) => saveReading({ pitch: s })));
+    if (systemNames.length > 1) {
+      const select = el("select", { "aria-label": "System voice" }, el("option", { value: "" }, "This device's default"),
+        systemNames.map((n) => el("option", { value: n, selected: n === prefs.system_voice }, n)));
+      select.addEventListener("change", () => saveReading({ systemVoice: select.value }));
+      how.append(el("div", { class: "row stack-narrow" }, el("span", { class: "label" }, "System voice", el("small", {}, "The English voices this device has")), select));
+    }
+  }
+  // A Chinese and English voice tries both.
+  const trySample = chosenVoice?.langs?.includes("zh") ? `${sample} 这是用中文朗读的样子。` : sample;
+  how.append(
+    toggleRow("Say who's speaking", "Reading a transcript, say each speaker's name before what they said.", prefs.read_speakers ?? true,
+      (on) => saveReading({ readSpeakers: on })),
+    el("div", { class: "row" }, el("span", { class: "label" }, "Try it", el("small", {}, chosenVoice ? `${chosenVoice.name}, with the settings above` : "The system's voice, with the settings above")),
+      readAloudButton(() => trySample, "Hear the voice", { label: "Play" })));
+  page.append(el("h2", {}, "How it reads"), how);
 
   // The voice: the system's, or one of the natural ones, downloaded once.
   const group = el("div", { class: "group voice-list", role: "radiogroup", "aria-label": "Voice" });
@@ -841,30 +882,29 @@ async function showReadingSettings(message) {
     return el("label", { class: `row voice-row${on ? " chosen" : ""}` }, radio,
       el("span", { class: "label" }, title, on ? el("span", { class: "badge ok" }, "Reading") : null, el("small", {}, about)), ...extra);
   };
-  const systemNames = voices.filter((v) => /^en/i.test(v.lang)).map((v) => v.name);
   group.append(pick(!natural, "The system's voice", status?.supported
     ? "Built into this device. Nothing to download."
     : "Built into this device. Natural voices are on Windows now, and coming here.",
   async () => { await saveReading({ natural: false }); showReadingSettings(); }));
   for (const v of status?.supported ? status.voices : []) {
     const on = natural && status.chosen === v.id;
-    const size = `${Math.round(v.size / 1e6)} MB`;
+    const size = v.size >= 1e9 ? `${(v.size / 1e9).toFixed(1)} GB` : `${Math.round(v.size / 1e6)} MB`;
     const extra = [];
-    if (status.downloading === v.id) {
+    if (status.downloading && status.downloading === v.model) {
       extra.push(el("span", { class: "value" }, el("span", { class: "spinner" }), " ", el("span", { "data-tts-progress": v.id }, "Starting…")),
         el("button", { class: "pill", type: "button", onclick: (e) => { e.preventDefault(); invoke("cancel_tts_download"); } }, "Stop"));
-    } else if (v.ready) {
-      extra.push(el("button", { class: "icon-only danger", type: "button", title: `Delete ${v.name}`, "aria-label": `Delete ${v.name}`,
+    } else if (v.ready || v.custom) {
+      extra.push(el("button", { class: "icon-only danger", type: "button", title: v.custom ? `Remove ${v.name}` : `Delete ${v.name}'s download`, "aria-label": `Delete ${v.name}`,
         onclick: async (e) => { e.preventDefault(); await invoke("delete_tts", { id: v.id }).catch((err) => showError(page, err)); await refreshPrefs(); showReadingSettings(); } }, svg("trash", 16)));
     } else {
       extra.push(el("button", { class: "pill", type: "button", disabled: !!status.downloading, onclick: (e) => { e.preventDefault(); getVoice(v); } }, `Download (${size})`));
     }
-    const row = pick(on, `${v.name}${v.id === status.voices[0].id ? " (recommended)" : ""}`, `Natural voice · ${v.about}`, async () => {
+    const row = pick(on, `${v.name}${v.recommended ? " (recommended)" : ""}`, `${voiceAbout(v)}${v.custom ? " · Added by you" : ""}`, async () => {
       if (!v.ready) return getVoice(v);
       await saveReading({ voice: v.id, natural: true });
       showReadingSettings();
     }, extra);
-    if (!v.ready) row.querySelector("input").disabled = !!status.downloading;
+    if (!v.ready) row.querySelector("input").disabled = !!status.downloading || v.custom;
     group.append(row);
   }
   async function getVoice(v) {
@@ -879,26 +919,170 @@ async function showReadingSettings(message) {
     }
   }
   page.append(el("h2", {}, "Voice"), group);
-  if (status?.supported) page.append(el("p", { class: "hint" }, "Natural voices run on this device, offline, once downloaded. Choose the system's voice to read without one."));
-
-  // How it reads.
-  const how = el("div", { class: "group" },
-    rateSlider("Speed", "How fast it reads", prefs.read_speed ?? 1, (s) => saveReading({ speed: s })));
-  if (!natural) {
-    how.append(rateSlider("Pitch", "The system's voice only", prefs.read_pitch ?? 1, (s) => saveReading({ pitch: s })));
-    if (systemNames.length > 1) {
-      const select = el("select", { "aria-label": "System voice" }, el("option", { value: "" }, "This device's default"),
-        systemNames.map((n) => el("option", { value: n, selected: n === prefs.system_voice }, n)));
-      select.addEventListener("change", () => saveReading({ systemVoice: select.value }));
-      how.append(el("div", { class: "row stack-narrow" }, el("span", { class: "label" }, "System voice", el("small", {}, "The English voices this device has")), select));
-    }
+  const langs = await languageData();
+  if (status?.supported && langs.chosen.length > 1) page.append(el("h2", {}, "Voice for each language"), voiceForLanguages(page, status, langs));
+  if (status?.supported) {
+    page.append(el("p", { class: "hint" }, "Natural voices run on this device, offline, once downloaded. Choose the system's voice to read without one."));
+    page.append(el("h2", {}, "Add a voice"), addVoiceForm(page, !!status.downloading));
   }
-  how.append(
-    toggleRow("Say who's speaking", "Reading a transcript, say each speaker's name before what they said.", prefs.read_speakers ?? true,
-      (on) => saveReading({ readSpeakers: on })),
-    el("div", { class: "row" }, el("span", { class: "label" }, "Try it", el("small", {}, "With the settings above")), readAloudButton(() => sample, "Hear the voice")));
-  page.append(el("h2", {}, "How it reads"), how);
   main.replaceChildren(page);
+}
+
+/// Adding a voice from sherpa-onnx's collection: its download address or its file, and what to call it.
+function addVoiceForm(page, busy) {
+  const COLLECTION = "https://k2-fsa.github.io/sherpa/onnx/tts/all/";
+  const name = el("input", { type: "text", maxlength: "60", placeholder: "Mia", "aria-label": "Name" });
+  const language = el("input", { type: "text", maxlength: "40", placeholder: "Australian English", list: "voice-languages", "aria-label": "Language" });
+  const languages = el("datalist", { id: "voice-languages" },
+    ["British English", "US English", "Australian English", "Chinese English", "Chinese (Mandarin)", "Arabic", "French", "Hindi", "Spanish", "Turkish", "Welsh"]
+      .map((l) => el("option", { value: l })));
+  const gender = el("select", { "aria-label": "Gender" }, el("option", { value: "" }, "Not given"), el("option", { value: "Female" }, "Female"), el("option", { value: "Male" }, "Male"));
+  const url = el("input", { type: "url", placeholder: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/….tar.bz2", "aria-label": "Model download address" });
+  let file = "";
+  const fileName = el("small", { class: "hint" });
+  const choose = el("button", { class: "pill", type: "button" }, "Choose a file…");
+  choose.addEventListener("click", async () => {
+    const picked = await window.__TAURI__?.dialog?.open({ title: "Choose a voice model", filters: [{ name: "Voice model", extensions: ["bz2"] }] }).catch(() => null);
+    if (picked) { file = picked; url.value = ""; fileName.textContent = picked.split(/[\\/]/).pop(); }
+  });
+  url.addEventListener("input", () => { if (url.value) { file = ""; fileName.textContent = ""; } });
+  const speaker = el("input", { type: "number", min: "0", step: "1", value: "0", class: "mono", "aria-label": "Speaker number" });
+  const status = el("div", { class: "hint", role: "status" });
+  const add = el("button", { class: "primary pill", type: "button", disabled: busy }, "Add the voice");
+  add.addEventListener("click", async () => {
+    if (!name.value.trim()) return status.replaceChildren(el("span", { class: "danger" }, "Give the voice a name."));
+    if (!url.value.trim() && !file) return status.replaceChildren(el("span", { class: "danger" }, "Paste the model's download address, or choose its file."));
+    add.disabled = true;
+    status.replaceChildren(el("span", { class: "spinner" }), " ", el("span", { "data-tts-progress": "new" }, "Starting…"), " Downloading and trying it…");
+    try {
+      const voice = await invoke("add_tts_voice", { voice: { name: name.value.trim(), language: language.value.trim(), gender: gender.value,
+        speaker: Math.max(0, Math.floor(Number(speaker.value) || 0)), url: url.value.trim(), file } });
+      await saveReading({ voice: voice.id, natural: true });
+      showReadingSettings(`${voice.name} is added, and reads from now on.`);
+    } catch (e) {
+      add.disabled = false;
+      status.replaceChildren(el("span", { class: "danger" }, String(e)));
+    }
+  });
+  const field = (label, hint, ...input) => el("div", { class: "row stack-narrow" }, el("span", { class: "label" }, label, hint ? el("small", {}, hint) : null), ...input);
+  const wide = (label, hint, input) => el("div", { class: "row column" }, el("span", { class: "label" }, label, hint ? el("small", {}, hint) : null), input);
+  return el("div", { class: "group add-voice" },
+    el("div", { class: "row" }, el("span", { class: "label" }, "From the sherpa-onnx collection",
+      el("small", {}, "Listen to the voices there. On a model's page, copy its download address, or download its .tar.bz2 file. A model with several speakers lists their numbers.")),
+    el("button", { class: "pill", type: "button", onclick: () => invoke("open_link", { url: COLLECTION }).catch(() => window.open(COLLECTION)) }, "Open the collection")),
+    wide("Model", "Its download address, or its file", el("div", { class: "add-voice-model" }, url, el("span", { class: "or" }, "or"), choose, fileName)),
+    field("Speaker", "0 for a model with one voice", speaker),
+    field("Name", null, name),
+    field("Language", "As you'd like it shown", language, languages),
+    field("Gender", null, gender),
+    el("div", { class: "row" }, el("span", { class: "label" }, status), add));
+}
+
+/// Which voice reads each of the person's languages: the main voice when it speaks it, the system's, or a
+/// natural voice that does.
+function voiceForLanguages(page, status, langs) {
+  const group = el("div", { class: "group" });
+  const name = (c) => langs.all.find(([code]) => code === c)?.[1] ?? c;
+  const main = status.voices.find((v) => v.id === status.chosen);
+  for (const code of langs.chosen) {
+    const set = prefs.voice_for?.[code] ?? "";
+    const speakers = status.voices.filter((v) => v.ready && v.langs?.includes(code));
+    // Left to itself: the main voice when it speaks the language, else the first downloaded voice that does.
+    const automatic = prefs.natural_voice ? (main?.ready && main.langs?.includes(code) ? main : speakers[0]) : null;
+    const select = el("select", { "aria-label": `Voice for ${name(code)}` },
+      el("option", { value: "" }, automatic ? `${automatic.name}${automatic === main ? " (the main voice)" : ""}` : "The system's voice"),
+      automatic ? el("option", { value: "system", selected: set === "system" }, "The system's voice") : null,
+      speakers.filter((v) => v !== automatic).map((v) => el("option", { value: v.id, selected: set === v.id }, `${v.name} · ${voiceAbout(v)}`)));
+    select.addEventListener("change", async () => {
+      try {
+        await invoke("save_voice_settings", { voiceFor: [code, select.value] });
+        prefs.voice_for = { ...(prefs.voice_for ?? {}) };
+        if (select.value) prefs.voice_for[code] = select.value; else delete prefs.voice_for[code];
+      } catch (e) { showError(page, e); }
+    });
+    const none = !speakers.length ? " No downloaded natural voice speaks it yet." : "";
+    group.append(el("div", { class: "row stack-narrow" }, el("span", { class: "label" }, name(code),
+      el("small", {}, `For notes and meetings in ${name(code)}.${none}`)), select));
+  }
+  return el("div", {}, group, el("p", { class: "hint" }, "A note or meeting is in your primary language unless you choose another for it, beside its status."));
+}
+
+// ---------- Languages
+
+/// The person's languages, fetched once: { all: [[code, name]], chosen: [codes], primary }.
+let languageInfo = null;
+async function languageData() {
+  languageInfo ??= await invoke("get_languages").catch(() => ({ all: [["en", "English"]], chosen: ["en"], primary: "en" }));
+  return languageInfo;
+}
+
+/// The tag a voice or spell-checker knows a language by.
+const languageTag = (code) => ({ zh: "zh-CN" })[code] ?? code;
+const RIGHT_TO_LEFT = new Set(["ar"]);
+
+/// Marks text as being in `code`, for spell-checking and so right-to-left languages run that way.
+function setLanguage(nodes, code) {
+  for (const node of nodes) {
+    if (!node) continue;
+    node.lang = languageTag(code);
+    node.dir = RIGHT_TO_LEFT.has(code) ? "rtl" : "ltr";
+  }
+}
+
+/// The language picker beside a note's or meeting's status: its own language, or the primary one. Shown
+/// only to someone with more than one language, or for an item already given another.
+function languagePicker(info, current, onChange) {
+  const name = (c) => info.all.find(([code]) => code === c)?.[1] ?? c;
+  const codes = [...new Set([...info.chosen, ...(current ? [current] : [])])];
+  if (codes.length < 2 && !current) return null;
+  const select = el("select", { class: "language-picker", "aria-label": "Language", title: "The language this is in" },
+    el("option", { value: "" }, `${name(info.primary)} (primary)`),
+    codes.filter((c) => c !== info.primary).map((c) => el("option", { value: c, selected: c === current }, name(c))));
+  let previous = current ?? "";
+  select.addEventListener("change", async () => {
+    if (await onChange(select.value)) previous = select.value;
+    else select.value = previous;
+  });
+  return select;
+}
+
+// ---------- Settings › Languages
+
+/// Settings › Languages: the ones the person uses, and the primary one.
+async function showLanguages(message) {
+  leave();
+  showPage();
+  view = { kind: "languages" };
+  refreshItems();
+  const data = await invoke("get_languages");
+  const page = el("div", { class: "page" }, backLinks("‹ Settings", () => showSettings()), el("h1", {}, "Languages"));
+  page.append(el("p", { class: "hint" }, "Tick the languages you use. The primary one is what your notes and meetings are in unless you say otherwise."));
+  if (message) page.append(el("div", { class: "notice" }, message));
+  const group = el("div", { class: "group" });
+  const save = async (chosen, primary) => {
+    try { languageInfo = await invoke("save_languages", { languages: chosen, primary }); showLanguages(); } catch (e) { showError(page, e); }
+  };
+  for (const [code, name] of data.all) {
+    const on = data.chosen.includes(code);
+    const primary = data.primary === code;
+    const box = el("input", { type: "checkbox", checked: on, disabled: primary, "aria-label": `I use ${name}` });
+    box.addEventListener("change", () => save(box.checked ? [...data.chosen, code] : data.chosen.filter((c) => c !== code), data.primary));
+    const row = el("label", { class: "row language-row" }, box, el("span", { class: "label" }, name, primary ? el("small", {}, "Primary: can't be unticked") : null));
+    if (primary) row.append(el("span", { class: "badge ok" }, "Primary"));
+    else if (on) row.append(el("button", { class: "pill", type: "button", onclick: (e) => { e.preventDefault(); save(data.chosen, code); } }, "Make primary"));
+    group.append(row);
+  }
+  page.append(group, el("p", { class: "hint" }, "With more than one, each note and meeting can be given its own beside its status, and Reading aloud can have a voice for each. More languages are coming; transcripts and analyses are still in English for now."));
+  main.replaceChildren(page);
+}
+
+/// One line for the Settings row.
+async function languagesSummary() {
+  const data = await invoke("get_languages").catch(() => null);
+  if (!data) return "English";
+  const name = (c) => data.all.find(([code]) => code === c)?.[1] ?? c;
+  const others = data.chosen.filter((c) => c !== data.primary).map(name);
+  return [name(data.primary), ...others].join(", ");
 }
 
 async function refreshPrefs() {

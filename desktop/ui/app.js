@@ -529,7 +529,7 @@ async function openNote(id, { dictate } = {}) {
   note = { id: data.id, title: data.title, body: data.body, keepAudio: !!data.keep_audio, archived: !!data.archived, status: data.status ?? "", dirty: false };
   view = { kind: "note", id: data.id };
   refreshItems();
-  renderNote(data, dictate);
+  renderNote({ ...data, langs: await languageData() }, dictate);
 }
 
 function renderNote(data, dictate) {
@@ -587,6 +587,9 @@ function renderNote(data, dictate) {
     }
   });
   const title = el("input", { class: "note-title", placeholder: "Title", value: data.title, "aria-label": "Title" });
+  const langs = data.langs;
+  note.language = data.language ?? "";
+  const noteLanguage = () => note.language || langs.primary;
   // An editable div rather than a textarea, so a dictation can hold its place in the text.
   const body = el("div", { class: "note-body", id: "note-body", contenteditable: "plaintext-only", role: "textbox", "aria-multiline": "true", "data-placeholder": isPhone()
     ? "Start typing, or press Dictate and talk. Your words appear at the cursor each time you pause, and it stops by itself when you finish."
@@ -623,14 +626,30 @@ function renderNote(data, dictate) {
     return invoke("export_note", { id: note.id, format });
   });
   main.replaceChildren(
-    el("div", { class: "topbar" }, picker, status, el("span", { class: "grow" }),
+    el("div", { class: "topbar" }, picker, languagePicker(langs, note.language, async (value) => {
+      try {
+        if (!note.id) {
+          note.id = await invoke("save_note", { id: null, title: note.title, body: note.body, keepAudio: note.keepAudio });
+          view.id = note.id;
+          note.dirty = false;
+        }
+        await invoke("set_note_language", { id: note.id, language: value });
+        note.language = value;
+        setLanguage([title, body], noteLanguage());
+        return true;
+      } catch (e) {
+        status.textContent = `Not saved: ${e}`;
+        return false;
+      }
+    }), status, el("span", { class: "grow" }),
       // The selection when there is one, else the whole note.
-      readAloudButton(() => { const sel = getSelection().toString().trim(); return `${title.value}.\n${sel || noteText(body)}`; }, "Read the note aloud"),
+      readAloudButton(() => { const sel = getSelection().toString().trim(); return `${title.value}.\n${sel || noteText(body)}`; }, "Read the note aloud", { lang: noteLanguage }),
       exporter, archive, remove),
     exporter.status,
     el("div", { class: "note" }, title,
-      data.id ? analysisStack("note", data.id, { speakers: ["Me"], go: (source) => selectInNote(body, source) }) : null, chip, body),
+      data.id ? analysisStack("note", data.id, { speakers: ["Me"], lang: noteLanguage, go: (source) => selectInNote(body, source) }) : null, chip, body),
     el("div", { class: "toolbar" }, el("span", { class: "grow" }), talk, live));
+  setLanguage([title, body], noteLanguage());
   // The cursor always starts in the body; a new note starts dictating straight away.
   body.classList.toggle("empty", !data.body);
   body.focus();
@@ -1566,7 +1585,7 @@ async function openSession(id, processingError) {
   refreshItems();
   let session;
   try {
-    session = await invoke("get_session", { id });
+    [session] = await Promise.all([invoke("get_session", { id }), languageData()]);
   } catch (e) {
     main.replaceChildren(el("div", { class: "page" }, el("div", { class: "error" }, String(e))));
     return;
@@ -1677,17 +1696,26 @@ function renderSession(session, processingError, suggestion) {
     refreshItems();
     return true;
   });
+  // Fetched before the page is drawn (see openSession).
+  const langs = languageInfo ?? { all: [["en", "English"]], chosen: ["en"], primary: "en" };
+  const meetingLanguage = () => meta.language || langs.primary;
+  const languageChoice = languagePicker(langs, meta.language ?? "", async (language) => {
+    if (!(await save("set_session_language", { language }))) return false;
+    meta.language = language;
+    setLanguage([page], meetingLanguage());
+    return true;
+  });
   const exporter = exportMenu([...TRANSCRIPT_EXPORTS, ...(meta.compacted ? [] : [
     ["package", "Edit package", "Every track and the transcript mix as audio, with an EDL, Premiere and Resolve XML and a REAPER project"]])],
     (format) => invoke("export_session", { id, title: meetingTitle(id, meta.title), format }));
   // Like a note's: the status and the meeting's actions in a bar of their own across the top.
   const topBar = el("div", { class: "topbar meta meeting-top" },
-    picker,
+    picker, languageChoice,
     // On a phone this drops to its own line under the status and the buttons.
     el("span", { class: "top-info" }, el("span", { title: dateText(meta.created) }, agoText(meta.created)),
       meta.duration_s ? el("span", { title: clock(meta.duration_s) }, el("span", { class: "wide-only" }, "Length: "), lengthText(meta.duration_s)) : null),
     el("span", { class: "grow" }),
-    scriptLines.length ? readAloudButton(() => scriptLines.filter((l) => hasWords(l.text)).map((l) => (prefs.read_speakers ?? true ? `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? "Someone"}: ${l.text}` : l.text)).join("\n"), "Read the transcript aloud") : null,
+    scriptLines.length ? readAloudButton(() => scriptLines.filter((l) => hasWords(l.text)).map((l) => (prefs.read_speakers ?? true ? `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? "Someone"}: ${l.text}` : l.text)).join("\n"), "Read the transcript aloud", { lang: meetingLanguage }) : null,
     session.segments.length ? exporter : null,
     isDesktop() ? el("button", { class: "icon-only", title: meta.compacted ? "Open this meeting's folder, with its transcript and exports" : "Open this meeting's folder, with its audio, transcript and exports",
       "aria-label": "Open this meeting's folder", onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
@@ -1716,6 +1744,7 @@ function renderSession(session, processingError, suggestion) {
   // Analyses sit under the title, above the transcript; their sources jump to the line and play from it.
   if (session.transcribed) {
     page.append(analysisStack("meeting", id, {
+      lang: meetingLanguage,
       speakers: session.speakers.filter((sp) => sp.key !== "unknown").map((sp) => sp.name),
       go: (source) => {
         const hit = lineEls.find((l) => l.seg.id === source.segment);
@@ -2160,6 +2189,7 @@ function renderSession(session, processingError, suggestion) {
     player.nextClip = nextClip;
     requestAnimationFrame(() => player?.seek(keepTime));
   }
+  setLanguage([page], meetingLanguage());
   main.replaceChildren(topBar, el("div", { class: "review" }, page, streams.length ? tracks : null));
 }
 
@@ -3227,6 +3257,8 @@ async function showSettings() {
   page.append(el("h2", {}, "Analysis"), el("div", { class: "group" },
     linkRow("Model and when it runs", "The language model that makes analyses", () => showAnalysisSettings()),
     linkRow("Analysis templates", "Summary, standup, interview, SOAP and your own", () => showTemplates())));
+  page.append(el("h2", {}, "Languages"), el("div", { class: "group" },
+    linkRow("Languages", await languagesSummary(), () => showLanguages())));
   page.append(el("h2", {}, "Reading aloud"), el("div", { class: "group" },
     linkRow("Voice and speed", await readingAloudSummary(), () => showReadingSettings())));
   page.append(el("h2", {}, "Voices"), el("div", { class: "group" },
