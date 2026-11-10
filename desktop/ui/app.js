@@ -1259,7 +1259,7 @@ function renderRecording(status) {
       const failing = ["failed", "disconnected", "silenced", "no headset"].includes(st.state);
       return el("div", { class: "lane" },
         el("span", { class: "name", style: `color:${colour}` }, streamName(st.name),
-          el("small", { class: failing ? "danger" : "" }, failing ? st.detail || st.state : st.state)),
+          el("small", { class: failing ? "danger" : "" }, failing || st.state === "reconnecting" ? st.detail || st.state : st.state)),
         el("span", { class: "spark" }, history.map((l) => el("span", { style: `height:${Math.max(2, Math.round(l * 24))}px;background:${l > 0.35 ? colour : "var(--line)"}` }))));
     }));
     if (!s.streams.length) lanes.replaceChildren(el("div", { class: "legend" }, "Starting the inputs…"));

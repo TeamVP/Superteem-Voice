@@ -1,0 +1,28 @@
+{
+ "note": "Hand labels for the eval. Turn numbers are after joining a speaker's consecutive lines and dropping filler.",
+ "action_items": [
+  {
+   "task": "Send the updated pricing sheet to Dana",
+   "owner": "Raj",
+   "deadline": "by Friday"
+  },
+  {
+   "task": "Remove the free month from the billing system",
+   "owner": "Mei",
+   "deadline": "before the first of next month"
+  },
+  {
+   "task": "Rewrite the FAQ page about the promotion",
+   "owner": "Unassigned",
+   "deadline": null
+  },
+  {
+   "task": "Check with legal whether existing customers keep the free month",
+   "owner": "Alice",
+   "deadline": "next week"
+  }
+ ],
+ "must_not": [
+  "meeting was cancelled"
+ ]
+}

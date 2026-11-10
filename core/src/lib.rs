@@ -1,5 +1,6 @@
 pub mod adpcm;
 pub mod align;
+pub mod analysis;
 pub mod attribute;
 pub mod embed;
 pub mod export;

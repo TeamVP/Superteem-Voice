@@ -42,7 +42,7 @@ jobs:
         with:
           workspaces: desktop
           # Changed when how whisper.cpp is compiled changes, so an old build of it isn't reused.
-          prefix-key: v1-portable-cpu
+          prefix-key: v2-shared-ggml
       # Tauri downloads NSIS and its plugin from GitHub release links, which have returned 504 for hours at a
       # time while the same files came through the API. They are fetched that way, with the hashes Tauri
       # 2.12 checks, into the folder Tauri looks in first.
@@ -81,13 +81,18 @@ jobs:
           npm run tauri -- build --bundles nsis
           if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
           Pop-Location
-          # whisper.cpp built for this machine's processor uses AVX-512 and crashes most PCs when speech is
-          # turned into text, so the release stops if that happened.
-          $cache = Get-ChildItem desktop/target/release/build -Recurse -Filter CMakeCache.txt | Where-Object { $_.FullName -match 'whisper-rs-sys' }
-          if (-not $cache) { throw 'whisper.cpp build settings not found' }
+          # ggml built for this machine's processor uses AVX-512 and crashes most PCs when speech is turned into
+          # text, so the release stops if that happened. ggml is built once, with llama.cpp, and whisper.cpp
+          # uses that copy (build-env.ps1).
+          $cache = Get-ChildItem desktop/target/release/build -Recurse -Filter CMakeCache.txt | Where-Object { $_.FullName -match 'llama-cpp-sys-2' }
+          if (-not $cache) { throw 'ggml build settings not found' }
           foreach ($c in $cache) {
             $text = Get-Content $c.FullName -Raw
-            if ($text -notmatch 'GGML_NATIVE:BOOL=OFF' -or $text -notmatch 'GGML_AVX512:BOOL=OFF') { throw "whisper.cpp was built for this machine's processor: $($c.FullName)" }
+            if ($text -notmatch 'GGML_NATIVE:BOOL=OFF' -or $text -notmatch 'GGML_AVX512:BOOL=OFF') { throw "ggml was built for this machine's processor: $($c.FullName)" }
+          }
+          $whisper = Get-ChildItem desktop/target/release/build -Recurse -Filter CMakeCache.txt | Where-Object { $_.FullName -match 'whisper-rs-sys' }
+          foreach ($c in $whisper) {
+            if ((Get-Content $c.FullName -Raw) -notmatch 'WHISPER_USE_SYSTEM_GGML:BOOL=ON') { throw "whisper.cpp built its own ggml: $($c.FullName)" }
           }
           $setup = Get-ChildItem desktop/target/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1
           New-Item -ItemType Directory -Force dist | Out-Null
@@ -113,7 +118,7 @@ jobs:
         with:
           workspaces: desktop
           # Changed when how whisper.cpp is compiled changes, so an old build of it isn't reused.
-          prefix-key: v1-portable-cpu
+          prefix-key: v2-shared-ggml
       - run: rustup target add aarch64-linux-android
       # services.gradle.org sends the Gradle download on to a GitHub release link, which has returned 504 for
       # hours at a time. The same file comes through the API, is checked against the checksum pinned in
@@ -228,7 +233,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
-          prefix-key: v1-apple
+          prefix-key: v2-shared-ggml-mac
       - name: Build the disk image
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -286,7 +291,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
-          prefix-key: v1-ios
+          prefix-key: v2-shared-ggml-ios
       - name: Make the Xcode project
         run: |
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim
