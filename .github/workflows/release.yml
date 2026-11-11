@@ -90,6 +90,12 @@ jobs:
         shell: pwsh
         run: |
           . desktop/build-env.ps1
+          # llama.cpp's Vulkan shaders are compiled in a nested CMake build whose paths pass Windows' 260
+          # character limit under the runner's long checkout path. The build goes through a short link to
+          # desktop/target instead, so everything still lands (and is cached) where the steps below look.
+          New-Item -ItemType Directory -Force desktop/target | Out-Null
+          New-Item -ItemType Junction -Path C:\t -Target (Resolve-Path desktop/target).Path | Out-Null
+          $env:CARGO_TARGET_DIR = 'C:\t'
           Push-Location desktop
           npm ci --no-audit --no-fund
           # The natural voice's DLLs, which the installer packs from here (installer-hooks.nsh).
