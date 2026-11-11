@@ -998,3 +998,6 @@ body[data-platform="ios"] { box-sizing: border-box; padding: env(safe-area-inset
 .optimise-bar { height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; margin-top: 6px; }
 .optimise-bar > span { display: block; height: 100%; background: var(--key); transition: width 0.3s; }
 .ai-page .row .value { text-align: right; max-width: 50%; }
+.optimise-step { color: var(--muted); font-size: 13px; margin: 4px 0 -4px; }
+.plan-tick { width: 18px; display: inline-flex; justify-content: center; flex: none; color: var(--ok); }
+.plan-done { color: var(--ok); font-size: 13px; font-weight: 600; }

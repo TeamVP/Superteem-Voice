@@ -341,6 +341,9 @@ pub struct Measured {
     /// Words of analysis written each second.
     pub words_per_s: Option<f32>,
     pub analysis_on_gpu: bool,
+    /// Steps the person chose not to take ("kind:id"): their setup is as they want it until the plan
+    /// recommends something not among these.
+    pub kept: Vec<String>,
 }
 
 static PROGRESS: Mutex<Progress> = Mutex::new(Progress { running: false, step: String::new(), index: 0, count: 0, fraction: 0.0, error: None, problems: Vec::new(), finished: false });
@@ -363,12 +366,39 @@ pub fn last() -> Option<Measured> {
     library::read_json(&result_path()).ok()
 }
 
-/// Whether to suggest optimising: never done, or done for a different device or set of languages.
-pub fn stale(p: &Profile, languages: &[String]) -> bool {
-    match last() {
+fn key(s: &Step) -> String {
+    format!("{}:{}", s.kind, s.id)
+}
+
+/// Whether to suggest optimising: never done; done for a different device or set of languages; or the plan
+/// now recommends something the person hasn't done or chosen to go without.
+pub fn stale(plan: &Plan) -> bool {
+    stale_against(plan, last().as_ref())
+}
+
+fn stale_against(plan: &Plan, last: Option<&Measured>) -> bool {
+    match last {
         None => true,
-        Some(r) => r.gpu != p.gpu || (r.ram_gb - p.ram_gb).abs() > 1.0 || !languages.iter().all(|l| r.languages.contains(l)),
+        Some(r) => {
+            let p = &plan.profile;
+            r.gpu != p.gpu
+                || (r.ram_gb - p.ram_gb).abs() > 1.0
+                || !plan.languages.iter().all(|l| r.languages.contains(l))
+                || plan.steps.iter().any(|s| !s.done && !s.kind.starts_with("remove") && !r.kept.contains(&key(s)))
+        }
     }
+}
+
+/// The person is happy with things as they are: what the plan would still change is kept as their choice.
+pub fn keep(plan: &Plan) -> Result<Measured, String> {
+    let mut r = last().unwrap_or_default();
+    r.at = library::now();
+    r.languages = plan.languages.clone();
+    r.gpu = plan.profile.gpu.clone();
+    r.ram_gb = plan.profile.ram_gb;
+    r.kept = plan.steps.iter().filter(|s| !s.done).map(key).collect();
+    library::write_json(&result_path(), &r)?;
+    Ok(r)
 }
 
 /// Does the steps of `plan` named in `chosen` (by kind and id), reporting through `tell`. Runs on the
@@ -447,7 +477,9 @@ pub fn apply(plan: &Plan, chosen: &[(String, String)], tell: impl Fn(&Progress))
     let cancelled = CANCEL.load(Ordering::SeqCst);
     // Trying each model once: how fast it is, and the graphics processor's setup done now rather than in
     // the next meeting. A graphics processor that fails here is turned off.
-    let mut result = Measured { at: library::now(), languages: plan.languages.clone(), gpu: plan.profile.gpu.clone(), ram_gb: plan.profile.ram_gb, ..Default::default() };
+    // Steps left unticked are the person's choice, and not suggested again.
+    let kept = plan.steps.iter().filter(|s| !s.done && !chosen.iter().any(|(k, i)| *k == s.kind && *i == s.id)).map(key).collect();
+    let mut result = Measured { at: library::now(), languages: plan.languages.clone(), gpu: plan.profile.gpu.clone(), ram_gb: plan.profile.ram_gb, kept, ..Default::default() };
     if !cancelled {
         update(&|p| {
             p.step = "Trying the models (the first time on the graphics processor takes a little longer)".into();
@@ -607,5 +639,23 @@ mod tests {
         assert!(pick(&p, "analysis").unwrap().done);
         assert!(pick(&p, "voice").unwrap().done);
         assert_eq!(pick(&p, "remove-llm").unwrap().id, "qwen2.5-1.5b-instruct-q4_k_m.gguf");
+    }
+
+    #[test]
+    fn a_setup_the_person_keeps_stays_kept_until_something_new_is_recommended() {
+        let d = device(Some(("RTX", 8.0, false)), 32.0, 200.0);
+        let plan = plan(&langs(&["en"]), &d, &Installed { natural_voices: true, gpu_on: true, ..Default::default() }, &tts::offered());
+        assert!(stale_against(&plan, None));
+        let kept: Vec<String> = plan.steps.iter().filter(|s| !s.done).map(key).collect();
+        let mut chose = Measured { languages: langs(&["en"]), gpu: d.gpu.clone(), ram_gb: d.ram_gb, kept, ..Default::default() };
+        assert!(!stale_against(&plan, Some(&chose)));
+        // A new language brings a new recommendation, a voice for it.
+        let more = super::plan(&langs(&["en", "fr"]), &d, &Installed { natural_voices: true, gpu_on: true, ..Default::default() }, &tts::offered());
+        chose.languages = langs(&["en", "fr"]);
+        assert!(stale_against(&more, Some(&chose)));
+        // So does new hardware.
+        chose.languages = langs(&["en"]);
+        chose.gpu = Some("Another card".into());
+        assert!(stale_against(&plan, Some(&chose)));
     }
 }

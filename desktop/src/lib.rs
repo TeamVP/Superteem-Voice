@@ -1777,7 +1777,7 @@ async fn optimise_plan() -> Result<OptimiseView, String> {
         let languages = p.languages();
         let profile = optimise::profile();
         let plan = optimise::plan(&languages, &profile, &optimise::installed(), &tts::voices());
-        let stale = optimise::stale(&profile, &languages);
+        let stale = optimise::stale(&plan);
         let used = !notes::list("").is_empty() && library::list("", &[]).iter().any(|m| !m.needs_processing && !m.preview.is_empty());
         OptimiseView { suggest: stale && used && !p.optimise_dismissed && plan.worth_it(), stale, last: optimise::last(), current: ai_now(&languages), plan, progress: optimise::progress() }
     })
@@ -1799,6 +1799,18 @@ fn optimise_apply<R: Runtime>(app: AppHandle<R>, steps: Vec<(String, String)>) -
         let _ = app.emit("optimise-progress", optimise::progress());
     });
     Ok(())
+}
+
+/// Keeps things as they are: the plan's remaining steps are the person's choice, not suggested again until
+/// something changes.
+#[tauri::command]
+async fn optimise_keep() -> Result<(), String> {
+    blocking(|| {
+        let languages = prefs::load().languages();
+        let plan = optimise::plan(&languages, &optimise::profile(), &optimise::installed(), &tts::voices());
+        optimise::keep(&plan).map(|_| ())
+    })
+    .await?
 }
 
 #[tauri::command]
@@ -2577,6 +2589,7 @@ pub fn run() {
             offered_voice,
             optimise_apply,
             optimise_cancel,
+            optimise_keep,
             optimise_dismiss,
             get_translation,
             translate_item,

@@ -3243,7 +3243,9 @@ async function showSettings() {
   // Optimising for this device, offered first while it would change something; the page it leads to always.
   const callout = await optimiseCallout().catch(() => null);
   if (callout) page.append(callout);
-  page.append(el("div", { class: "group" }, linkRow(`AI on this ${isPhone() ? "phone" : "computer"}`, "Models, how fast they run, and optimising them", () => showAiSettings())));
+  page.append(el("div", { class: "group" },
+    linkRow(`Optimise for this ${isPhone() ? "phone" : "computer"}`, "Your languages, then the best models and voices for them here", () => showOptimise(OPTIMISE_FROM.settings)),
+    linkRow(`AI on this ${isPhone() ? "phone" : "computer"}`, "What runs here and how fast", () => showAiSettings())));
 
   // The proxy and the model folder are only needed when the download doesn't work, so they sit behind a
   // link in the row, opened already when the download has failed.

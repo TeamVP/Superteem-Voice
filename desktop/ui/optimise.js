@@ -24,11 +24,11 @@ async function optimiseCallout() {
   const data = await optimiseData().catch(() => null);
   if (!data) return null;
   const todo = data.plan.steps.filter((s) => !s.done && !s.kind.startsWith("remove"));
-  if (!data.progress.running && (!todo.length || (!data.stale && data.last))) return null;
+  if (!data.progress.running && (!todo.length || !data.stale)) return null;
   return el("div", { class: "optimise-callout" }, svg("spark", 22),
     el("div", { class: "grow" }, el("strong", {}, data.progress.running ? "Optimising Voice for this device…" : `Make Voice faster and smarter on this ${isPhone() ? "phone" : "computer"}`),
       el("small", {}, data.progress.running ? data.progress.step : optimiseSummary(todo))),
-    el("button", { class: "primary pill", onclick: () => (data.progress.running ? showAiSettings() : showOptimise()) }, data.progress.running ? "See progress" : "Optimise"));
+    el("button", { class: "primary pill", onclick: () => (data.progress.running ? showAiSettings() : showOptimise(OPTIMISE_FROM.settings)) }, data.progress.running ? "See progress" : "Optimise"));
 }
 
 /// "A better speech model, the graphics processor and a Spanish voice."
@@ -56,7 +56,7 @@ async function optimiseNudge() {
     svg("spark", 22),
     el("div", { class: "grow" }, el("strong", {}, `Voice can run better on this ${isPhone() ? "phone" : "computer"}`), el("small", {}, optimiseSummary(todo))),
     el("div", { class: "optimise-nudge-actions" },
-      el("button", { class: "primary pill", onclick: () => showOptimise() }, "Optimise"),
+      el("button", { class: "primary pill", onclick: () => showOptimise(OPTIMISE_FROM.home) }, "Optimise"),
       el("button", { class: "link", onclick: async () => { await invoke("optimise_dismiss").catch(() => {}); card.remove(); } }, "Not now")));
   return card;
 }
@@ -83,10 +83,15 @@ async function showAiSettings(message) {
     drawOptimiseProgress(optimisePage, progress);
   } else {
     const todo = plan.steps.filter((s) => !s.done && !s.kind.startsWith("remove"));
+    // Never done; something new to recommend; set up as the person chose; or fully optimised.
+    const [title, detail] = !last ? ["Not optimised yet", optimiseSummary(todo)]
+      : data.stale ? ["Something here can be better", optimiseSummary(todo)]
+      : todo.length ? ["Set up the way you chose", `You kept your own choices. The recommendations are still here if you change your mind. Last checked ${timeText(last.at)}.`]
+      : ["Optimised for this device", `Nothing to change. Last done ${timeText(last.at)}.`];
+    const label = !last || data.stale ? "Optimise" : todo.length ? "See recommendations" : "Optimise again";
     page.append(el("div", { class: "optimise-callout" }, svg("spark", 22),
-      el("div", { class: "grow" }, el("strong", {}, last ? (todo.length ? "Something here can be better" : "Optimised for this device") : "Not optimised yet"),
-        el("small", {}, last ? `${todo.length ? optimiseSummary(todo) : "Nothing to change."} Last done ${timeText(last.at)}.` : optimiseSummary(todo))),
-      el("button", { class: todo.length || !last ? "primary pill" : "pill", onclick: () => showOptimise() }, last ? "Optimise again" : "Optimise")));
+      el("div", { class: "grow" }, el("strong", {}, title), el("small", {}, detail)),
+      el("button", { class: !last || data.stale ? "primary pill" : "pill", onclick: () => showOptimise(OPTIMISE_FROM.ai) }, label)));
   }
 
   // The device.
@@ -133,14 +138,25 @@ function infoRow(label, detail, value) {
 
 // ---------- The flow
 
-/// Optimising: first the languages, then the plan to confirm, then it runs on the AI page.
-async function showOptimise() {
+/// Where optimising was started from, to go back to: [label, show].
+const OPTIMISE_FROM = {
+  settings: ["Settings", () => showSettings()],
+  ai: ["AI on this device", () => showAiSettings()],
+  home: ["Home", () => showHome()],
+};
+let optimiseFrom = OPTIMISE_FROM.settings;
+
+/// Optimising, its own branch from Settings: first the languages, then the plan to confirm, then it runs
+/// and the AI page shows how it went.
+async function showOptimise(from) {
+  if (from) optimiseFrom = from;
   leave();
   showPage();
   view = { kind: "optimise" };
   refreshItems();
   const info = await languageData(true);
-  const page = el("div", { class: "page optimise-page" }, backLinks("‹ AI on this device", () => showAiSettings()), el("h1", {}, "Optimise for this device"),
+  const page = el("div", { class: "page optimise-page" }, backLinks(`‹ ${optimiseFrom[0]}`, optimiseFrom[1]),
+    el("div", { class: "optimise-step" }, "Step 1 of 2 · Your languages"), el("h1", {}, "Optimise for this device"),
     el("p", { class: "hint" }, "First, the languages you speak and read in. Voice then picks the speech model, analysis model and voices that work best for them on this device."));
   const chosen = new Set(info.chosen);
   const list = el("div", { class: "group" });
@@ -176,7 +192,9 @@ async function showOptimisePlan() {
   leave();
   showPage();
   view = { kind: "optimise" };
-  const page = el("div", { class: "page optimise-page" }, backLinks("‹ Languages", () => showOptimise()), el("h1", {}, "The plan for this device"));
+  const page = el("div", { class: "page optimise-page" }, backLinks(`‹ ${optimiseFrom[0]}`, optimiseFrom[1]),
+    el("div", { class: "optimise-step" }, "Step 2 of 2 · The plan · ", el("button", { class: "link inline", onclick: () => showOptimise() }, "Change languages")),
+    el("h1", {}, "The plan for this device"));
   page.append(el("p", { class: "hint" }, el("span", { class: "spinner" }), " Looking at this device…"));
   main.replaceChildren(page);
   const data = await optimiseData().catch((e) => { showError(page, e); return null; });
@@ -194,16 +212,25 @@ async function showOptimisePlan() {
     const frees = steps.reduce((n, s) => n + s.frees, 0);
     total.textContent = download ? `Downloads ${bytes(download)}${frees ? `, frees ${bytes(frees)}` : ""}` : frees ? `Frees ${bytes(frees)}` : steps.length ? "Nothing to download" : "Nothing to change";
     go.textContent = download ? `Download and set up (${bytes(download)})` : "Set up";
-    go.disabled = false;
+    go.disabled = !steps.length;
   };
   const group = el("div", { class: "group optimise-plan" });
+  const kept = new Set(data.last?.kept ?? []);
   for (const s of plan.steps) {
     const key = `${s.kind}:${s.id}`;
-    picked.set(key, !s.done);
-    const box = el("input", { type: "checkbox", checked: !s.done, disabled: s.done, "aria-label": s.title });
+    const text = el("span", { class: "label" }, s.title, el("small", {}, s.reason));
+    // Done: nothing to choose; a green tick and "Done".
+    if (s.done) {
+      group.append(el("div", { class: "row done" }, el("span", { class: "plan-tick", role: "img", "aria-label": "Done" }, svg("check", 18)), text,
+        el("span", { class: "plan-done" }, "Done")));
+      continue;
+    }
+    // Ticked, unless the person chose to go without it before.
+    picked.set(key, !kept.has(key));
+    const box = el("input", { type: "checkbox", checked: !kept.has(key), "aria-label": s.title });
     box.addEventListener("change", () => { picked.set(key, box.checked); sum(); });
-    const size = s.done ? el("span", { class: "badge ok" }, svg("check", 12), "Set up") : el("span", { class: "value" }, s.download ? bytes(s.download) : s.frees ? `Frees ${bytes(s.frees)}` : "");
-    group.append(el("label", { class: `row${s.done ? " done" : ""}` }, box, el("span", { class: "label" }, s.title, el("small", {}, s.reason)), size));
+    group.append(el("label", { class: "row" }, box, text,
+      el("span", { class: "value" }, s.download ? bytes(s.download) : s.frees ? `Frees ${bytes(s.frees)}` : "")));
   }
   page.append(group);
   if (plan.notes.length) page.append(el("ul", { class: "optimise-notes" }, plan.notes.map((n) => el("li", {}, n))));
@@ -219,7 +246,17 @@ async function showOptimisePlan() {
       showError(page, e);
     }
   });
-  page.append(el("div", { class: "toolbar optimise-go" }, total, el("span", { class: "grow" }), el("button", { class: "pill", onclick: () => showAiSettings() }, "Cancel"), go));
+  // Happy as things are: what's left becomes the person's choice, and isn't suggested again until
+  // something changes. They can come back and follow the recommendations whenever they like.
+  const keep = plan.steps.some((s) => !s.done)
+    ? el("button", { class: "pill", title: "Keep things as they are. Voice stops suggesting these until something changes.", onclick: async () => {
+      try {
+        await invoke("optimise_keep");
+        showAiSettings("Kept as you have it. Voice won't suggest these again unless something changes. Come back any time to follow the recommendations.");
+      } catch (e) { showError(page, e); }
+    } }, "Keep my current setup")
+    : null;
+  page.append(el("div", { class: "toolbar optimise-go" }, total, el("span", { class: "grow" }), el("button", { class: "pill", onclick: optimiseFrom[1] }, "Cancel"), keep, go));
   sum();
   main.replaceChildren(page);
 }
