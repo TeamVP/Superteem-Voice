@@ -111,6 +111,22 @@ function agoText(unix) {
   return new Date(unix * 1000).toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
+/// A note's last save, as "Just now" or "4h ago", kept current while it shows.
+let savedTimer = null;
+function showSaved(status) {
+  const draw = () => {
+    const at = note?.savedAt;
+    status.textContent = !at ? "New note" : Date.now() / 1000 - at < 60 ? "Just now" : agoText(at);
+    status.title = at ? `Saved ${dateText(at)}` : "";
+  };
+  draw();
+  clearInterval(savedTimer);
+  savedTimer = setInterval(() => {
+    if (!status.isConnected || !note) { clearInterval(savedTimer); savedTimer = null; return; }
+    if (!/^(Editing|Not saved)/.test(status.textContent)) draw();
+  }, 30000);
+}
+
 /// A length in words: "45 seconds", "1 minute", "1 hour 5 minutes".
 function lengthText(seconds) {
   if (seconds < 30) return `${Math.max(1, Math.round(seconds))} second${Math.round(seconds) === 1 ? "" : "s"}`;
@@ -543,7 +559,9 @@ async function openNote(id, { dictate } = {}) {
 }
 
 function renderNote(data, dictate) {
-  const status = el("span", { class: "status", "aria-live": "polite" }, data.updated ? `Saved · ${timeText(data.updated)}` : "New note");
+  const status = el("span", { class: "status", "aria-live": "polite" });
+  note.savedAt = data.updated ?? null;
+  showSaved(status);
   const remove = el("button", { class: "icon-only danger", title: "Delete", "aria-label": "Delete note" }, svg("trash", 18));
   remove.addEventListener("click", async () => {
     if (!note.id) return showHome();
@@ -652,14 +670,16 @@ function renderNote(data, dictate) {
       note.languages = result.effective;
       setLanguage([title, body], noteLanguage());
       return true;
-    }), status, el("span", { class: "grow" }),
-      // The selection when there is one, else the whole note.
-      readAloudButton(() => { const sel = getSelection().toString().trim(); return `${HEADING}${title.value}\n${sel || noteText(body)}`; }, "Read the note aloud", { lang: noteLanguage }),
-      exporter, archive, remove),
+    }), status,
+      // The buttons stay together: beside the status, or on the line under it when they don't fit.
+      el("span", { class: "top-actions" },
+        // The selection when there is one, else the whole note.
+        readAloudButton(() => { const sel = getSelection().toString().trim(); return `${HEADING}${title.value}\n${sel || noteText(body)}`; }, "Read the note aloud", { lang: noteLanguage }),
+        exporter, archive, remove)),
     exporter.status, langNotice,
     el("div", { class: "note" }, title,
-      data.id ? analysisStack("note", data.id, { speakers: ["Me"], lang: noteLanguage, go: (source) => selectInNote(body, source) }) : null,
-      data.id ? translationPanel("note", data.id, note.languages) : null, chip, body),
+      data.id ? analysisStack("note", data.id, { speakers: ["Me"], lang: noteLanguage, go: (source) => selectInNote(body, source),
+        translations: translationStack("note", data.id, note.languages) }) : null, chip, body),
     el("div", { class: "toolbar" }, el("span", { class: "grow" }), talk, live));
   setLanguage([title, body], noteLanguage());
   // The cursor always starts in the body; a new note starts dictating straight away.
@@ -699,7 +719,8 @@ async function saveNote(status) {
     const id = await invoke("save_note", { id: note.id, title: note.title, body: note.body, keepAudio: note.keepAudio });
     note.id = id;
     if (view.kind === "note") view.id = id;
-    if (status?.isConnected) status.textContent = `Saved · ${timeText(Date.now() / 1000)}`;
+    note.savedAt = Date.now() / 1000;
+    if (status?.isConnected) showSaved(status);
     refreshItems();
   } catch (e) {
     note.dirty = true;
@@ -1730,13 +1751,13 @@ function renderSession(session, processingError, suggestion) {
     // On a phone this drops to its own line under the status and the buttons.
     el("span", { class: "top-info" }, el("span", { title: dateText(meta.created) }, agoText(meta.created)),
       meta.duration_s ? el("span", { title: clock(meta.duration_s) }, el("span", { class: "wide-only" }, "Length: "), lengthText(meta.duration_s)) : null),
-    el("span", { class: "grow" }),
+    el("span", { class: "top-actions" },
     scriptLines.length ? readAloudButton(() => scriptLines.filter((l) => hasWords(l.text)).map((l) => (prefs.read_speakers ?? true ? `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? "Someone"}: ${l.text}` : l.text)).join("\n"), "Read the transcript aloud", { lang: meetingLanguage }) : null,
     session.segments.length ? exporter : null,
     isDesktop() ? el("button", { class: "icon-only", title: meta.compacted ? "Open this meeting's folder, with its transcript and exports" : "Open this meeting's folder, with its audio, transcript and exports",
       "aria-label": "Open this meeting's folder", onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
     session.model_ready && !session.needs_processing && !meta.compacted ? reprocess : null,
-    remove);
+    remove));
   page.append(exporter.status, confirmBox, langNotice, title);
 
   const processNow = el("button", { class: "primary" }, "Process now");
@@ -1772,10 +1793,9 @@ function renderSession(session, processingError, suggestion) {
       lang: meetingLanguage,
       speakers: session.speakers.filter((sp) => sp.key !== "unknown").map((sp) => sp.name),
       go: goToLine,
+      // Translations into other languages, under the analyses.
+      translations: translationStack("meeting", id, meetingLanguages, { go: (line) => goToLine({ segment: Number(line.id), at_s: line.at_s }) }),
     }));
-    // A translation into another of the person's languages, under the analyses.
-    const translation = translationPanel("meeting", id, meetingLanguages, { go: (line) => goToLine({ segment: Number(line.id), at_s: line.at_s }) });
-    if (translation) page.append(translation);
   }
   // Shown behind the "?" with the other notes on reading the transcript.
   const extraHelp = [];
@@ -3227,10 +3247,28 @@ function trainedText(prints) {
   return first.phrases ? `${first.phrases} of ${first.phrases_of} trained` : "Not trained: slower to answer";
 }
 
-function linkRow(label, value, onClick) {
-  return el("button", { class: "row link-row", style: "width:100%;border-radius:0;border:none;border-bottom:1px solid var(--line);text-align:left", onclick: onClick },
+/// A row that opens a page. Its label and value share a line while they fit; when they don't, the value
+/// goes under the label, or, with `drop` (the section heading already says what the label would), the
+/// label is hidden and the value has the line to itself.
+function linkRow(label, value, onClick, { drop = false } = {}) {
+  const row = el("button", { class: "row link-row", style: "width:100%;border-radius:0;border:none;border-bottom:1px solid var(--line);text-align:left", onclick: onClick },
     el("span", { class: "label" }, label), el("span", { class: "value" }, value ?? ""), el("span", { "aria-hidden": "true", class: "value" }, "›"));
+  if (drop) row.dataset.drop = "";
+  rowFit.observe(row);
+  return row;
 }
+
+/// Marks a link row "tight" when its label and value don't fit on one line, again whenever its width changes.
+const rowFit = new ResizeObserver((entries) => {
+  for (const { target: row } of entries) {
+    const width = Math.round(row.clientWidth);
+    if (!width || row.fitWidth === width) continue;
+    row.fitWidth = width;
+    row.classList.remove("tight");
+    const value = row.querySelector(":scope > .value:not([aria-hidden])");
+    row.classList.toggle("tight", row.scrollWidth > row.clientWidth + 1 || (!!value && value.scrollWidth > value.clientWidth + 1));
+  }
+});
 
 async function showSettings() {
   leave();
@@ -3265,12 +3303,13 @@ async function showSettings() {
   const callout = await optimiseCallout().catch(() => null);
   const optimise = [el("h2", {}, "Optimise"), callout, el("div", { class: "group" },
     linkRow(`Optimise for this ${isPhone() ? "phone" : "computer"}`, "Your languages, then the best models and voices for them here", () => showOptimise(OPTIMISE_FROM.settings)),
-    linkRow(`AI on this ${isPhone() ? "phone" : "computer"}`, "What runs here and how fast", () => showAiSettings()))];
+    linkRow("Local AI", `What runs on this ${isPhone() ? "phone" : "computer"}`, () => showAiSettings()))];
 
   const languages = [el("h2", {}, "Languages"), el("div", { class: "group" },
-    linkRow("Languages", await languagesSummary(), () => showLanguages()))];
+    linkRow("Languages", await languagesSummary(), () => showLanguages(), { drop: true }))];
 
-  const listening = [el("h2", {}, "Listening"), el("div", { class: "group windows-only" },
+  // Nothing here applies on a phone yet, so the section isn't shown there.
+  const listening = isPhone() ? [] : [el("h2", {}, "Listening"), el("div", { class: "group windows-only" },
     toggleRow("“Hey Superteem”", "Listen for the wake word while the app is open. Nothing is recorded until you ask.", prefs.wake,
       async (on, box) => {
         try {
@@ -3288,9 +3327,9 @@ async function showSettings() {
       prefs.keep_audio = on;
       await invoke("save_prefs", { keepAudio: on });
     }))];
-  // Android's permissions, with listening as what they're mostly for.
+  // Android's permissions, straight after About as everything else needs them.
   const phone = platform === "android" ? [el("h2", {}, "This phone"), el("div", { class: "group" },
-    linkRow("App permissions", "Microphone, Bluetooth, notifications", () => showPermissions()))] : [];
+    linkRow("App permissions", "Microphone, Bluetooth, notifications", () => showPermissions(), { drop: true }))] : [];
 
   const meetings = [el("h2", {}, "Meetings"), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, "Consent question",
@@ -3303,7 +3342,7 @@ async function showSettings() {
   const inUse = speech.filter((m) => m.ready && m.used_for.length).map((m) => m.name);
   const transcriptionRow = linkRow("Transcription", ready
     ? [inUse.join(" and ") || "Speech model ready", terms.length ? `${terms.length} vocabulary word${terms.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")
-    : "The speech model needs downloading", () => showTranscription());
+    : "The speech model needs downloading", () => showTranscription(), { drop: true });
   if (!ready) transcriptionRow.classList.add("needs-attention");
   const transcription = [el("h2", {}, "Transcription"), el("div", { class: "group" }, transcriptionRow)];
 
@@ -3312,7 +3351,7 @@ async function showSettings() {
     linkRow("Analysis templates", "Summary, standup, interview, SOAP and your own", () => showTemplates()))];
 
   const voices = [el("h2", {}, "Voices"), el("div", { class: "group" },
-    linkRow("Voices", `${await readingAloudSummary()} · ${prints.length ? `${prints.length} voice print${prints.length === 1 ? "" : "s"}` : "No voice prints yet"}`, () => showVoices()))];
+    linkRow("Voices", `${await readingAloudSummary()} · ${prints.length ? `${prints.length} voice print${prints.length === 1 ? "" : "s"}` : "No voice prints yet"}`, () => showVoices(), { drop: true }))];
 
   const theme = el("div", { class: "theme", role: "group", "aria-label": "Theme" });
   const current = document.documentElement.dataset.theme ?? "system";
@@ -3326,7 +3365,7 @@ async function showSettings() {
     el("div", { class: "row" }, el("span", { class: "label" }, "Recordings and notes", el("small", {}, "Kept on this device only.")),
       isDesktop() ? el("button", { class: "pill", onclick: () => invoke("open_folder", { id: null }) }, "Open folder") : null))];
 
-  for (const section of [about, optimise, languages, listening, phone, meetings, transcription, analysis, voices, appearance, storage]) {
+  for (const section of [about, phone, optimise, languages, listening, meetings, transcription, analysis, voices, appearance, storage]) {
     page.append(...section.filter(Boolean));
   }
   main.replaceChildren(page);
@@ -3573,7 +3612,7 @@ async function showTranscription(message) {
       + "Spoken commands such as “Hey Superteem” and “bookmark that” are English for now."));
 
   page.append(el("h2", {}, "Vocabulary"), el("div", { class: "group" },
-    linkRow("Vocabulary", terms.length ? `${terms.length} word${terms.length === 1 ? "" : "s"}` : "Spell names and acronyms your way", () => showVocabulary())));
+    linkRow("Vocabulary", terms.length ? `${terms.length} word${terms.length === 1 ? "" : "s"}` : "Spell names and acronyms your way", () => showVocabulary(), { drop: true })));
   page.append(await modelHelp(() => showTranscription()));
   main.replaceChildren(page);
 }
@@ -3702,7 +3741,7 @@ async function showOnboarding(step = SETUP.welcome) {
       el("div", { class: "celebrate", role: "status" }, el("span", { class: "badge" }, svg("check", 44))),
       el("h1", {}, "You're all set"),
       el("div", { class: "actions" }, el("button", { class: "primary pill big", onclick: finish }, "Start")),
-      // Optional: the same as Settings › AI on this device.
+      // Optional: the same as Settings › Local AI.
       el("p", { class: "legend" }, el("button", { class: "link inline", onclick: async () => { await finish(); showOptimise(); } }, "Optimise Voice for this device first"),
         " · picks the best speech and analysis models and voices for your languages"));
   }

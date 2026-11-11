@@ -54,29 +54,46 @@ function languageOptions(selected, { none } = {}) {
   ];
 }
 
-/// The picker beside a note's or meeting's status: its main language, and a second one for a note or
-/// meeting where people switch between two. `onChange(list)` saves and says whether it worked.
+/// "EN", "ZH": a language's short name, for the chip beside the status.
+const languageShort = (code) => code.split("-")[0].toUpperCase();
+
+/// The chip beside a note's or meeting's status, showing its language ("EN"), or two ("EN · ES") for one
+/// where people switch between them. It opens a dialog to change them. `onChange(list)` saves and says
+/// whether it worked.
 function languagePicker(current, onChange) {
   let saved = [...current];
-  const wrap = el("span", { class: "language-picker-wrap", title: "The languages this is in" });
-  const main = el("select", { class: "language-picker", "aria-label": "Language" }, languageOptions(saved[0]));
-  const second = el("select", { class: "language-picker second", "aria-label": "Second language" },
-    languageOptions(saved[1] ?? "", { none: saved[1] ? "Only one language" : "+ Second language" }));
+  const chip = el("button", { class: "language-chip", type: "button" });
   const draw = () => {
-    main.replaceChildren(...languageOptions(saved[0]));
-    second.replaceChildren(...languageOptions(saved[1] ?? "", { none: saved[1] ? "Only one language" : "+ Second language" }).filter(Boolean));
-    for (const opt of second.querySelectorAll("option")) opt.disabled = opt.value === saved[0];
+    const names = saved.map(languageName).join(" and ");
+    chip.title = `In ${names}. Change the language`;
+    chip.setAttribute("aria-label", `Language: ${names}. Change it`);
+    chip.replaceChildren(svg("globe", 14), el("span", {}, saved.map(languageShort).join(" · ")));
   };
-  const change = async () => {
-    const list = [main.value, second.value].filter((c, i, a) => c && a.indexOf(c) === i);
-    if (await onChange(list)) saved = list;
-    draw();
-  };
-  main.addEventListener("change", change);
-  second.addEventListener("change", change);
+  chip.addEventListener("click", () => {
+    const main = el("select", { "aria-label": "Language" }, languageOptions(saved[0]));
+    const second = el("select", { "aria-label": "Second language" }, languageOptions(saved[1] ?? "", { none: "None" }));
+    const block = () => { for (const opt of second.querySelectorAll("option")) opt.disabled = !!opt.value && opt.value === main.value; };
+    main.addEventListener("change", () => { if (second.value === main.value) second.value = ""; block(); });
+    block();
+    const save = el("button", { class: "primary pill", type: "button" }, "Save");
+    const dialog = el("dialog", { class: "sheet", "aria-label": "Language" },
+      el("h2", {}, "Language"),
+      el("label", { class: "field" }, "Spoken and written in", main),
+      el("label", { class: "field" }, el("span", {}, "Second language", el("small", {}, "For when people switch between two.")), second),
+      el("div", { class: "actions" }, el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"), save));
+    save.addEventListener("click", async () => {
+      const list = [main.value, second.value].filter((c, i, a) => c && a.indexOf(c) === i);
+      save.disabled = true;
+      if (await onChange(list)) saved = list;
+      draw();
+      dialog.close();
+    });
+    dialog.addEventListener("close", () => dialog.remove());
+    document.body.append(dialog);
+    dialog.showModal();
+  });
   draw();
-  wrap.append(svg("globe", 14), main, second);
-  return wrap;
+  return chip;
 }
 
 /// Saves an item's languages and follows up: a new speech model to download, and for a meeting already
@@ -168,7 +185,7 @@ async function showLanguages(message) {
   const add = el("select", { "aria-label": "Add a language" }, el("option", { value: "" }, "Add a language…"),
     (data.catalogue ?? []).filter((l) => !data.chosen.includes(l.code)).map((l) => el("option", { value: l.code }, l.native && l.native !== l.name ? `${l.name} · ${l.native}` : l.name)));
   add.addEventListener("change", () => add.value && save([...data.chosen, add.value], data.primary));
-  group.append(el("div", { class: "row" }, add));
+  group.append(el("div", { class: "row add-language" }, add));
   page.append(group);
 
   // What new notes and meetings start in.
@@ -198,7 +215,7 @@ async function showLanguages(message) {
   // Speech models live with the rest of transcription.
   const usedFor = models.filter((m) => m.ready && m.used_for.length).map((m) => m.name);
   page.append(el("h2", {}, "Speech models"), el("div", { class: "group" },
-    linkRow("Speech models", usedFor.join(" and ") || "Choose and download them", () => showTranscription())),
+    linkRow("Speech models", usedFor.join(" and ") || "Choose and download them", () => showTranscription(), { drop: true })),
     el("p", { class: "hint" }, "Which model transcribes each of your languages, and downloading others, are in Settings › Transcription."));
   main.replaceChildren(page);
 }
@@ -213,29 +230,100 @@ async function languagesSummary() {
 
 // ---------- Translations
 
-/// The translation panel on the page now (see translationPanel).
-let translationPage = null;
+/// The translations on the page now (see translationStack).
+let translationStackNow = null;
 
 /// The languages an item can be translated into: the person's, except the one it's all in.
 const translationTargets = (languages) => (languageInfo?.chosen ?? []).filter((c) => !(languages.length === 1 && languages[0] === c));
 
-/// A section showing a meeting's or note's translation into another language, line by line, each
-/// correctable, with the original under it, and a Listen button that reads the translation aloud.
-/// `languages` are the item's, main one first; `ctx.go(line)` jumps to a line in the original.
-function translationPanel(kind, id, languages, ctx = {}) {
-  const holder = el("section", { class: "translation", "aria-label": "Translation" });
-  const remembered = (() => { try { return localStorage.getItem(`translation:${kind}:${id}`); } catch { return null; } })();
-  const targets = translationTargets(languages);
-  const page = { kind, id, holder, languages, ctx, open: !!remembered, picked: !!remembered, data: null, reading: null,
-    language: remembered || (languageInfo?.translate_into ?? []).find((c) => targets.includes(c)) || targets[0] || null };
+/// A meeting's or note's translations, one panel each, shown under its analyses. There are none until one
+/// is made with Translate, beside Analysis templates. `languages` are the item's, main one first;
+/// `ctx.go(line)` jumps to a line in the original.
+function translationStack(kind, id, languages, ctx = {}) {
+  const holder = el("div", { class: "translations" });
+  const stack = { kind, id, holder, languages, ctx, panels: new Map() };
+  translationStackNow = stack;
+  refreshTranslationStack(stack);
+  return holder;
+}
+
+/// Adds a panel for each language translated, or being translated, that hasn't one.
+async function refreshTranslationStack(stack) {
+  const { kind, id } = stack;
+  const [data, queue] = await Promise.all([
+    invoke("get_translation", { kind, id, language: stack.languages[0] }).catch(() => null),
+    invoke("get_analyses", { kind, id }).then((d) => d.queue).catch(() => ({ current: null, waiting: [] }))]);
+  if (translationStackNow !== stack) return;
+  const jobs = [queue.current, ...queue.waiting].filter((j) => j && j.kind === kind && j.id === id && j.template.startsWith("translate:"))
+    .map((j) => j.template.slice("translate:".length));
+  const own = stack.languages.length === 1 ? stack.languages[0] : null;
+  for (const language of new Set([...(data?.available ?? []), ...jobs])) {
+    if (language !== own) addTranslation(stack, language);
+  }
+  refreshAnalyses(); // So Translate leaves out the languages already here.
+}
+
+/// The panel for one language, made if it isn't there yet.
+function addTranslation(stack, language, { open = false } = {}) {
+  const had = stack.panels.get(language);
+  if (had) {
+    if (open && !had.open) { had.open = true; drawTranslation(had); }
+    return had;
+  }
+  const holder = el("section", { class: "translation", "aria-label": `${languageName(language)} translation` });
+  const page = { stack, kind: stack.kind, id: stack.id, holder, languages: stack.languages, ctx: stack.ctx, open, data: null, reading: null, language };
   // Made once, so it keeps reading and saying Stop while the panel is redrawn around it.
   page.follow = (piece, voice) => followReading(page, piece, voice);
-  page.listen = readAloudButton(null, "Listen to the translation", { label: "Listen", lang: () => page.language, pieces: () => translationSpeech(page), onPiece: page.follow });
+  page.listen = readAloudButton(null, `Listen to the ${languageName(language)} translation`, { label: "Listen", lang: () => page.language, pieces: () => translationSpeech(page), onPiece: page.follow });
   page.listen.classList.add("translation-listen");
   page.status = el("div", { class: "translation-reading", role: "status", "aria-live": "polite", hidden: true });
-  translationPage = page;
+  stack.panels.set(language, page);
+  stack.holder.append(holder);
   drawTranslation(page);
-  return holder;
+  return page;
+}
+
+/// Translates the item on the page into `language`, and shows its panel, open.
+async function startTranslation(language) {
+  const stack = translationStackNow;
+  if (!stack?.holder.isConnected) return;
+  const page = addTranslation(stack, language, { open: true });
+  page.error = null;
+  try { await invoke("translate_item", { kind: stack.kind, id: stack.id, language }); } catch (e) { page.error = String(e); }
+  drawTranslation(page);
+  refreshAnalyses();
+}
+
+/// "Translate", beside Analysis templates: the person's other languages, then any language.
+function translateMenu(kind, id) {
+  const stack = translationStackNow;
+  if (!stack || stack.kind !== kind || stack.id !== id) return null;
+  const label = el("span", { class: "with-icon" }, svg("globe", 16), "Translate");
+  const targets = translationTargets(stack.languages).filter((c) => !stack.panels.has(c));
+  const choices = targets.map((c) => [languageName(c), null, () => startTranslation(c)]);
+  choices.push(["Another language…", null, () => pickTranslationLanguage(stack)]);
+  const menu = menuButton(label, choices, "link add-analysis");
+  menu.classList.add("translate-menu");
+  return menu;
+}
+
+/// A dialog to choose any language to translate into.
+function pickTranslationLanguage(stack) {
+  const own = stack.languages.length === 1 ? stack.languages[0] : null;
+  const pick = el("select", { "aria-label": "Translate into" }, el("option", { value: "", selected: true, disabled: true }, "Choose a language"),
+    ...languageOptions("").filter(Boolean));
+  for (const opt of pick.querySelectorAll("option")) if (opt.value && (opt.value === own || stack.panels.has(opt.value))) opt.disabled = true;
+  const go = el("button", { class: "primary pill", type: "button", disabled: true }, "Translate");
+  pick.addEventListener("change", () => { go.disabled = !pick.value; });
+  const dialog = el("dialog", { class: "sheet", "aria-label": "Translate" },
+    el("h2", {}, "Translate"),
+    el("p", { class: "hint" }, `Make a version of this ${stack.kind} in another language, to read, correct, export or listen to. Your analysis model translates it line by line.`),
+    el("label", { class: "field" }, "Into", pick),
+    el("div", { class: "actions" }, el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"), go));
+  go.addEventListener("click", () => { const language = pick.value; dialog.close(); startTranslation(language); });
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
 }
 
 /// The translation as pieces to read aloud, from line `from` on, each knowing its line. In a meeting, who
@@ -334,8 +422,9 @@ async function voiceOffer(page) {
 
 /// Called by the job events: redraws the panel when its translation moves on or finishes.
 function refreshTranslation(job, finished) {
-  const page = translationPage;
-  if (!page || !page.holder.isConnected || job.kind !== page.kind || job.id !== page.id || job.template !== `translate:${page.language}`) return;
+  const stack = translationStackNow;
+  if (!stack || !stack.holder.isConnected || job.kind !== stack.kind || job.id !== stack.id || !job.template.startsWith("translate:")) return;
+  const page = addTranslation(stack, job.template.slice("translate:".length));
   if (finished) {
     page.progress = null;
     page.error = job.error ?? null;
@@ -350,21 +439,12 @@ async function drawTranslation(page) {
   const { kind, id, holder } = page;
   let data = null;
   try {
-    // With no language of the person's to translate into, they choose one first.
-    data = page.language ? await invoke("get_translation", { kind, id, language: page.language })
-      : { ...(await invoke("get_translation", { kind, id, language: page.languages[0] })), lines: [], missing: 0, advice: null, none: true };
+    data = await invoke("get_translation", { kind, id, language: page.language });
   } catch (e) {
     holder.replaceChildren(el("div", { class: "error" }, String(e)));
     return;
   }
-  if (translationPage !== page) return;
-  // Until a language is picked here, show a translation that has been made rather than an empty one.
-  if (!page.picked) {
-    page.picked = true;
-    const own = page.languages.length === 1 ? page.languages[0] : null;
-    const made = data.missing === data.lines.length && data.available.find((c) => c !== own && c !== page.language);
-    if (made) { page.language = made; return drawTranslation(page); }
-  }
+  if (page.stack.panels.get(page.language) !== page) return;
   page.data = data;
   const queue = await invoke("get_analyses", { kind, id }).then((d) => d.queue).catch(() => ({ current: null, waiting: [] }));
   const job = `translate:${page.language}`;
@@ -375,24 +455,6 @@ async function drawTranslation(page) {
   const translated = total - data.missing;
   const name = languageName(page.language);
 
-  // Which language: the person's first, then every other; those already translated say so.
-  const made = new Set(data.available);
-  const option = (code, label) => el("option", { value: code, selected: code === page.language }, made.has(code) ? `${label} · translated` : label);
-  const mine = translationTargets(page.languages);
-  const others = (languageInfo?.catalogue ?? []).filter((l) => !(languageInfo?.chosen ?? []).includes(l.code));
-  const pick = el("select", { class: "language-picker", "aria-label": "Translate into" },
-    data.none ? el("option", { value: "", selected: true, disabled: true }, "Choose a language") : null,
-    mine.length ? el("optgroup", { label: "Your languages" }, mine.map((c) => option(c, languageName(c)))) : null,
-    others.length ? el("optgroup", { label: "More languages" }, others.map((l) => option(l.code, l.name))) : null);
-  pick.addEventListener("change", () => {
-    if (reading?.button === page.listen) stopReading();
-    page.language = pick.value;
-    page.open = true;
-    page.error = null;
-    try { localStorage.setItem(`translation:${kind}:${id}`, pick.value); } catch {}
-    drawTranslation(page);
-  });
-
   const translate = async () => {
     page.error = null;
     try { await invoke("translate_item", { kind, id, language: page.language }); page.open = true; } catch (e) { page.error = String(e); }
@@ -401,9 +463,7 @@ async function drawTranslation(page) {
   // One thing to do at a time: translate, translate what's new, or wait for it.
   let state = null;
   let action = null;
-  if (data.none) {
-    state = el("span", { class: "hint" }, "Not translated");
-  } else if (busy) {
+  if (busy) {
     state = el("span", { class: "badge busy" }, el("span", { class: "spinner" }), running ? page.progress ?? "Loading the model…" : "Waiting its turn");
     action = el("button", { class: "link", onclick: () => invoke("cancel_analysis", { kind, id, template: job }) }, "Cancel");
   } else if (!translated) {
@@ -419,8 +479,8 @@ async function drawTranslation(page) {
     (format) => invoke("export_translation", { kind, id, language: page.language, format })) : null;
   const toggle = el("button", { class: "icon-only chevron", "aria-expanded": String(page.open), title: page.open ? "Hide the translation" : "Show the translation",
     onclick: () => { page.open = !page.open; drawTranslation(page); } }, svg(page.open ? "down" : "chevron", 16));
-  const head = el("div", { class: "analysis-head translation-head" }, toggle, svg("globe", 16), el("strong", {}, "Translation"),
-    el("span", { class: "translation-into" }, "into"), pick, state, el("span", { class: "grow" }),
+  const head = el("div", { class: "analysis-head translation-head" }, toggle, svg("globe", 16), el("strong", {}, name),
+    el("span", { class: "translation-into" }, "translation"), state, el("span", { class: "grow" }),
     action, translated ? page.listen : null, exporter);
   page.listen.disabled = !translated;
   const parts = [head];
@@ -460,14 +520,17 @@ async function drawTranslation(page) {
         return;
       }
       if (reading?.button === page.listen) stopReading();
-      try { await invoke("delete_translation", { kind, id, language: page.language }); drawTranslation(page); } catch (e) { showError(holder, e); }
+      try {
+        await invoke("delete_translation", { kind, id, language: page.language });
+        page.stack.panels.delete(page.language);
+        holder.remove();
+        refreshAnalyses(); // So Translate offers the language again.
+      } catch (e) { showError(holder, e); }
     });
     parts.push(rows, el("div", { class: "analysis-foot translation-foot" },
       el("span", {}, `Machine translation${data.engine ? ` with ${data.engine}` : ""}. Check it against the original; click a line to correct it.`), remove));
   } else if (page.open && busy) {
     parts.push(el("p", { class: "hint translation-intro" }, `The ${name} translation appears here when it's done. You can keep working meanwhile.`));
-  } else if (page.open && data.none) {
-    parts.push(el("p", { class: "hint translation-intro" }, `Choose a language to make a translated version of this ${kind} to read, correct, export or listen to.`));
   } else if (page.open) {
     parts.push(el("p", { class: "hint translation-intro" },
       `Make a ${name} version of this ${kind} to read, correct, export or listen to. Your analysis model translates it line by line; names and words in your vocabulary stay as they are.`));

@@ -41,8 +41,12 @@ listen("analysed", (e) => {
 
 /// The stack for a meeting or note. `ctx`: { speakers: [names], go(source) }.
 function analysisStack(kind, id, ctx) {
-  const holder = el("section", { class: "analyses", "aria-label": "Analyses" });
-  analysisPage = { kind, id, holder, ctx, errors: new Map() };
+  // The cards, then the translations (ctx.translations), then the bar to add either. The translations
+  // keep their place as the cards are redrawn, so one being read or corrected isn't disturbed.
+  const cards = el("div", { class: "analysis-cards" });
+  const bar = el("div", { class: "analysis-add-holder" });
+  const holder = el("section", { class: "analyses", "aria-label": "Analyses and translations" }, cards, ctx.translations ?? null, bar);
+  analysisPage = { kind, id, holder, cards, bar, ctx, errors: new Map() };
   analysisOrigin = null;
   refreshAnalyses();
   return holder;
@@ -57,7 +61,8 @@ async function refreshAnalyses() {
     page.rendered = true;
     renderAnalyses(page, data);
   } catch (e) {
-    page.holder.replaceChildren();
+    page.cards.replaceChildren();
+    page.bar.replaceChildren();
   }
 }
 
@@ -65,7 +70,7 @@ const isJob = (j, page, template) => j && j.kind === page.kind && j.id === page.
 
 function renderAnalyses(page, data) {
   const { holder } = page;
-  const open = holder.querySelector(".analysis-menu .menu:not([hidden])");
+  const open = holder.querySelector(".analysis-add-holder .menu:not([hidden]), .analysis-cards .analysis-menu .menu:not([hidden])");
   if (open) return; // Don't redraw under an open menu; the next event will.
   const running = (t) => isJob(data.queue.current, page, t);
   const waiting = (t) => data.queue.waiting.some((j) => isJob(j, page, t));
@@ -91,7 +96,8 @@ function renderAnalyses(page, data) {
         el("button", { class: "link", onclick: () => { page.errors.delete(template); runAnalysis(page, template); } }, "Try again"),
         el("button", { class: "link", onclick: () => { page.errors.delete(template); refreshAnalyses(); } }, "Dismiss"))));
   }
-  holder.replaceChildren(...cards, addAnalysis(page, data));
+  page.cards.replaceChildren(...cards);
+  page.bar.replaceChildren(addAnalysis(page, data));
 }
 
 function runAnalysis(page, template) {
@@ -100,17 +106,18 @@ function runAnalysis(page, template) {
 }
 
 /// "Analysis templates": the first time, setting up a model; after that, the person's starred
-/// templates to run, the rest below them, and a cog for the settings.
+/// templates to run, the rest below them. "Translate" sits opposite.
 function addAnalysis(page, data) {
   const used = new Set(data.entries.map((e) => e.key));
   const busy = (t) => data.queue.waiting.some((j) => isJob(j, page, t)) || isJob(data.queue.current, page, t);
   const bar = el("div", { class: "analysis-add" });
   const label = el("span", { class: "with-icon" }, svg("sparkle", 16), "Analysis templates");
   const from = () => { analysisOrigin = { kind: page.kind, id: page.id }; };
-  const settings = el("button", { class: "icon-only", title: "Analysis settings: model and starred templates", "aria-label": "Analysis settings",
-    onclick: () => { from(); showAnalysisSettings(); } }, svg("cog", 16));
   if (!data.ready) {
-    bar.append(el("button", { class: "link add-analysis", onclick: () => { from(); showAnalysisSettings(null, true); } }, label));
+    // Translating needs the analysis model too, so both lead to setting it up.
+    const setUp = () => { from(); showAnalysisSettings(null, true); };
+    bar.append(el("button", { class: "link add-analysis", onclick: setUp }, label), el("span", { class: "grow" }),
+      page.ctx.translations ? el("button", { class: "link add-analysis", onclick: setUp }, el("span", { class: "with-icon" }, svg("globe", 16), "Translate")) : null);
     return bar;
   }
   // data.templates holds only those for this kind of page; a starred one for the other kind is shown, unusable.
@@ -123,7 +130,7 @@ function addAnalysis(page, data) {
   const choices = [...starred.map(choice)];
   if (others.length) choices.push(starred.length ? "More templates" : "Templates", ...others.map(choice));
   choices.push(["Star or edit templates…", null, () => { from(); showTemplates(); }]);
-  bar.append(menuButton(label, choices, "link add-analysis"), settings);
+  bar.append(menuButton(label, choices, "link add-analysis"), el("span", { class: "grow" }), translateMenu(page.kind, page.id));
   return bar;
 }
 
@@ -906,7 +913,7 @@ async function saveReading(change) {
 
 /// A slider from 0.5 to 2 with its value beside it, saved when let go.
 function rateSlider(label, hint, value, save) {
-  const shown = el("span", { class: "value mono" }, speedText(value));
+  const shown = el("span", { class: "value" }, speedText(value));
   const input = el("input", { type: "range", min: "0.5", max: "2", step: "0.05", value: String(value), "aria-label": label });
   input.addEventListener("input", () => { shown.textContent = speedText(Number(input.value)); });
   input.addEventListener("change", () => save(Number(input.value)));

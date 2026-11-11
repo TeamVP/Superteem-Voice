@@ -1,6 +1,6 @@
 "use strict";
 
-/// AI on this device: one page showing everything the models do here and how fast, the one-button flow
+/// Local AI: one page showing everything the models do here and how fast, the one-button flow
 /// that optimises them for this device (languages, then the plan, then downloading and trying it), the
 /// callout at the top of Settings, and the suggestion on the home page once a note and a meeting are made.
 
@@ -61,14 +61,14 @@ async function optimiseNudge() {
   return card;
 }
 
-// ---------- Settings › AI on this device
+// ---------- Settings › Local AI
 
 async function showAiSettings(message) {
   leave();
   showPage();
   view = { kind: "ai-settings" };
   refreshItems();
-  const page = el("div", { class: "page ai-page" }, backLinks("‹ Settings", () => showSettings()), el("h1", {}, `AI on this ${isPhone() ? "phone" : "computer"}`));
+  const page = el("div", { class: "page ai-page" }, backLinks("‹ Settings", () => showSettings()), el("h1", {}, "Local AI"));
   main.replaceChildren(page);
   const data = await optimiseData().catch((e) => { showError(page, e); return null; });
   if (!data) return;
@@ -95,7 +95,7 @@ async function showAiSettings(message) {
   }
 
   // The device.
-  const gpuText = d.gpu ? `${d.gpu}${d.gpu_memory_gb ? `, ${d.gpu_memory_gb.toFixed(0)} GB` : d.integrated ? ", shares the computer's memory" : ""}` : "None that models can use";
+  const gpuText = d.gpu ? `${d.gpu}${d.gpu_memory_gb ? `, ${d.gpu_memory_gb.toFixed(0)} GB` : d.integrated ? ", shares the computer's memory" : ""}` : "None usable";
   page.append(el("h2", {}, "This device"), el("div", { class: "group" },
     infoRow("Graphics processor", d.gpu ? (current.gpu_on ? "Models run on it." : "Turned off: models run on the processor.") : plan.notes.find((n) => n.includes("graphics")) ?? "", gpuText),
     infoRow("Memory", "Decides how large a model runs well.", `${d.ram_gb.toFixed(0)} GB`),
@@ -141,7 +141,7 @@ function infoRow(label, detail, value) {
 /// Where optimising was started from, to go back to: [label, show].
 const OPTIMISE_FROM = {
   settings: ["Settings", () => showSettings()],
-  ai: ["AI on this device", () => showAiSettings()],
+  ai: ["Local AI", () => showAiSettings()],
   home: ["Home", () => showHome()],
 };
 let optimiseFrom = OPTIMISE_FROM.settings;
@@ -161,8 +161,8 @@ async function showOptimise(from) {
     return;
   }
   const page = el("div", { class: "page optimise-page" }, backLinks(`‹ ${optimiseFrom[0]}`, optimiseFrom[1]),
-    el("div", { class: "optimise-step" }, "Step 1 of 2 · Your languages"), el("h1", {}, "Optimise for this device"),
-    el("p", { class: "hint" }, "First, the languages you speak and read in. Voice then picks the speech model, analysis model and voices that work best for them on this device."));
+    el("div", { class: "optimise-step" }, "Step 1 of 2 · Your languages"), el("h1", {}, `Optimise for this ${isPhone() ? "phone" : "computer"}`),
+    el("p", { class: "hint" }, "First, the languages you speak and read in. Voice then picks the speech model, analysis model and voices that work best for them here."));
   const chosen = new Set(info.chosen);
   const list = el("div", { class: "group" });
   const draw = () => {
@@ -174,7 +174,7 @@ async function showOptimise(from) {
     const add = el("select", { "aria-label": "Add a language" }, el("option", { value: "" }, "Add a language…"),
       (info.catalogue ?? []).filter((l) => !chosen.has(l.code)).map((l) => el("option", { value: l.code }, l.native && l.native !== l.name ? `${l.name} · ${l.native}` : l.name)));
     add.addEventListener("change", () => { if (add.value) { chosen.add(add.value); draw(); } });
-    list.append(el("div", { class: "row" }, el("span", { class: "label" }, "Another language"), add));
+    list.append(el("div", { class: "row add-language" }, add));
   };
   draw();
   const next = el("button", { class: "primary pill" }, "Next: see the plan");
@@ -201,7 +201,7 @@ async function showOptimisePlan() {
   view = { kind: "optimise" };
   const page = el("div", { class: "page optimise-page" }, backLinks(`‹ ${optimiseFrom[0]}`, optimiseFrom[1]),
     el("div", { class: "optimise-step" }, "Step 2 of 2 · The plan · ", el("button", { class: "link inline", onclick: () => showOptimise() }, "Change languages")),
-    el("h1", {}, "The plan for this device"));
+    el("h1", {}, `The plan for this ${isPhone() ? "phone" : "computer"}`));
   page.append(el("p", { class: "hint" }, el("span", { class: "spinner" }), " Looking at this device…"));
   main.replaceChildren(page);
   const data = await optimiseData().catch((e) => { showError(page, e); return null; });
