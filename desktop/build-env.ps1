@@ -148,6 +148,14 @@ if ($Android) {
     $ucrt = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' | Where-Object { Test-Path "$($_.FullName)\ucrt\stdio.h" } | Sort-Object Name | Select-Object -Last 1
     if (-not $stdbool -or -not $ucrt) { throw 'Visual Studio C++ tools and the Windows SDK are required' }
     $env:BINDGEN_EXTRA_CLANG_ARGS = "-I`"$(Split-Path $stdbool)`" -I`"$($ucrt.FullName)\ucrt`""
+    # Models run on the graphics processor through Vulkan; llama.cpp's build needs its SDK (headers, the
+    # loader's library and the shader compiler). A shell opened before it was installed doesn't have it set.
+    if (-not $env:VULKAN_SDK) {
+        $vulkan = [Environment]::GetEnvironmentVariable('VULKAN_SDK', 'Machine')
+        if (-not $vulkan) { $vulkan = (Get-ChildItem 'C:\VulkanSDK' -Directory -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1).FullName }
+        if (-not $vulkan) { throw 'The Vulkan SDK is required to build Superteem Voice: winget install KhronosGroup.VulkanSDK' }
+        $env:VULKAN_SDK = $vulkan
+    }
     # whisper.cpp is otherwise built for the build machine's own processor. GitHub's machines have AVX-512,
     # which most PCs (Intel 12th gen and later desktops included) don't, so speech to text crashed the app
     # there with an illegal instruction. AVX2, from 2013 on, runs on practically every Windows PC in use.

@@ -42,7 +42,7 @@ jobs:
         with:
           workspaces: desktop
           # Changed when how whisper.cpp is compiled changes, so an old build of it isn't reused.
-          prefix-key: v2-shared-ggml
+          prefix-key: v3-vulkan
       # Tauri downloads NSIS and its plugin from GitHub release links, which have returned 504 for hours at a
       # time while the same files came through the API. They are fetched that way, with the hashes Tauri
       # 2.12 checks, into the folder Tauri looks in first.
@@ -72,6 +72,20 @@ jobs:
           $additional = Join-Path $nsis 'Plugins\x86-unicode\additional'
           New-Item -ItemType Directory -Force $additional | Out-Null
           Fetch 'tauri-apps/nsis-tauri-utils' 'nsis_tauri_utils-v0.5.3' 'nsis_tauri_utils.dll' '75197FEE3C6A814FE035788D1C34EAD39349B860' (Join-Path $additional 'nsis_tauri_utils.dll')
+      # Models run on the graphics processor through Vulkan, and llama.cpp's build needs its SDK.
+      - name: Install the Vulkan SDK
+        shell: pwsh
+        run: |
+          $version = '1.4.363.0'
+          $installer = Join-Path $env:RUNNER_TEMP 'vulkansdk.exe'
+          curl.exe -sSfL --retry 5 --retry-all-errors "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe" -o $installer
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download the Vulkan SDK' }
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+          if ($hash -ne '94A82D378F7A5E3E54C9DB7D2FB7016AF136E14AC0A18DBF0F2F67A36352D141') { throw "The Vulkan SDK has hash $hash" }
+          $root = "C:\VulkanSDK\$version"
+          Start-Process $installer -ArgumentList '--root', $root, '--accept-licenses', '--default-answer', '--confirm-command', 'install' -Wait
+          if (-not (Test-Path "$root\Libulkan-1.lib")) { throw 'The Vulkan SDK did not install' }
+          "VULKAN_SDK=$root" >> $env:GITHUB_ENV
       - name: Build the installer
         shell: pwsh
         run: |
@@ -91,6 +105,7 @@ jobs:
           foreach ($c in $cache) {
             $text = Get-Content $c.FullName -Raw
             if ($text -notmatch 'GGML_NATIVE:BOOL=OFF' -or $text -notmatch 'GGML_AVX512:BOOL=OFF') { throw "ggml was built for this machine's processor: $($c.FullName)" }
+            if ($text -notmatch 'GGML_VULKAN:BOOL=ON') { throw "ggml was built without the graphics processor: $($c.FullName)" }
           }
           $whisper = Get-ChildItem desktop/target/release/build -Recurse -Filter CMakeCache.txt | Where-Object { $_.FullName -match 'whisper-rs-sys' }
           foreach ($c in $whisper) {
@@ -120,7 +135,7 @@ jobs:
         with:
           workspaces: desktop
           # Changed when how whisper.cpp is compiled changes, so an old build of it isn't reused.
-          prefix-key: v2-shared-ggml
+          prefix-key: v3-vulkan
       - run: rustup target add aarch64-linux-android
       # services.gradle.org sends the Gradle download on to a GitHub release link, which has returned 504 for
       # hours at a time. The same file comes through the API, is checked against the checksum pinned in

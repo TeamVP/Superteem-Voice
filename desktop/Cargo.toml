@@ -73,3 +73,7 @@ opt-level = 2
 # The sandbox analyses run their model in (an AppContainer); see isolate.rs.
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Isolation", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
 sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }
+# Language and speech models on the graphics processor through Vulkan, which NVIDIA, AMD and Intel drivers
+# all provide. Building needs the Vulkan SDK (build-env.ps1). The Vulkan loader is loaded only when first
+# used, so the app still starts, and runs on the processor, on a PC without it (gpu.rs).
+llama-cpp-2 = { version = "=0.1.161", default-features = false, features = ["vulkan"] }

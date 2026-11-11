@@ -4,6 +4,8 @@ fn main() {
     let windows = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
     if windows && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         println!("cargo:rustc-link-arg=/DELAYLOAD:sherpa-onnx-c-api.dll");
+        // Likewise the Vulkan loader, which graphics drivers install: without it, models run on the processor.
+        println!("cargo:rustc-link-arg=/DELAYLOAD:vulkan-1.dll");
         println!("cargo:rustc-link-arg=delayimp.lib");
     }
     tauri_build::build()

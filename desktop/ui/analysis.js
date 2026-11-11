@@ -492,12 +492,12 @@ async function showAnalysisSettings(message, setup = false) {
   page.append(el("p", { class: "hint" }, `This ${isPhone() ? "phone" : "computer"} has ${device.ram_gb.toFixed(0)} GB of memory, so models read up to ${device.context.toLocaleString()} tokens at a time${device.too_small ? ". That's too little to run a model well here; a local server (below) can do it instead." : "."}`));
 
   page.append(el("div", { class: "group" }, device.gpu
-    ? toggleRow("Use the graphics processor", `${device.gpu}. Summaries are made several times faster there.`, status.use_gpu, async (on) => {
+    ? toggleRow("Use the graphics processor", `${device.gpu}. Summaries, translations${platform === "windows" ? " and transcripts" : ""} are made several times faster there.`, status.use_gpu, async (on) => {
       await invoke("save_voice_settings", { useGpu: on });
     })
     : el("div", { class: "row" }, el("span", { class: "label" }, "Graphics processor",
       el("small", {}, isDesktop() && platform === "windows"
-        ? "Models run on the processor on Windows for now. Graphics processor support is coming."
+        ? "None found that models can use, so they run on the processor. Updating the graphics driver can help."
         : "None that models can use here, so they run on the processor.")), el("span", { class: "value" }, "Processor"))));
   const installed = new Map(status.installed.map((i) => [i.file, i]));
   const group = el("div", { class: "group" });
@@ -687,7 +687,9 @@ let reading = null;
 
 /// A button that reads aloud what `text()` returns, and stops when pressed again.
 /// `lang`: the language code what's read is in, or a function giving it; unset for the main voice.
-function readAloudButton(text, what = "Read aloud", { label, lang } = {}) {
+/// `pieces()`, instead of text, gives the pieces to say already split (see speechPieces), and `onPiece` is
+/// told each as it's said, then null when reading ends.
+function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPiece } = {}) {
   const button = label
     ? el("button", { class: "pill with-icon read-aloud", type: "button", title: what, "aria-pressed": "false" }, svg("play", 14), label)
     : el("button", { class: "icon-only read-aloud", type: "button", title: what, "aria-label": what, "aria-pressed": "false" }, svg("speak", 16));
@@ -697,7 +699,7 @@ function readAloudButton(text, what = "Read aloud", { label, lang } = {}) {
   button.addEventListener("click", () => {
     if (reading?.button === button) return stopReading();
     stopReading();
-    readAloud(button, text(), typeof lang === "function" ? lang() : lang);
+    readAloud(button, pieces ? null : text(), typeof lang === "function" ? lang() : lang, { pieces: pieces?.(), onPiece });
   });
   return button;
 }
@@ -749,13 +751,13 @@ function pause(ms, mine) {
 /// Says the text a sentence at a time, with a pause after each and longer ones around headings and between
 /// paragraphs. Short pieces also keep long text going where a voice gives up after a while, and let it stop
 /// between them.
-async function readAloud(button, text, lang) {
-  const pieces = speechPieces(text);
+async function readAloud(button, text, lang, { pieces: given, onPiece } = {}) {
+  const pieces = given ?? speechPieces(text);
   if (!pieces.length) return;
   // The gap between two pieces: the longer of what the first wants after it and the next before it, shorter
   // when reading faster.
   const gap = (i) => (i + 1 < pieces.length ? Math.max(pieces[i].after, pieces[i + 1].before) : 0) / (prefs.read_speed ?? 1);
-  const mine = { button, cancelled: false };
+  const mine = { button, cancelled: false, onPiece };
   reading = mine;
   button.classList.add("on");
   button.setAttribute("aria-pressed", "true");
@@ -773,11 +775,13 @@ async function readAloud(button, text, lang) {
         const wav = await next;
         if (i + 1 < pieces.length) next = invoke("natural_speak", { text: pieces[i + 1].text, voice: voice.id });
         if (mine.cancelled) break;
+        onPiece?.(pieces[i], voice);
         await playWav(wav, mine);
         await pause(gap(i), mine);
       }
     } else {
       for (let i = 0; i < pieces.length && !mine.cancelled; i++) {
+        onPiece?.(pieces[i], null);
         await say(pieces[i].text, lang);
         await pause(gap(i), mine);
       }
@@ -786,6 +790,8 @@ async function readAloud(button, text, lang) {
     showError(button.closest(".page") ?? main, e);
   }
   if (reading === mine) reading = null;
+  // Unless reading started again from elsewhere in the same place, which now says where it is.
+  if (reading?.onPiece !== onPiece) onPiece?.(null);
   button.classList.remove("on");
   button.setAttribute("aria-pressed", "false");
   button.title = "Read aloud";

@@ -373,7 +373,16 @@ impl Transcriber {
     pub fn load(m: &'static SpeechModel) -> Result<Self, String> {
         let path = path_of(m);
         let path = path.to_str().ok_or("The model path is not valid text.")?;
-        let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default()).map_err(|e| e.to_string())?;
+        crate::gpu::prepare();
+        // On a PC's graphics processor when there is one and the person hasn't turned it off; on the
+        // processor if it can't be used. (Not yet tried on the Mac's.)
+        let gpu = cfg!(windows) && crate::prefs::load().use_gpu.unwrap_or(true) && crate::llm::device().gpu.is_some();
+        let with = |gpu: bool| {
+            let mut params = WhisperContextParameters::default();
+            params.use_gpu(gpu);
+            WhisperContext::new_with_params(path, params)
+        };
+        let ctx = if gpu { with(true).or_else(|_| with(false)) } else { with(false) }.map_err(|e| e.to_string())?;
         Ok(Self { ctx, model: m.id, multilingual: m.multilingual })
     }
 

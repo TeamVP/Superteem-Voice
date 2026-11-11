@@ -10,6 +10,8 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{LlamaChatMessage, LlamaChatTemplate, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
+use llama_cpp_2::token::data::LlamaTokenData;
+use llama_cpp_2::token::data_array::LlamaTokenDataArray;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -272,6 +274,7 @@ fn backend() -> Result<&'static LlamaBackend, String> {
     if let Some(b) = BACKEND.get() {
         return Ok(b);
     }
+    crate::gpu::prepare();
     let mut b = LlamaBackend::init().map_err(|e| e.to_string())?;
     if std::env::var_os("STV_LLAMA_LOG").is_none() {
         b.void_logs();
@@ -305,10 +308,15 @@ impl Local {
     /// `gpu`: every layer on the graphics processor when there is one.
     pub fn load(path: &Path, ctx_tokens: u32, threads: i32, gpu: bool, cancel: Arc<AtomicBool>) -> Result<Self, String> {
         let backend = backend()?;
-        let layers = if gpu { 999 } else { 0 };
-        let params = LlamaModelParams::default().with_n_gpu_layers(layers);
-        let model = LlamaModel::load_from_file(backend, path, &params)
-            .map_err(|e| format!("Couldn't load {}: {e}", path.display()))?;
+        let on_processor = || LlamaModel::load_from_file(backend, path, &LlamaModelParams::default().with_n_gpu_layers(0));
+        // When the graphics processor can't take it (too little memory on it, a driver that fails), the
+        // processor runs it instead.
+        let model = if gpu {
+            LlamaModel::load_from_file(backend, path, &LlamaModelParams::default().with_n_gpu_layers(999)).or_else(|_| on_processor())
+        } else {
+            on_processor()
+        }
+        .map_err(|e| format!("Couldn't load {}: {e}", path.display()))?;
         let template = model.chat_template(None).map_err(|e| format!("The model has no chat template: {e}"))?;
         let ctx_tokens = ctx_tokens.min(model.n_ctx_train().max(512));
         let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -377,9 +385,8 @@ impl Model for Local {
         }
         let prompt_s = started.elapsed().as_secs_f64();
 
-        let grammar = LlamaSampler::grammar(&self.model, grammar, "root").map_err(|e| format!("Bad grammar: {e}"))?;
-        let mut sampler =
-            LlamaSampler::chain_simple([grammar, LlamaSampler::temp(0.2), LlamaSampler::top_p(0.9, 1), LlamaSampler::dist(self.seed)]);
+        let mut grammar = LlamaSampler::grammar(&self.model, grammar, "root").map_err(|e| format!("Bad grammar: {e}"))?;
+        let mut sampler = LlamaSampler::chain_simple([LlamaSampler::temp(0.2), LlamaSampler::top_p(0.9, 1), LlamaSampler::dist(self.seed)]);
         let generating = Instant::now();
         let mut out = Vec::new();
         let mut pos = tokens.len() as i32;
@@ -389,7 +396,23 @@ impl Model for Local {
             if self.cancel.load(Ordering::Relaxed) {
                 return Err("Cancelled.".into());
             }
-            let token = sampler.sample(&ctx, index);
+            // Checking every token in the vocabulary against the grammar each time is slow, slower than the
+            // graphics processor makes the model. So the token is picked first and checked alone; only when
+            // the grammar rejects it is the pick made again from the tokens the grammar allows, as
+            // llama.cpp's own tools do.
+            let mut picked = ctx.token_data_array_ith(index);
+            sampler.apply(&mut picked);
+            let mut token = picked.selected_token().ok_or("The model picked no token.")?;
+            let mut alone = LlamaTokenDataArray::new(vec![LlamaTokenData::new(token, 1.0, 0.0)], false);
+            grammar.apply(&mut alone);
+            if alone.data[0].logit() == f32::NEG_INFINITY {
+                let mut allowed = ctx.token_data_array_ith(index);
+                grammar.apply(&mut allowed);
+                sampler.apply(&mut allowed);
+                token = allowed.selected_token().ok_or("The grammar allows no token here.")?;
+            }
+            grammar.accept(token);
+            sampler.accept(token);
             if vocab.is_eog(token) {
                 break;
             }
@@ -403,6 +426,7 @@ impl Model for Local {
         }
         let stats = Stats { prompt_tokens: tokens.len(), output_tokens: produced, prompt_s, output_s: generating.elapsed().as_secs_f64() };
         drop(sampler);
+        drop(grammar);
         drop(ctx);
         self.stats.push(stats);
         String::from_utf8(out).map_err(|e| e.to_string())

@@ -5,6 +5,7 @@ pub mod analysis;
 pub mod capture;
 pub mod dictation;
 pub mod exports;
+pub mod gpu;
 pub mod imports;
 pub mod keyphrases;
 pub mod library;

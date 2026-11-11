@@ -241,21 +241,95 @@ async function languagesSummary() {
 
 // ---------- Translations
 
-/// The translation panel on the page now: { kind, id, holder, language, original, render }.
+/// The translation panel on the page now (see translationPanel).
 let translationPage = null;
 
-/// A section showing a meeting's or note's translation into one of the person's languages, line by line,
-/// each correctable, with the original beside it. `languages` are the item's; `ctx.go(line)` jumps to a
-/// line in the original.
+/// The languages an item can be translated into: the person's, except the one it's all in.
+const translationTargets = (languages) => (languageInfo?.chosen ?? []).filter((c) => !(languages.length === 1 && languages[0] === c));
+
+/// A section showing a meeting's or note's translation into another language, line by line, each
+/// correctable, with the original under it, and a Listen button that reads the translation aloud.
+/// `languages` are the item's, main one first; `ctx.go(line)` jumps to a line in the original.
 function translationPanel(kind, id, languages, ctx = {}) {
   const holder = el("section", { class: "translation", "aria-label": "Translation" });
-  const targets = () => (languageInfo?.chosen ?? []).filter((c) => !(languages.length === 1 && languages[0] === c));
   const remembered = (() => { try { return localStorage.getItem(`translation:${kind}:${id}`); } catch { return null; } })();
-  const page = { kind, id, holder, languages, ctx, open: !!remembered, language: remembered || (languageInfo?.translate_into ?? []).find((c) => targets().includes(c)) || targets()[0] };
+  const targets = translationTargets(languages);
+  const page = { kind, id, holder, languages, ctx, open: !!remembered, picked: !!remembered, data: null, reading: null,
+    language: remembered || (languageInfo?.translate_into ?? []).find((c) => targets.includes(c)) || targets[0] || null };
+  // Made once, so it keeps reading and saying Stop while the panel is redrawn around it.
+  page.follow = (piece, voice) => followReading(page, piece, voice);
+  page.listen = readAloudButton(null, "Listen to the translation", { label: "Listen", lang: () => page.language, pieces: () => translationSpeech(page), onPiece: page.follow });
+  page.listen.classList.add("translation-listen");
+  page.status = el("div", { class: "translation-reading", role: "status", "aria-live": "polite", hidden: true });
   translationPage = page;
-  if (!page.language) return null;
   drawTranslation(page);
   return holder;
+}
+
+/// The translation as pieces to read aloud, from line `from` on, each knowing its line. In a meeting, who
+/// is speaking is said when it changes, as the transcript does.
+function translationSpeech(page, from = 0) {
+  const lines = page.data?.lines ?? [];
+  const names = page.kind === "meeting" && (prefs.read_speakers ?? true);
+  const pieces = [];
+  let previous = null;
+  lines.slice(from).forEach((line) => {
+    if (!line.text) return;
+    const who = names && line.speaker && line.speaker !== previous ? `${line.speaker}: ` : "";
+    previous = line.speaker;
+    for (const piece of speechPieces(who + line.text)) pieces.push({ ...piece, line: line.id });
+  });
+  return pieces;
+}
+
+/// Reads aloud from one line of the translation to the end.
+function listenFrom(page, index) {
+  stopReading();
+  readAloud(page.listen, null, page.language, { pieces: translationSpeech(page, index), onPiece: page.follow });
+}
+
+/// Follows reading aloud: marks the line being read and says which, and in what voice.
+function followReading(page, piece, voice) {
+  page.reading = piece ? { line: piece.line, voice } : null;
+  page.holder.querySelectorAll(".translation-line.speaking").forEach((n) => n.classList.remove("speaking"));
+  drawReadingStatus(page);
+  if (!piece) return;
+  if (!page.open) {
+    // The lines are shown, so the one being read can be followed; drawing marks it.
+    page.open = true;
+    drawTranslation(page);
+    return;
+  }
+  markSpeaking(page);
+}
+
+function markSpeaking(page) {
+  if (!page.reading) return;
+  const node = page.holder.querySelector(`.translation-line[data-line="${CSS.escape(page.reading.line)}"]`);
+  if (!node) return;
+  node.classList.add("speaking");
+  node.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+/// "Reading line 4 of 30 in Spanish · Alba", and a warning when nothing on this device speaks the language.
+function drawReadingStatus(page) {
+  const { status, reading, data } = page;
+  if (!reading || !data) { status.hidden = true; status.replaceChildren(); return; }
+  const spoken = data.lines.filter((l) => l.text);
+  const n = spoken.findIndex((l) => l.id === reading.line) + 1;
+  const name = languageName(page.language);
+  const voice = reading.voice ? reading.voice.name : "this device's voice";
+  const parts = [el("span", { class: "translation-reading-dot", "aria-hidden": "true" }),
+    el("span", {}, `Reading line ${n} of ${spoken.length} in ${name} · ${voice}`)];
+  // The system's voices: with none for the language, it would be read in another language's accent.
+  const base = languageTag(page.language).toLowerCase().split("-")[0];
+  const systemVoices = window.speechSynthesis?.getVoices?.() ?? [];
+  if (!reading.voice && platform !== "android" && systemVoices.length && !systemVoices.some((v) => v.lang.toLowerCase().startsWith(base))) {
+    parts.push(el("small", { class: "translation-reading-warning" },
+      `This device has no ${name} voice, so it may sound wrong. Add one in ${platform === "windows" ? "Windows Settings › Time & language › Speech" : "the system's speech settings"}.`));
+  }
+  status.replaceChildren(...parts);
+  status.hidden = false;
 }
 
 /// Called by the job events: redraws the panel when its translation moves on or finishes.
@@ -267,7 +341,7 @@ function refreshTranslation(job, finished) {
     page.error = job.error ?? null;
     page.open = true;
   } else {
-    page.progress = job.parts > 1 ? `Translating: part ${job.part} of ${job.parts}…` : "Translating…";
+    page.progress = job.parts > 1 ? `Translating part ${job.part} of ${job.parts}…` : "Translating…";
   }
   drawTranslation(page);
 }
@@ -276,67 +350,127 @@ async function drawTranslation(page) {
   const { kind, id, holder } = page;
   let data = null;
   try {
-    data = await invoke("get_translation", { kind, id, language: page.language });
+    // With no language of the person's to translate into, they choose one first.
+    data = page.language ? await invoke("get_translation", { kind, id, language: page.language })
+      : { ...(await invoke("get_translation", { kind, id, language: page.languages[0] })), lines: [], missing: 0, advice: null, none: true };
   } catch (e) {
     holder.replaceChildren(el("div", { class: "error" }, String(e)));
     return;
   }
   if (translationPage !== page) return;
+  // Until a language is picked here, show a translation that has been made rather than an empty one.
+  if (!page.picked) {
+    page.picked = true;
+    const own = page.languages.length === 1 ? page.languages[0] : null;
+    const made = data.missing === data.lines.length && data.available.find((c) => c !== own && c !== page.language);
+    if (made) { page.language = made; return drawTranslation(page); }
+  }
+  page.data = data;
   const queue = await invoke("get_analyses", { kind, id }).then((d) => d.queue).catch(() => ({ current: null, waiting: [] }));
   const job = `translate:${page.language}`;
   const running = queue.current?.kind === kind && queue.current?.id === id && queue.current?.template === job;
   const waiting = queue.waiting.some((j) => j.kind === kind && j.id === id && j.template === job);
-  const translated = data.lines.length - data.missing;
+  const busy = running || waiting;
+  const total = data.lines.length;
+  const translated = total - data.missing;
+  const name = languageName(page.language);
+
+  // Which language: the person's first, then every other; those already translated say so.
+  const made = new Set(data.available);
+  const option = (code, label) => el("option", { value: code, selected: code === page.language }, made.has(code) ? `${label} · translated` : label);
+  const mine = translationTargets(page.languages);
+  const others = (languageInfo?.catalogue ?? []).filter((l) => !(languageInfo?.chosen ?? []).includes(l.code));
   const pick = el("select", { class: "language-picker", "aria-label": "Translate into" },
-    (languageInfo?.chosen ?? []).map((c) => el("option", { value: c, selected: c === page.language }, languageName(c))),
-    el("optgroup", { label: "More languages" }, (languageInfo?.catalogue ?? []).filter((l) => !(languageInfo?.chosen ?? []).includes(l.code))
-      .map((l) => el("option", { value: l.code, selected: l.code === page.language }, l.name))));
+    data.none ? el("option", { value: "", selected: true, disabled: true }, "Choose a language") : null,
+    mine.length ? el("optgroup", { label: "Your languages" }, mine.map((c) => option(c, languageName(c)))) : null,
+    others.length ? el("optgroup", { label: "More languages" }, others.map((l) => option(l.code, l.name))) : null);
   pick.addEventListener("change", () => {
+    if (reading?.button === page.listen) stopReading();
     page.language = pick.value;
     page.open = true;
+    page.error = null;
     try { localStorage.setItem(`translation:${kind}:${id}`, pick.value); } catch {}
     drawTranslation(page);
   });
-  const go = el("button", { class: "pill", disabled: running || waiting }, data.missing === data.lines.length ? "Translate" : data.missing ? `Translate ${data.missing} new line${data.missing > 1 ? "s" : ""}` : "Up to date");
-  if (!data.missing) go.disabled = true;
-  go.addEventListener("click", async () => {
+
+  const translate = async () => {
     page.error = null;
-    try { await invoke("translate_item", { kind, id, language: page.language }); page.progress = "Waiting its turn"; drawTranslation(page); } catch (e) { page.error = String(e); drawTranslation(page); }
-  });
-  const cancel = el("button", { class: "link", onclick: () => invoke("cancel_analysis", { kind, id, template: job }) }, "Cancel");
-  const exporter = exportMenu([["txt", "Translation as text", ".txt"], ["md", "Translation as Markdown", ".md"]],
-    (format) => invoke("export_translation", { kind, id, language: page.language, format }));
-  const toggle = el("button", { class: "icon-only chevron", "aria-expanded": String(page.open), title: page.open ? "Hide" : "Show",
+    try { await invoke("translate_item", { kind, id, language: page.language }); page.open = true; } catch (e) { page.error = String(e); }
+    drawTranslation(page);
+  };
+  // One thing to do at a time: translate, translate what's new, or wait for it.
+  let state = null;
+  let action = null;
+  if (data.none) {
+    state = el("span", { class: "hint" }, "Not translated");
+  } else if (busy) {
+    state = el("span", { class: "badge busy" }, el("span", { class: "spinner" }), running ? page.progress ?? "Loading the model…" : "Waiting its turn");
+    action = el("button", { class: "link", onclick: () => invoke("cancel_analysis", { kind, id, template: job }) }, "Cancel");
+  } else if (!translated) {
+    state = el("span", { class: "hint" }, "Not translated yet");
+    action = el("button", { class: "primary pill", onclick: translate }, "Translate");
+  } else if (data.missing) {
+    state = el("span", { class: "hint" }, `${translated} of ${total} lines`);
+    action = el("button", { class: "pill", title: "Lines added or changed since it was translated", onclick: translate }, `Translate ${data.missing} new line${data.missing > 1 ? "s" : ""}`);
+  } else {
+    state = el("span", { class: "badge ok" }, svg("check", 12), "Up to date");
+  }
+  const exporter = translated ? exportMenu([["txt", "Translation as text", ".txt"], ["md", "Translation as Markdown", ".md"]],
+    (format) => invoke("export_translation", { kind, id, language: page.language, format })) : null;
+  const toggle = el("button", { class: "icon-only chevron", "aria-expanded": String(page.open), title: page.open ? "Hide the translation" : "Show the translation",
     onclick: () => { page.open = !page.open; drawTranslation(page); } }, svg(page.open ? "down" : "chevron", 16));
-  const head = el("div", { class: "analysis-head translation-head" }, toggle, svg("globe", 16), el("strong", {}, "Translation"), pick,
-    running || waiting ? el("span", { class: "badge busy" }, el("span", { class: "spinner" }), running ? page.progress ?? "Loading the model…" : "Waiting its turn") : null,
-    !running && !waiting && translated ? el("span", { class: "hint" }, data.missing ? `${translated} of ${data.lines.length} lines` : "") : null,
-    el("span", { class: "grow" }), running || waiting ? cancel : go, translated ? exporter : null);
+  const head = el("div", { class: "analysis-head translation-head" }, toggle, svg("globe", 16), el("strong", {}, "Translation"),
+    el("span", { class: "translation-into" }, "into"), pick, state, el("span", { class: "grow" }),
+    action, translated ? page.listen : null, exporter);
+  page.listen.disabled = !translated;
   const parts = [head];
-  if (translated) parts.push(exporter.status);
+  if (exporter) parts.push(exporter.status);
+  parts.push(page.status);
   if (page.error) parts.push(el("p", { class: "danger" }, page.error));
   if (data.advice) parts.push(el("p", { class: "hint" }, data.advice, " ", el("button", { class: "link inline", onclick: () => { analysisOrigin = { kind, id }; showAnalysisSettings(); } }, "Analysis settings")));
+
   if (page.open && translated) {
     const rows = el("div", { class: "translation-lines" });
-    for (const line of data.lines) {
+    data.lines.forEach((line, index) => {
       const text = line.text ? editable(line.text, async (value) => {
         try { await invoke("edit_translation", { kind, id, language: page.language, line: line.id, text: value }); drawTranslation(page); } catch (e) { showError(holder, e); }
       }, "div") : el("div", { class: "hint" }, "Not translated yet");
       setLanguage([text], page.language);
-      const original = el("div", { class: "translation-original" }, line.original);
+      const original = line.same ? null : el("div", { class: "translation-original" }, line.original);
       setLanguage([original], page.languages[0]);
-      const label = line.at_s != null ? el("button", { class: "link mono", title: "Go to this line", onclick: () => page.ctx.go?.(line) }, clock(line.at_s)) : null;
+      const time = line.at_s != null ? el("button", { class: "link mono", title: "Go to this line in the transcript", onclick: () => page.ctx.go?.(line) }, clock(line.at_s)) : null;
       const flags = [];
       if (line.edited) flags.push(el("span", { class: "badge", title: "Corrected by you; translating again keeps it. Clear the text to go back to the machine translation." }, "Corrected"));
       if (line.original_changed) flags.push(el("span", { class: "badge stale", title: "The original line changed after you corrected this" }, "Original changed"));
       if (line.warning) flags.push(el("span", { class: "badge stale", title: line.warning }, "Check"));
-      rows.append(el("div", { class: `translation-line${line.same ? " same" : ""}` },
-        line.speaker || label ? el("div", { class: "translation-who" }, label, line.speaker ? el("strong", {}, line.speaker) : null, ...flags) : flags.length ? el("div", { class: "translation-who" }, ...flags) : null,
-        text, line.same ? null : original));
-    }
-    parts.push(rows, el("p", { class: "analysis-foot" }, `Machine translation${data.engine ? ` with ${data.engine}` : ""}. Check it against the original. Click a line to correct it.`));
-  } else if (page.open && !running && !waiting) {
-    parts.push(el("p", { class: "hint" }, `Translate this ${kind} into ${languageName(page.language)} with the analysis language model, line by line. Lines already in ${languageName(page.language)} are kept as they are.`));
+      const who = time || line.speaker || flags.length ? el("div", { class: "translation-who" }, time, line.speaker ? el("strong", {}, line.speaker) : null, ...flags) : null;
+      const here = line.text ? el("button", { class: "icon-only listen-here", type: "button", title: "Listen from here", "aria-label": "Listen from here",
+        onmousedown: (e) => e.preventDefault(), onclick: () => listenFrom(page, index) }, svg("play", 14)) : null;
+      rows.append(el("div", { class: `translation-line${line.same ? " same" : ""}`, "data-line": line.id },
+        el("div", { class: "translation-content" }, who, text, original), here));
+    });
+    const remove = el("button", { class: "link danger", type: "button" }, "Delete this translation");
+    remove.addEventListener("click", async () => {
+      if (!remove.dataset.sure) {
+        remove.dataset.sure = "1";
+        remove.textContent = `Delete the ${name} translation and your corrections? Click again to delete.`;
+        setTimeout(() => { if (remove.isConnected) { delete remove.dataset.sure; remove.textContent = "Delete this translation"; } }, 5000);
+        return;
+      }
+      if (reading?.button === page.listen) stopReading();
+      try { await invoke("delete_translation", { kind, id, language: page.language }); drawTranslation(page); } catch (e) { showError(holder, e); }
+    });
+    parts.push(rows, el("div", { class: "analysis-foot translation-foot" },
+      el("span", {}, `Machine translation${data.engine ? ` with ${data.engine}` : ""}. Check it against the original; click a line to correct it.`), remove));
+  } else if (page.open && busy) {
+    parts.push(el("p", { class: "hint translation-intro" }, `The ${name} translation appears here when it's done. You can keep working meanwhile.`));
+  } else if (page.open && data.none) {
+    parts.push(el("p", { class: "hint translation-intro" }, `Choose a language to make a translated version of this ${kind} to read, correct, export or listen to.`));
+  } else if (page.open) {
+    parts.push(el("p", { class: "hint translation-intro" },
+      `Make a ${name} version of this ${kind} to read, correct, export or listen to. Your analysis model translates it line by line; names and words in your vocabulary stay as they are.`));
   }
   holder.replaceChildren(...parts);
+  drawReadingStatus(page);
+  markSpeaking(page);
 }
