@@ -2339,8 +2339,13 @@ function renderSession(session, processingError, suggestion) {
       }
       timeLabel.textContent = `${clock(t)} / ${clock(duration)}`;
       if (meta.created) timeLabel.title = `${dayClock(meta.created + t)} by the time of day`;
-      playButton.replaceChildren(svg(playing ? "pause" : "play", 18));
-      playButton.setAttribute("aria-label", playing ? "Pause" : "Play");
+      // Only when it changes: swapping the icon on every tick removes the element a click pressed
+      // down on, and WebView2 then drops the click, so Pause wouldn't work while playing.
+      if (playButton.dataset.playing !== String(playing)) {
+        playButton.dataset.playing = String(playing);
+        playButton.replaceChildren(svg(playing ? "pause" : "play", 18));
+        playButton.setAttribute("aria-label", playing ? "Pause" : "Play");
+      }
       for (const { seg, line } of lineEls) line.classList.toggle("playing", playing && t >= seg.start_s && t < seg.end_s);
       applyMix(t);
     };
