@@ -154,7 +154,12 @@ async function showOptimise(from) {
   showPage();
   view = { kind: "optimise" };
   refreshItems();
-  const info = await languageData(true);
+  // Straight from the app, not the stand-in used when it can't be read, so saving can't drop a language.
+  let info;
+  try { info = await invoke("get_languages"); languageInfo = info; } catch (e) {
+    main.replaceChildren(el("div", { class: "page" }, backLinks(`‹ ${optimiseFrom[0]}`, optimiseFrom[1]), el("div", { class: "error" }, `Your languages couldn't be read: ${e}`)));
+    return;
+  }
   const page = el("div", { class: "page optimise-page" }, backLinks(`‹ ${optimiseFrom[0]}`, optimiseFrom[1]),
     el("div", { class: "optimise-step" }, "Step 1 of 2 · Your languages"), el("h1", {}, "Optimise for this device"),
     el("p", { class: "hint" }, "First, the languages you speak and read in. Voice then picks the speech model, analysis model and voices that work best for them on this device."));
@@ -176,7 +181,9 @@ async function showOptimise(from) {
   next.addEventListener("click", async () => {
     next.disabled = true;
     try {
-      await invoke("save_languages", { languages: [...chosen], primary: info.primary });
+      // Saved only when changed here.
+      const same = chosen.size === info.chosen.length && info.chosen.every((c) => chosen.has(c));
+      if (!same) await invoke("save_languages", { languages: [...chosen], primary: info.primary });
       await languageData(true);
       showOptimisePlan();
     } catch (e) {
