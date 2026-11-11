@@ -3991,25 +3991,54 @@ function stepBackSoon() {
 /// Counts utterances, so one cut short by the next doesn't unmute the microphone while the next is spoken.
 let speechCount = 0;
 
-/// Says `text` aloud. Resolves once it has been said, or at once when nothing is said.
+/// What the app is saying now, so the next reply or a stop can cut it short: { source } while a natural
+/// voice's audio plays.
+let speechPlaying = null;
+
+/// Stops whatever the app is saying.
+function stopSpeech() {
+  window.speechSynthesis?.cancel();
+  try { speechPlaying?.source?.stop(); } catch {}
+  speechPlaying = null;
+}
+
+/// Says `text` aloud in the voice chosen for reading aloud: the natural voice when one reads the main
+/// language, else the system's voice chosen in Settings at its speed and pitch. Resolves once it has been
+/// said, or at once when nothing is said.
 function speak(text) {
   // The app's voice would be on the recording, so in a meeting it answers on screen only.
-  if (prefs.quiet || !window.speechSynthesis || recording) return Promise.resolve();
-  speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text.replace(/[“”]/g, ""));
+  if (prefs.quiet || recording) return Promise.resolve();
+  stopSpeech();
   const mine = ++speechCount;
   speaking = true;
   invoke("listen_mute", { muted: true }).catch(() => {});
-  return new Promise((resolve) => {
-    utterance.onend = utterance.onerror = () => setTimeout(() => {
-      if (mine === speechCount) {
-        speaking = false;
-        invoke("listen_mute", { muted: false }).catch(() => {});
-      }
-      resolve();
-    }, 300);
-    speechSynthesis.speak(utterance);
-  });
+  const finished = () => new Promise((resolve) => setTimeout(() => {
+    if (mine === speechCount) {
+      speaking = false;
+      invoke("listen_mute", { muted: false }).catch(() => {});
+    }
+    resolve();
+  }, 300));
+  return speakInChosenVoice(text.replace(/[“”]/g, ""), mine).catch(() => {}).then(finished);
+}
+
+async function speakInChosenVoice(text, mine) {
+  const main = languageInfo?.primary ?? "en";
+  const voice = isDesktop() ? await invoke("reading_voice", { language: main }).catch(() => null) : null;
+  if (mine !== speechCount) return;
+  if (voice) {
+    try {
+      const wav = await invoke("natural_speak", { text, voice: voice.id });
+      if (mine !== speechCount) return;
+      const playing = {};
+      speechPlaying = playing;
+      return await playWav(wav, playing);
+    } catch {
+      // The natural voice couldn't say it (its files missing, say): the system's voice does.
+      if (mine !== speechCount) return;
+    }
+  }
+  return systemSay(text, main);
 }
 
 /// While the panel waits for an answer everything said is transcribed; otherwise only what follows "Hey Superteem".
@@ -4101,7 +4130,7 @@ function closeAgent(byUser = false) {
   clearInterval(agent.levelTimer);
   clearTimeout(agent.quietTimer);
   // The last reply ("Opening settings.") is said to the end, unless the person closed the panel.
-  if (byUser) speechSynthesis?.cancel();
+  if (byUser) stopSpeech();
   endDialogue();
   syncAttentive();
   if (agent.forcedWake) {

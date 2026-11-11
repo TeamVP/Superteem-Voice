@@ -782,7 +782,7 @@ async function readAloud(button, text, lang, { pieces: given, onPiece } = {}) {
     } else {
       for (let i = 0; i < pieces.length && !mine.cancelled; i++) {
         onPiece?.(pieces[i], null);
-        await say(pieces[i].text, lang);
+        await systemSay(pieces[i].text, lang);
         await pause(gap(i), mine);
       }
     }
@@ -799,7 +799,9 @@ async function readAloud(button, text, lang, { pieces: given, onPiece } = {}) {
   if (!reading) invoke("listen_mute", { muted: false }).catch(() => {});
 }
 
-function say(text, lang) {
+/// Says `text` in the system's voice chosen in Settings, at the chosen speed and pitch. (Named apart from
+/// the voice panel's say() in app.js: two top-level functions with one name are one, the later.)
+function systemSay(text, lang) {
   const tag = lang ? languageTag(lang) : "";
   if (platform === "android" || !window.speechSynthesis) return invoke("speak_text", { text, language: tag || null });
   return new Promise((resolve) => {
