@@ -278,8 +278,16 @@ fn remember_outcomes(chosen: &[String], status: &recorder::Status) {
         .filter_map(|s| {
             let device = recorder::device_of(&s.name, chosen)?;
             let quiet_state = s.state == "recording" || s.state == "stopped";
-            let problem = if s.detail.is_empty() && !quiet_state { s.state.clone() } else { s.detail.clone() };
-            Some(prefs::Outcome { device, frames: s.frames, lost: s.lost, problem })
+            // A stream that fell back to another microphone only counts what the chosen one recorded.
+            let frames = s.own_frames.unwrap_or(s.frames);
+            let problem = if frames < s.frames && frames == 0 {
+                "It wasn't available, so another microphone recorded".to_string()
+            } else if s.detail.is_empty() && !quiet_state {
+                s.state.clone()
+            } else {
+                s.detail.clone()
+            };
+            Some(prefs::Outcome { device, frames, lost: s.lost, problem })
         })
         .collect();
     let _ = prefs::record_outcomes(chosen, &outcomes);
@@ -1415,6 +1423,12 @@ async fn open_app_settings() -> Result<(), String> {
 #[tauri::command]
 async fn dictation_problem() -> Result<Option<String>, String> {
     blocking(listen::problem).await
+}
+
+/// The last change of microphone during a dictation, numbered so the page tells it once.
+#[tauri::command]
+async fn dictation_notice() -> Result<Option<(u32, String)>, String> {
+    blocking(listen::notice).await
 }
 
 /// Off the UI thread, as on Android it asks the capture service.
@@ -2571,6 +2585,7 @@ pub fn run() {
             install_update,
             open_link,
             dictation_problem,
+            dictation_notice,
             haptic,
             tts_status,
             set_export_dir,

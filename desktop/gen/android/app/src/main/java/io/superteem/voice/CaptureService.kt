@@ -1,5 +1,6 @@
 package io.superteem.voice
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
@@ -11,6 +12,7 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -65,19 +67,27 @@ class CaptureService : Service() {
         if (running || intent == null) return START_NOT_STICKY
         val inputs = intent.getStringArrayExtra(EXTRA_INPUTS).orEmpty()
         val usesPins = intent.getBooleanExtra(EXTRA_PINS, false)
-        startInForeground(bluetooth = usesPins || INPUT_HEADSET in inputs)
+        val bluetoothAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        startInForeground(bluetooth = bluetoothAllowed && (usesPins || INPUT_HEADSET in inputs))
         running = true
         instance = this
         startedAt = SystemClock.elapsedRealtime()
         Stats.sources.clear()
         sessionDir = File(intent.getStringExtra(EXTRA_DIR)!!).apply { mkdirs() }
-        for (input in inputs) {
+        // Each stream falls back to another microphone when its own is missing or stops working, so a recording
+        // never fails for want of the one chosen. The headset doesn't fall back to the phone when the phone is
+        // recorded too.
+        // A name saved on another phone or by an older version is recorded as the phone's microphone.
+        val mics = inputs.map { if (it == INPUT_HEADSET) INPUT_HEADSET else INPUT_PHONE }.distinct()
+        val phoneToo = INPUT_PHONE in mics
+        for (input in mics) {
             val source = when (input) {
-                INPUT_HEADSET -> MicSource(this, sessionDir, "headset", headset = true)
-                INPUT_PHONE -> MicSource(this, sessionDir, "phone", headset = false)
+                INPUT_HEADSET -> MicSource(this, sessionDir, "headset", Mic.HEADSET, fallback = true, phoneRecordedElsewhere = phoneToo)
+                INPUT_PHONE -> MicSource(this, sessionDir, "phone", Mic.PHONE, fallback = true)
                 else -> null
             }
-            source?.let { mics += it; it.start() }
+            source?.let { this.mics += it; it.start() }
         }
         if (usesPins) startScan()
         return START_NOT_STICKY

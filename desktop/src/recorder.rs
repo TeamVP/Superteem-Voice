@@ -13,6 +13,15 @@ pub struct Stream {
     pub lost: u64,
     /// Input level from 0 to 1 for the meter.
     pub level: f32,
+    /// The last change of microphone to tell the person about ("Switched to the phone microphone"), numbered
+    /// so each is told once. Android only.
+    #[serde(default)]
+    pub notice: String,
+    #[serde(default)]
+    pub notice_id: u32,
+    /// Frames recorded by the chosen input itself, where the stream may have fallen back to another.
+    #[serde(default)]
+    pub own_frames: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -185,6 +194,9 @@ mod imp {
                     frames: s.frames,
                     lost: s.lost,
                     level: ((s.level_db + 70.0) / 70.0).clamp(0.0, 1.0),
+                    notice: String::new(),
+                    notice_id: 0,
+                    own_frames: None,
                 })
                 .collect();
             Ok(Status { elapsed_s: self.shared.started.elapsed().as_secs(), streams })

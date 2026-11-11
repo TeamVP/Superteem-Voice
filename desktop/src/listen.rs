@@ -657,6 +657,11 @@ mod imp {
     pub fn problem() -> Option<String> {
         None
     }
+
+    /// Windows records the microphone chosen, so it never switches.
+    pub fn notice() -> Option<(u32, String)> {
+        None
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -804,6 +809,13 @@ mod imp {
         let slot = DICTATION.lock().unwrap();
         let status = slot.as_ref()?.status().ok()?;
         status.streams.into_iter().find(|s| s.state == "silenced" || s.state == "failed" || s.state == "no headset").map(|s| s.detail)
+    }
+
+    /// The last change of microphone, when the capture service had to switch.
+    pub fn notice() -> Option<(u32, String)> {
+        let slot = DICTATION.lock().unwrap();
+        let status = slot.as_ref()?.status().ok()?;
+        status.streams.into_iter().find(|s| s.notice_id > 0).map(|s| (s.notice_id, s.notice))
     }
 }
 
