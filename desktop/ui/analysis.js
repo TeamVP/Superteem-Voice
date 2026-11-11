@@ -925,7 +925,7 @@ async function showReadingSettings(message) {
   view = { kind: "reading-settings" };
   refreshItems();
   const [status, voices] = await Promise.all([invoke("tts_status").catch(() => null), systemVoices()]);
-  const page = el("div", { class: "page" }, backLinks("‹ Settings", () => showSettings()), el("h1", {}, "Reading aloud"));
+  const page = el("div", { class: "page" }, backLinks("‹ Voices", () => showVoices()), el("h1", {}, "Reading aloud"));
   page.append(el("p", { class: "hint" }, "Notes, transcripts and analyses can be read aloud with the speaker button beside them. Choose how it reads and the voice here."));
   if (message) page.append(el("div", { class: "notice" }, message));
   const sample = "This is how notes, transcripts and summaries sound when they're read aloud.";

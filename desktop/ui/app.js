@@ -1224,7 +1224,8 @@ async function showDevices(fromTracks = false) {
   });
 
   const page = el("div", { class: "page" },
-    fromTracks ? el("button", { class: "link back-link", onclick: () => showMeeting() }, "‹ Back to the meeting") : null,
+    fromTracks ? el("button", { class: "link back-link", onclick: () => showMeeting() }, "‹ Back to the meeting")
+      : el("button", { class: "link back-link", onclick: () => showVoices() }, "‹ Voices"),
     el("div", { class: "section-head" }, el("h1", {}, "Devices"),
       el("button", { class: "pill", onclick: () => showDevices(fromTracks) }, "Refresh devices")),
     el("p", { class: "legend" }, "Say something to test each microphone. Once it hears you it shows ✓ and can be used as a meeting track. Hide any you never use or that don't work."),
@@ -2627,7 +2628,7 @@ async function showVoicePrints(error) {
   refreshItems();
   const prints = await invoke("list_voiceprints");
   const page = el("div", { class: "page" },
-    el("button", { class: "link", onclick: () => showSettings() }, "‹ Settings"),
+    el("button", { class: "link", onclick: () => showVoices() }, "‹ Voices"),
     el("h1", {}, "Voice prints"),
     el("p", { class: "legend" }, "A voice print lets Voice recognise someone and name them in new meetings. "
       + "It is kept only on this device, as a description of how the voice sounds; the recording made for it is deleted. "
@@ -2807,7 +2808,7 @@ async function showKeyphrases(printId, message) {
   const [{ prints, print }, fresh] = await Promise.all([keyphrasePrint(printId), invoke("get_prefs")]);
   prefs = fresh;
   const page = el("div", { class: "page" },
-    el("button", { class: "link", onclick: () => showSettings() }, "‹ Settings"),
+    el("button", { class: "link", onclick: () => showVoices() }, "‹ Voices"),
     el("h1", {}, "Wake word and commands"),
     el("p", { class: "legend" }, "Say each phrase a few times so Voice hears it the moment it's said, without waiting "
       + "for speech to text. It learns how you say them, so it answers you rather than anyone in the room. Only a "
@@ -3297,13 +3298,8 @@ async function showSettings() {
     linkRow("Analysis templates", "Summary, standup, interview, SOAP and your own", () => showTemplates())));
   page.append(el("h2", {}, "Languages"), el("div", { class: "group" },
     linkRow("Languages", await languagesSummary(), () => showLanguages())));
-  page.append(el("h2", {}, "Reading aloud"), el("div", { class: "group" },
-    linkRow("Voice and speed", await readingAloudSummary(), () => showReadingSettings())));
   page.append(el("h2", {}, "Voices"), el("div", { class: "group" },
-    linkRow("Voice prints", prints.length ? `${prints.length} saved` : "None yet", () => showVoicePrints()),
-    linkRow("Default microphone and voice print", prefs.enrol_input ?? "Not set up", () => showOnboarding(SETUP.voice)),
-    el("div", { class: "windows-only" }, linkRow("Devices", "Test, hide and add microphones and Voice Pins", () => showDevices())),
-    el("div", { class: "windows-only" }, linkRow("Wake word and commands", trainedText(prints), () => showKeyphrases()))));
+    linkRow("Voices", `${await readingAloudSummary()} · ${prints.length ? `${prints.length} voice print${prints.length === 1 ? "" : "s"}` : "No voice prints yet"}`, () => showVoices())));
 
   page.append(el("h2", {}, "Meetings"), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, "Consent question",
@@ -3525,6 +3521,28 @@ function permissionsPanel(changed) {
   timer = setInterval(refresh, 2000);
   document.addEventListener("visibilitychange", refresh);
   return el("div", {}, holder, tips);
+}
+
+/// Settings › Voices: everything about voices in one place. How Voice reads aloud to you, and how it knows
+/// your voice and the people in meetings: voice prints, the microphone, devices and spoken commands.
+async function showVoices() {
+  leave();
+  showPage();
+  view = { kind: "voices" };
+  refreshItems();
+  const [prints, reading] = await Promise.all([invoke("list_voiceprints").catch(() => []), readingAloudSummary()]);
+  const page = el("div", { class: "page" },
+    el("button", { class: "link back-link", onclick: () => showSettings() }, "‹ Settings"),
+    el("h1", {}, "Voices"),
+    el("p", { class: "hint" }, "How the app reads aloud to you, and how it recognises your voice for commands and the people in your meetings."));
+  page.append(el("h2", {}, "Reading aloud"), el("div", { class: "group" },
+    linkRow("Voice and speed", reading, () => showReadingSettings())));
+  page.append(el("h2", {}, "Recognising voices"), el("div", { class: "group" },
+    linkRow("Voice prints", prints.length ? `${prints.length} saved` : "None yet", () => showVoicePrints()),
+    linkRow("Default microphone and voice print", prefs.enrol_input ?? "Not set up", () => showOnboarding(SETUP.voice)),
+    el("div", { class: "windows-only" }, linkRow("Devices", "Test, hide and add microphones and Voice Pins", () => showDevices())),
+    el("div", { class: "windows-only" }, linkRow("Wake word and commands", trainedText(prints), () => showKeyphrases()))));
+  main.replaceChildren(page);
 }
 
 /// The permissions page in Settings.
