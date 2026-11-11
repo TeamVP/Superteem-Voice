@@ -156,6 +156,15 @@ if ($Android) {
         if (-not $vulkan) { throw 'The Vulkan SDK is required to build Superteem Voice: winget install KhronosGroup.VulkanSDK' }
         $env:VULKAN_SDK = $vulkan
     }
+    # ggml's Vulkan build turns on parallel custom build steps (CMP0147), and MSBuild then runs the shader
+    # generator's configure, build and install steps at once, so install can run before configure (seen with
+    # CMake 4 and sometimes 3.31). MSBuild reads Directory.Build.props from any folder above a project, so
+    # one in the build folder keeps those steps one at a time. Builds into another folder need it there too.
+    $props = "<Project>`n  <ItemDefinitionGroup>`n    <CustomBuild>`n      <MaxProcesses>1</MaxProcesses>`n    </CustomBuild>`n  </ItemDefinitionGroup>`n</Project>`n"
+    foreach ($dir in @((Join-Path $PSScriptRoot 'target'), $env:CARGO_TARGET_DIR) | Where-Object { $_ }) {
+        New-Item -ItemType Directory -Force $dir | Out-Null
+        Set-Content (Join-Path $dir 'Directory.Build.props') $props -NoNewline
+    }
     # whisper.cpp is otherwise built for the build machine's own processor. GitHub's machines have AVX-512,
     # which most PCs (Intel 12th gen and later desktops included) don't, so speech to text crashed the app
     # there with an illegal instruction. AVX2, from 2013 on, runs on practically every Windows PC in use.
