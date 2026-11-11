@@ -111,7 +111,10 @@ pub fn display_title(note: &Note) -> String {
 }
 
 pub fn load(id: &str) -> Result<Note, String> {
-    library::read_json(&path(id)?).map_err(|_| "That note no longer exists.".to_string())
+    let mut note: Note = library::read_json(&path(id)?).map_err(|_| "That note no longer exists.".to_string())?;
+    // The file name is the id, even if the file itself lost or never had one.
+    note.id = id.to_string();
+    Ok(note)
 }
 
 /// Saves the note, creating it when `id` is None, and returns its id.
@@ -163,14 +166,37 @@ pub fn delete(id: &str) -> Result<(), String> {
     std::fs::remove_file(path(id)?).map_err(|e| e.to_string())
 }
 
+/// A note file found in the folder, or None for anything else kept there.
+///
+/// Analyses (`<id>.analysis.json`) and half-written saves sit beside the notes, and every
+/// field of `Note` has a default, so they would otherwise parse as a blank note dated 1970
+/// that can't be opened or deleted. Only `<id>.json` with a plain id counts, and the note
+/// takes its id from its file name, so whatever the list shows can be opened and deleted.
+fn read_entry(file: &std::path::Path) -> Option<Note> {
+    if file.extension()? != "json" {
+        return None;
+    }
+    let id = file.file_stem()?.to_str()?;
+    path(id).ok()?;
+    let mut note: Note = library::read_json(file).ok()?;
+    note.id = id.to_string();
+    if note.created == 0 && note.updated == 0 {
+        // Undated: fall back to the file's own time rather than show 1970.
+        let modified = std::fs::metadata(file).and_then(|m| m.modified()).ok()?;
+        let at = modified.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        note.created = at;
+        note.updated = at;
+    }
+    Some(note)
+}
+
 pub fn list(query: &str) -> Vec<NoteSummary> {
     let query = query.trim().to_lowercase();
     let mut notes: Vec<Note> = std::fs::read_dir(dir())
         .into_iter()
         .flatten()
         .flatten()
-        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
-        .filter_map(|e| library::read_json::<Note>(&e.path()).ok())
+        .filter_map(|e| read_entry(&e.path()))
         .filter(|n| query.is_empty() || n.title.to_lowercase().contains(&query) || n.body.to_lowercase().contains(&query))
         .collect();
     notes.sort_by(|a, b| b.updated.cmp(&a.updated));
@@ -203,6 +229,30 @@ mod tests {
         assert_eq!(display_title(&note("Plan", "x")), "Plan");
         assert_eq!(display_title(&note(" ", "\n  First line\nsecond")), "First line");
         assert_eq!(display_title(&note("", "")), "Untitled note");
+    }
+
+    #[test]
+    fn analyses_and_partial_saves_are_not_listed_as_notes() {
+        let folder = std::env::temp_dir().join(format!("stv-notes-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let write = |name: &str, text: &str| {
+            let file = folder.join(name);
+            std::fs::write(&file, text).unwrap();
+            file
+        };
+        let note = write("n5-1.json", r#"{"id":"n5-1","title":"Plan","created":5,"updated":6}"#);
+        let analysis = write("n5-1.analysis.json", r#"{"templates":[]}"#);
+        let partial = write("n5-1.json.part", r#"{"id":"n5-1"}"#);
+        let idless = write("n7-2.json", r#"{"title":"Lost its id"}"#);
+
+        let found = read_entry(&note).unwrap();
+        assert_eq!((found.id.as_str(), found.created, found.updated), ("n5-1", 5, 6));
+        assert!(read_entry(&analysis).is_none());
+        assert!(read_entry(&partial).is_none());
+        let found = read_entry(&idless).unwrap();
+        assert_eq!(found.id, "n7-2");
+        assert!(found.created > 0 && found.updated > 0, "an undated note isn't shown as 1970");
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]
