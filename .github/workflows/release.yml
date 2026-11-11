@@ -106,7 +106,8 @@ jobs:
           # ggml built for this machine's processor uses AVX-512 and crashes most PCs when speech is turned into
           # text, so the release stops if that happened. ggml is built once, with llama.cpp, and whisper.cpp
           # uses that copy (build-env.ps1).
-          $cache = Get-ChildItem desktop/target/release/build -Recurse -Filter CMakeCache.txt | Where-Object { $_.FullName -match 'llama-cpp-sys-2' }
+          # The Vulkan shader generator is a separate build tool run on this machine, not part of the app.
+          $cache = Get-ChildItem desktop/target/release/build -Recurse -Filter CMakeCache.txt | Where-Object { $_.FullName -match 'llama-cpp-sys-2' -and $_.FullName -notmatch 'vulkan-shaders-gen' }
           if (-not $cache) { throw 'ggml build settings not found' }
           foreach ($c in $cache) {
             $text = Get-Content $c.FullName -Raw
