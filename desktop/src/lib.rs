@@ -20,6 +20,7 @@ pub mod recorder;
 pub mod script;
 pub mod shell;
 pub mod transcribe;
+pub mod translations;
 pub mod tts;
 pub mod update;
 pub mod vocabulary;
@@ -157,8 +158,16 @@ fn enqueue<R: Runtime>(app: &AppHandle<R>, id: String) {
         let _ = app.emit("processed", Processed { id: id.clone(), summary });
         // The default analysis follows a processed meeting, when the person wants that and a model is here.
         let p = prefs::load();
-        if ok && p.auto_analyse() && (!p.llm_server.trim().is_empty() || !llm::installed().is_empty()) {
-            enqueue_analysis(&app, Job { kind: "meeting".into(), id, template: stv_core::analysis::DEFAULT_TEMPLATE.into() });
+        let model_here = !p.llm_server.trim().is_empty() || !llm::installed().is_empty();
+        if ok && p.auto_analyse() && model_here {
+            enqueue_analysis(&app, Job { kind: "meeting".into(), id: id.clone(), template: stv_core::analysis::DEFAULT_TEMPLATE.into() });
+        }
+        // Then the translations the person wants, when they want them made by themselves.
+        if ok && p.auto_translate() && model_here {
+            let languages = library::session_dir(&id).map(|d| p.effective(&library::load_meta(&d).langs())).unwrap_or_default();
+            for to in p.translate_targets(&languages) {
+                enqueue_analysis(&app, Job { kind: "meeting".into(), id: id.clone(), template: format!("{TRANSLATE}{to}") });
+            }
         }
     });
 }
@@ -468,15 +477,6 @@ fn set_session_status(state: State<AppState>, id: String, status: String) -> Res
 }
 
 #[tauri::command]
-fn set_session_language(state: State<AppState>, id: String, language: String) -> Result<(), String> {
-    let language = prefs::check_language(&language)?;
-    edit_session(&state, &id, |meta, _| {
-        meta.language = language;
-        Ok(())
-    })
-}
-
-#[tauri::command]
 fn rename_session(state: State<AppState>, id: String, title: String) -> Result<(), String> {
     edit_session(&state, &id, |meta, _| {
         meta.title = title.trim().to_string();
@@ -513,6 +513,47 @@ fn add_speaker(state: State<AppState>, id: String, name: String) -> Result<Strin
         Ok(())
     })?;
     Ok(key)
+}
+
+/// Hears one line of a meeting in two languages again, as `language`. The line counts as edited by hand,
+/// so transcribing the meeting again keeps it.
+#[tauri::command]
+async fn set_line_language<R: Runtime>(app: AppHandle<R>, id: String, segment: usize, language: String) -> Result<(), String> {
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let dir = library::session_dir(&id)?;
+        let meta = library::load_meta(&dir);
+        if meta.compacted {
+            return Err("This meeting's audio was deleted, so its lines can't be transcribed again.".into());
+        }
+        let languages = prefs::load().effective(&meta.langs());
+        if !languages.contains(&language) {
+            return Err("That isn't one of this meeting's languages.".into());
+        }
+        let seg = library::load_segments(&dir).into_iter().find(|s| s.id == segment).ok_or("That line no longer exists.")?;
+        let pcm = exports::read_wav(&dir.join(format!("{}.wav", seg.stream)))?;
+        let t = transcribe::Transcriber::for_languages(&languages)?;
+        let at = |s: f64| ((s * process::RATE as f64) as usize).min(pcm.len());
+        let terms = vocabulary::load();
+        let prompt = vocabulary::prompt("", &terms);
+        let mut words = Vec::new();
+        for (a, b) in seg.spans() {
+            let heard = t.transcribe(&pcm, at(a), at(b), prompt.as_deref(), &language)?;
+            words.push(vocabulary::drop_echo(heard, &terms));
+        }
+        let text = words.join(" ").trim().to_string();
+        edit_session(&state, &id, |_, segments| {
+            let s = segments.iter_mut().find(|s| s.id == segment).ok_or("That line no longer exists.")?;
+            if !text.is_empty() {
+                s.text = text;
+                s.fixes.clear();
+            }
+            s.language = if language == languages[0] { String::new() } else { language };
+            s.edited = true;
+            Ok(())
+        })
+    })
+    .await?
 }
 
 /// Changes a line. When its speaker changes, returns the other lines that sound like it and still have
@@ -1143,11 +1184,6 @@ fn set_note_status(id: String, status: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_note_language(id: String, language: String) -> Result<(), String> {
-    notes::set_language(&id, &language)
-}
-
-#[tauri::command]
 fn delete_note(id: String) -> Result<(), String> {
     notes::delete(&id)?;
     analysis::forget_note(&id);
@@ -1160,7 +1196,13 @@ async fn set_wake(on: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn dictate_start<R: Runtime>(app: AppHandle<R>, continuous: Option<bool>, note: Option<String>) -> Result<u64, String> {
+async fn dictate_start<R: Runtime>(
+    app: AppHandle<R>,
+    continuous: Option<bool>,
+    note: Option<String>,
+    languages: Option<Vec<String>>,
+) -> Result<u64, String> {
+    let languages = stv_core::lang::clean_list(&languages.unwrap_or_default());
     if !continuous.unwrap_or(false) {
         return blocking(listen::dictate_start).await?.map(|_| 0);
     }
@@ -1169,6 +1211,7 @@ async fn dictate_start<R: Runtime>(app: AppHandle<R>, continuous: Option<bool>, 
     blocking(move || {
         dictation::start(
             note,
+            languages,
             move |c| drop(clips.emit("dictation-clip", c)),
             move |w| drop(words.emit("dictation-words", w)),
             move |e| drop(ended.emit("dictation-ended", e)),
@@ -1178,12 +1221,13 @@ async fn dictate_start<R: Runtime>(app: AppHandle<R>, continuous: Option<bool>, 
 }
 
 #[tauri::command]
-async fn dictate_stop(note: Option<String>, session: Option<u64>) -> Result<String, String> {
+async fn dictate_stop(note: Option<String>, session: Option<u64>, languages: Option<Vec<String>>) -> Result<String, String> {
     if let Some(id) = session.filter(|&s| s > 0) {
         return blocking(move || dictation::stop(id)).await?;
     }
+    let languages = stv_core::lang::clean_list(&languages.unwrap_or_default());
     blocking(move || {
-        let (words, pcm) = listen::dictate_stop()?;
+        let (words, pcm) = listen::dictate_stop(&languages)?;
         // The audio is kept only when the note asks, and only once the words are written down.
         if let Some(id) = note.filter(|_| !words.is_empty()) {
             notes::keep_dictation(&id, &pcm, process::RATE)?;
@@ -1406,7 +1450,10 @@ fn open_folder(id: Option<String>) -> Result<(), String> {
 
 // ---------- Analyses
 
-/// One analysis waiting to run, or running.
+/// A job whose template is this and a language code translates the item into that language.
+const TRANSLATE: &str = "translate:";
+
+/// One analysis or translation waiting to run, or running.
 #[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
 struct Job {
     kind: String,
@@ -1428,6 +1475,8 @@ fn analysis_queue_state(state: &AppState) -> AnalysisQueue {
 struct AnalysisProgress {
     #[serde(flatten)]
     job: Job,
+    /// What it's doing: "Analysing", "Translating".
+    step: String,
     part: usize,
     parts: usize,
 }
@@ -1502,10 +1551,16 @@ fn enqueue_analysis<R: Runtime>(app: &AppHandle<R>, job: Job) {
                 }
                 let (model, info) = engine.as_mut().expect("just loaded");
                 let item = analysis::Item::new(&job.kind, &job.id)?;
-                let report = |part, parts| drop(app.emit("analysing", AnalysisProgress { job: job.clone(), part, parts }));
-                let entry = analysis::make(&item, &job.template, model.as_mut(), info.clone(), report)?;
-                let _guard = state.edit.lock().unwrap();
-                analysis::put(&item, entry)
+                let report = |step: &str, part, parts| drop(app.emit("analysing", AnalysisProgress { job: job.clone(), step: step.into(), part, parts }));
+                if let Some(language) = job.template.strip_prefix(TRANSLATE) {
+                    translations::update(&item, language, model.as_mut(), &info.model, |k, n| report("Translating", k, n))?;
+                    return Ok(());
+                }
+                for entry in analysis::make(&item, &job.template, model.as_mut(), info.clone(), report)? {
+                    let _guard = state.edit.lock().unwrap();
+                    analysis::put(&item, entry)?;
+                }
+                Ok(())
             })();
             let _ = app.emit("analysed", Analysed { job, error: outcome.err() });
         }
@@ -1549,7 +1604,11 @@ fn get_analyses(state: State<AppState>, kind: String, id: String) -> Result<Anal
 #[tauri::command]
 fn analyse<R: Runtime>(app: AppHandle<R>, kind: String, id: String, template: String) -> Result<(), String> {
     analysis::Item::new(&kind, &id)?;
-    analysis::template(&template)?;
+    let (t, language) = analysis::split_key(&template);
+    analysis::template(t)?;
+    if language.is_some_and(|l| !stv_core::lang::is_known(l)) {
+        return Err("That language isn't one Voice offers yet.".into());
+    }
     enqueue_analysis(&app, Job { kind, id, template });
     Ok(())
 }
@@ -1664,34 +1723,263 @@ async fn natural_speak(text: String, voice: Option<String>) -> Result<tauri::ipc
 #[derive(Serialize)]
 struct Languages {
     /// Every language that can be chosen: (code, name).
-    all: &'static [(&'static str, &'static str)],
+    all: Vec<(&'static str, &'static str)>,
+    /// The same, with what works in each.
+    catalogue: &'static [stv_core::lang::Language],
     chosen: Vec<String>,
     primary: String,
+    /// What new notes and meetings start in; empty for the primary language.
+    defaults: Vec<String>,
+    translate_into: Vec<String>,
+    auto_translate: bool,
+    speech_model: String,
 }
 
 #[tauri::command]
 fn get_languages() -> Languages {
     let p = prefs::load();
-    Languages { all: prefs::LANGUAGES, chosen: p.languages(), primary: p.primary_language() }
+    Languages {
+        all: stv_core::lang::LANGUAGES.iter().map(|l| (l.code, l.name)).collect(),
+        catalogue: stv_core::lang::LANGUAGES,
+        chosen: p.languages(),
+        primary: p.primary_language(),
+        defaults: p.new_item_languages(),
+        translate_into: p.translate_targets(&[]),
+        auto_translate: p.auto_translate(),
+        speech_model: p.speech_model.clone(),
+    }
 }
 
 /// The languages the person uses and the primary one, which must be among them.
 #[tauri::command]
 fn save_languages(languages: Vec<String>, primary: String) -> Result<Languages, String> {
-    let known = |l: &String| prefs::LANGUAGES.iter().any(|(c, _)| c == l);
-    if !known(&primary) {
+    if !stv_core::lang::is_known(&primary) {
         return Err("That language isn't one Voice offers yet.".into());
     }
-    let mut chosen: Vec<String> = languages.into_iter().filter(known).collect();
-    chosen.dedup();
+    let mut chosen: Vec<String> = Vec::new();
+    for l in languages.into_iter().filter(|l| stv_core::lang::is_known(l)) {
+        if !chosen.contains(&l) {
+            chosen.push(l);
+        }
+    }
     if !chosen.contains(&primary) {
         chosen.insert(0, primary.clone());
     }
     prefs::update(|p| {
+        // Languages the person no longer uses aren't defaults or translated into.
+        p.default_languages.retain(|l| chosen.contains(l));
+        p.translate_into.retain(|l| chosen.contains(l));
         p.languages = chosen;
         p.primary_language = primary;
     })?;
     Ok(get_languages())
+}
+
+/// What new items start in, what to translate into and whether to by itself, and the multilingual speech
+/// model to use; each is left as it is when not given.
+#[tauri::command]
+fn save_language_settings(
+    defaults: Option<Vec<String>>,
+    translate_into: Option<Vec<String>>,
+    auto_translate: Option<bool>,
+    speech_model: Option<String>,
+) -> Result<Languages, String> {
+    if let Some(m) = speech_model.as_deref().filter(|m| !m.is_empty()) {
+        transcribe::model(m).filter(|m| m.multilingual).ok_or("That speech model isn't one Voice knows.")?;
+    }
+    prefs::update(|p| {
+        if let Some(d) = defaults {
+            p.default_languages = stv_core::lang::clean_list(&d);
+        }
+        if let Some(t) = translate_into {
+            p.translate_into = t.into_iter().filter(|l| stv_core::lang::is_known(l)).collect();
+            p.translate_into.dedup();
+        }
+        if let Some(a) = auto_translate {
+            p.auto_translate = Some(a);
+        }
+        if let Some(m) = speech_model {
+            p.speech_model = m;
+        }
+    })?;
+    Ok(get_languages())
+}
+
+#[derive(Serialize, Clone)]
+struct SpeechModelView {
+    #[serde(flatten)]
+    model: &'static transcribe::SpeechModel,
+    ready: bool,
+    /// The multilingual model this device suits.
+    suggested: bool,
+}
+
+fn speech_model_view(m: &'static transcribe::SpeechModel) -> SpeechModelView {
+    SpeechModelView { model: m, ready: transcribe::is_ready(m), suggested: m.multilingual && m.id == transcribe::suggested_multilingual().id }
+}
+
+#[tauri::command]
+fn speech_models() -> Vec<SpeechModelView> {
+    transcribe::MODELS.iter().map(speech_model_view).collect()
+}
+
+#[derive(Serialize, Clone)]
+struct SpeechDownload {
+    id: String,
+    fraction: f32,
+}
+
+static SPEECH_DOWNLOAD_CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SPEECH_DOWNLOADING: Mutex<Option<String>> = Mutex::new(None);
+
+/// Downloads a speech model; progress goes out as "speech-model-download". One at a time.
+#[tauri::command]
+async fn download_speech_model<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(), String> {
+    {
+        let mut busy = SPEECH_DOWNLOADING.lock().unwrap();
+        if busy.is_some() {
+            return Err("A speech model is already downloading.".into());
+        }
+        *busy = Some(id.clone());
+    }
+    SPEECH_DOWNLOAD_CANCEL.store(false, std::sync::atomic::Ordering::SeqCst);
+    let handle = app.clone();
+    let result = blocking(move || {
+        let which = id.clone();
+        transcribe::download(&id, &SPEECH_DOWNLOAD_CANCEL, |fraction| drop(handle.emit("speech-model-download", SpeechDownload { id: which.clone(), fraction })))
+    })
+    .await;
+    *SPEECH_DOWNLOADING.lock().unwrap() = None;
+    result?
+}
+
+#[tauri::command]
+fn cancel_speech_download() {
+    SPEECH_DOWNLOAD_CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[tauri::command]
+fn delete_speech_model(id: String) -> Result<(), String> {
+    transcribe::delete(&id)?;
+    prefs::update(|p| {
+        if p.speech_model == id {
+            p.speech_model.clear();
+        }
+    })
+    .map(|_| ())
+}
+
+/// What changed when an item's languages were set, and what the page should offer next.
+#[derive(Serialize)]
+struct ItemLanguages {
+    /// As saved: empty for the primary language alone.
+    languages: Vec<String>,
+    /// The languages it's in, main one first.
+    effective: Vec<String>,
+    /// Languages added to the person's own because this item is in them.
+    added: Vec<String>,
+    /// The speech model these languages need.
+    model: SpeechModelView,
+    /// The languages differ from those it was transcribed in, and there's a transcript.
+    changed: bool,
+    /// It can be transcribed again in the new languages.
+    can_retranscribe: bool,
+    /// Why it can't, when it can't.
+    reason: Option<String>,
+}
+
+/// Sets the languages a note or meeting is in, one or two, main one first. A language the person hasn't
+/// chosen yet becomes one of theirs.
+#[tauri::command]
+fn set_item_languages(state: State<AppState>, kind: String, id: String, languages: Vec<String>) -> Result<ItemLanguages, String> {
+    let languages = stv_core::lang::clean_list(&languages);
+    if languages.is_empty() {
+        return Err("Choose a language.".into());
+    }
+    let p = prefs::load();
+    let saved = if languages.len() == 1 && languages[0] == p.primary_language() { Vec::new() } else { languages.clone() };
+    let mine = p.languages();
+    let added: Vec<String> = languages.iter().filter(|l| !mine.contains(l)).cloned().collect();
+    if !added.is_empty() {
+        prefs::update(|p| p.languages.extend(added.iter().cloned()))?;
+    }
+    let (model, _) = transcribe::model_for(&languages);
+    let (changed, can_retranscribe, reason) = match kind.as_str() {
+        "meeting" => {
+            let dir = library::session_dir(&id)?;
+            let before = p.effective(&library::load_meta(&dir).langs());
+            edit_session(&state, &id, |meta, _| {
+                meta.set_langs(saved.clone());
+                Ok(())
+            })?;
+            let has_lines = !library::load_segments(&dir).is_empty();
+            let compacted = library::load_meta(&dir).compacted;
+            let reason = if compacted {
+                Some("Its audio was deleted to save space, so it can't be transcribed again. New analyses and translations use the new languages.".to_string())
+            } else {
+                None
+            };
+            (before != languages && has_lines, !compacted, reason)
+        }
+        "note" => {
+            let before = p.effective(&notes::load(&id)?.langs());
+            notes::set_languages(&id, saved.clone())?;
+            let reason = "Notes are written down as you dictate, so what's already here stays as it is. New dictation is heard in the new languages.";
+            (before != languages, false, Some(reason.to_string()))
+        }
+        _ => return Err(format!("Unknown kind: {kind}")),
+    };
+    Ok(ItemLanguages { languages: saved, effective: languages, added, model: speech_model_view(model), changed, can_retranscribe, reason })
+}
+
+/// A translation of a note or meeting as the page shows it, and the languages it has translations in.
+#[derive(Serialize)]
+struct TranslationView {
+    #[serde(flatten)]
+    view: translations::View,
+    available: Vec<String>,
+}
+
+#[tauri::command]
+fn get_translation(kind: String, id: String, language: String) -> Result<TranslationView, String> {
+    let item = analysis::Item::new(&kind, &id)?;
+    Ok(TranslationView { view: translations::view(&item, &language)?, available: translations::languages(&item) })
+}
+
+/// Translates a note or meeting into `language`, in turn with analyses.
+#[tauri::command]
+fn translate_item<R: Runtime>(app: AppHandle<R>, kind: String, id: String, language: String) -> Result<(), String> {
+    analysis::Item::new(&kind, &id)?;
+    if !stv_core::lang::is_known(&language) {
+        return Err("That language isn't one Voice offers yet.".into());
+    }
+    let p = prefs::load();
+    if p.llm_server.trim().is_empty() && llm::installed().is_empty() {
+        return Err("Translating needs a language model. Get one in Settings › Analysis.".into());
+    }
+    enqueue_analysis(&app, Job { kind, id, template: format!("{TRANSLATE}{language}") });
+    Ok(())
+}
+
+#[tauri::command]
+fn edit_translation(state: State<AppState>, kind: String, id: String, language: String, line: String, text: String) -> Result<(), String> {
+    let _guard = state.edit.lock().unwrap();
+    translations::edit(&analysis::Item::new(&kind, &id)?, &language, &line, &text)
+}
+
+#[tauri::command]
+fn delete_translation(state: State<AppState>, kind: String, id: String, language: String) -> Result<(), String> {
+    let _guard = state.edit.lock().unwrap();
+    translations::delete(&analysis::Item::new(&kind, &id)?, &language)
+}
+
+#[tauri::command]
+async fn export_translation(kind: String, id: String, language: String, format: String) -> Result<String, String> {
+    blocking(move || {
+        let item = analysis::Item::new(&kind, &id)?;
+        exports::export_translation(&item, &language, &format).map(|p| p.to_string_lossy().into_owned())
+    })
+    .await?
 }
 
 /// Reading aloud and model settings; each is left as it is when not given.
@@ -2157,10 +2445,20 @@ pub fn run() {
             cancel_tts_download,
             add_tts_voice,
             reading_voice,
-            set_note_language,
-            set_session_language,
             get_languages,
             save_languages,
+            set_line_language,
+            save_language_settings,
+            set_item_languages,
+            speech_models,
+            download_speech_model,
+            cancel_speech_download,
+            delete_speech_model,
+            get_translation,
+            translate_item,
+            edit_translation,
+            delete_translation,
+            export_translation,
             delete_tts,
             natural_speak,
             save_voice_settings,

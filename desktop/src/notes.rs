@@ -18,8 +18,17 @@ pub struct Note {
     pub archived: bool,
     /// Where the note is in the person's own workflow; empty when not set.
     pub status: String,
-    /// The language it's in, as a code ("cy"); empty for the person's primary language.
+    /// The language older versions kept, before a note could be in two; read into `languages`.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub language: String,
+    /// The languages it's in, the main one first; empty for the person's primary language.
+    pub languages: Vec<String>,
+}
+
+impl Note {
+    pub fn langs(&self) -> Vec<String> {
+        crate::prefs::item_languages(&self.languages, &self.language)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -126,6 +135,7 @@ pub fn save(id: Option<String>, title: String, body: String, keep_audio: bool) -
         None => Note {
             id: format!("n{}-{}", now, std::process::id() ^ (now as u32).rotate_left(7)),
             created: now,
+            languages: crate::prefs::load().new_item_languages(),
             ..Default::default()
         },
     };
@@ -154,10 +164,11 @@ pub fn set_status(id: &str, status: &str) -> Result<(), String> {
     library::write_json(&path(id)?, &note)
 }
 
-/// Like a status, a language doesn't count as an edit.
-pub fn set_language(id: &str, language: &str) -> Result<(), String> {
+/// Like a status, languages don't count as an edit.
+pub fn set_languages(id: &str, languages: Vec<String>) -> Result<(), String> {
     let mut note = load(id)?;
-    note.language = crate::prefs::check_language(language)?;
+    note.languages = languages;
+    note.language.clear();
     library::write_json(&path(id)?, &note)
 }
 

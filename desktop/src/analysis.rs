@@ -213,6 +213,7 @@ impl Item {
 /// Removes a note's analyses with it.
 pub fn forget_note(id: &str) {
     let _ = std::fs::remove_file(library::data_dir().join("notes").join(format!("{id}.analysis.json")));
+    crate::translations::forget_note(id);
 }
 
 /// What a template reads, and how to find its citations again.
@@ -441,6 +442,32 @@ pub struct Entry {
     #[serde(default)]
     pub seconds: f64,
     pub result: Value,
+    /// The language it's written in; empty for English, as before languages.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub language: String,
+    /// What it was made from: "original", "translation" (the item's English translation) or
+    /// "translated" (another entry, translated into this language). Empty is "original".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub via: String,
+    /// For a translated entry: when the entry it was translated from was made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_created: Option<u64>,
+}
+
+impl Entry {
+    /// How the stack knows it: the template's id, with the language after an @ for a translation of
+    /// another entry ("meeting-summary@cy").
+    pub fn key(&self) -> String {
+        if self.via == "translated" { format!("{}@{}", self.template.id, self.language) } else { self.template.id.clone() }
+    }
+}
+
+/// A key's template and, for a translated entry, its language.
+pub fn split_key(key: &str) -> (&str, Option<&str>) {
+    match key.split_once('@') {
+        Some((t, l)) => (t, Some(l)),
+        None => (key, None),
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -474,53 +501,164 @@ fn save(item: &Item, stack: &Stack) -> Result<(), String> {
     Ok(())
 }
 
-/// Runs a template on an item. The result goes into the stack with `put`, which is quick, so edits made
-/// meanwhile aren't held up for the minute or so this takes.
-pub fn make(item: &Item, template_id: &str, model: &mut dyn Model, engine: Engine, progress: impl FnMut(usize, usize)) -> Result<Entry, String> {
+/// The languages an item is in, main one first.
+pub fn item_languages(item: &Item) -> Result<Vec<String>, String> {
+    let p = crate::prefs::load();
+    Ok(match item {
+        Item::Meeting(id) => p.effective(&library::load_meta(&library::session_dir(id)?).langs()),
+        Item::Note(id) => p.effective(&notes::load(id)?.langs()),
+    })
+}
+
+/// The language an item's analyses are written in: its main language when the model writes it well,
+/// else English, from the item's English translation.
+pub fn analysis_language(item: &Item) -> Result<String, String> {
+    let main = item_languages(item)?.remove(0);
+    Ok(match stv_core::lang::get(&main).map(|l| l.analysis) {
+        Some(stv_core::lang::Analysis::Direct) | None => main,
+        Some(stv_core::lang::Analysis::ViaEnglish) => stv_core::lang::ENGLISH.into(),
+    })
+}
+
+/// What a template reads in `language`: the item itself, or its translation with the same lines, so
+/// citations still point at the original.
+fn input_in(item: &Item, language: &str) -> Result<Input, String> {
+    let (texts, _) = crate::translations::texts(item, language)?;
+    match item {
+        Item::Meeting(id) => {
+            let dir = library::session_dir(id)?;
+            let meta = library::load_meta(&dir);
+            let mut segments = library::load_segments(&dir);
+            for s in segments.iter_mut() {
+                if let Some(t) = texts.get(&s.id.to_string()) {
+                    s.text = t.clone();
+                }
+            }
+            let mut translated = meeting_input(&meta, &segments);
+            // Citations are found again in the original lines.
+            translated.segments = library::load_segments(&dir);
+            Ok(translated)
+        }
+        Item::Note(id) => {
+            let note = notes::load(id)?;
+            let mut i = note_input(&note);
+            for t in i.turns.iter_mut() {
+                if let Some(x) = texts.get(&stv_core::translate::fingerprint(&t.text)) {
+                    t.text = x.clone();
+                }
+            }
+            Ok(i)
+        }
+    }
+}
+
+/// Runs a template on an item, or translates one of its analyses. A key "template@cy" makes the
+/// template's analysis first when it's missing or out of date, then translates it into Welsh. The
+/// result goes into the stack with `put`, which is quick, so edits made meanwhile aren't held up for the
+/// minute or so this takes. `progress` gets a step name, the part and how many parts.
+pub fn make(item: &Item, key: &str, model: &mut dyn Model, engine: Engine, mut progress: impl FnMut(&str, usize, usize)) -> Result<Vec<Entry>, String> {
+    let (template_id, into) = split_key(key);
     let t = template(template_id)?;
     if !t.applies_to(item.kind()) {
         return Err(format!("\"{}\" isn't for {}s.", t.name, item.kind()));
     }
-    let input = input(item)?;
-    let glossary = stv_core::vocab::glossary(&vocabulary::load(), 300);
-    let date = input.date();
-    let ctx = Context {
-        title: &input.title,
-        date: &date,
-        duration_s: input.duration_s,
-        speakers: &input.speakers,
-        glossary: &glossary,
-        is_note: input.is_note,
-        bookmarks: &input.bookmarks,
+    let language = analysis_language(item)?;
+    let original_hash = input(item)?.hash();
+    let mut made = Vec::new();
+    let base = load(item).stack.into_iter().find(|e| e.key() == template_id && e.input_hash == original_hash);
+    let base = match (base, into) {
+        (Some(b), Some(_)) => b,
+        _ => {
+            // Lines in another language are read in English translation; those already translated are kept.
+            let translate_first = language == stv_core::lang::ENGLISH && item_languages(item)?.iter().any(|l| l != stv_core::lang::ENGLISH);
+            if translate_first {
+                crate::translations::update(item, &language, model, &engine.model, |k, n| progress("Translating the transcript", k, n))?;
+                // An analysis of lines left untranslated would be guesswork.
+                let v = crate::translations::view(item, &language)?;
+                let failed = v.lines.iter().filter(|l| !l.same && (l.warning.is_some() || l.text.is_empty())).count();
+                let translated = v.lines.iter().filter(|l| !l.same).count();
+                if translated > 0 && failed * 2 > translated {
+                    return Err(v.advice.unwrap_or_else(|| {
+                        "Most lines couldn't be translated into English, so an analysis would be guesswork. Check the translation, or try a larger model in Settings › Analysis.".into()
+                    }));
+                }
+            }
+            let input = if translate_first { input_in(item, &language)? } else { input(item)? };
+            let glossary = stv_core::vocab::glossary(&vocabulary::load(), 300);
+            let date = input.date();
+            let ctx = Context {
+                title: &input.title,
+                date: &date,
+                duration_s: input.duration_s,
+                speakers: &input.speakers,
+                glossary: &glossary,
+                is_note: input.is_note,
+                bookmarks: &input.bookmarks,
+                language: &language,
+            };
+            let started = std::time::Instant::now();
+            let checked = engine::analyse(model, &t, &input.turns, &ctx, |k, n| progress("Analysing", k, n))?;
+            let mut result = checked.result;
+            engine::map_evidence(&t, &mut result, |v| v.as_u64().and_then(|n| input.anchor(n)));
+            let entry = Entry {
+                template: TemplateRef { id: t.id.clone(), name: t.name.clone(), version: t.version, hash: t.hash.clone() },
+                engine: engine.clone(),
+                created: library::now(),
+                input_hash: original_hash.clone(),
+                warnings: checked.warnings,
+                collapsed: false,
+                seconds: started.elapsed().as_secs_f64(),
+                result,
+                language: if language == stv_core::lang::ENGLISH { String::new() } else { language.clone() },
+                via: if translate_first { "translation".into() } else { String::new() },
+                from_created: None,
+            };
+            made.push(entry.clone());
+            entry
+        }
     };
-    let started = std::time::Instant::now();
-    let checked = engine::analyse(model, &t, &input.turns, &ctx, progress)?;
-    let mut result = checked.result;
-    engine::map_evidence(&t, &mut result, |v| v.as_u64().and_then(|n| input.anchor(n)));
-    Ok(Entry {
-        template: TemplateRef { id: t.id.clone(), name: t.name.clone(), version: t.version, hash: t.hash.clone() },
-        engine,
-        created: library::now(),
-        input_hash: input.hash(),
-        warnings: checked.warnings,
-        collapsed: false,
-        seconds: started.elapsed().as_secs_f64(),
-        result,
-    })
+    if let Some(to) = into {
+        let from = if base.language.is_empty() { stv_core::lang::ENGLISH.to_string() } else { base.language.clone() };
+        if to != from {
+            let started = std::time::Instant::now();
+            let lines = stv_core::translate::analysis_lines(&t, &base.result);
+            let keep: Vec<String> = vocabulary::load().into_iter().map(|t| t.spelling).collect();
+            let done = stv_core::translate::translate(model, &lines, &[from], to, &keep, |k, n| progress("Translating", k, n))?;
+            let warnings = done.iter().filter_map(|d| d.warning.clone()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+            made.push(Entry {
+                result: stv_core::translate::apply(&base.result, &done),
+                language: to.to_string(),
+                via: "translated".into(),
+                from_created: Some(base.created),
+                created: library::now(),
+                seconds: started.elapsed().as_secs_f64(),
+                warnings,
+                engine,
+                collapsed: false,
+                ..base
+            });
+        }
+    }
+    Ok(made)
 }
 
-/// Puts a result in an item's stack: in place of the last result from the same template (keeping what the
-/// person edited, ticked, added or deleted there), or at the end.
+/// Puts a result in an item's stack: in place of the last result with the same key (keeping what the
+/// person edited, ticked, added or deleted there), or at the end; a translation goes just after the entry
+/// it was translated from.
 pub fn put(item: &Item, mut entry: Entry) -> Result<(), String> {
     let t = template(&entry.template.id)?;
     let mut stack = load(item);
-    match stack.stack.iter_mut().find(|e| e.template.id == entry.template.id) {
+    let key = entry.key();
+    match stack.stack.iter_mut().find(|e| e.key() == key) {
         Some(old) => {
             engine::carry_over(&t, &old.result, &mut entry.result);
             entry.collapsed = old.collapsed;
             *old = entry;
         }
-        None => stack.stack.push(entry),
+        None => {
+            let after = stack.stack.iter().rposition(|e| e.template.id == entry.template.id).map_or(stack.stack.len(), |i| i + 1);
+            stack.stack.insert(after, entry);
+        }
     }
     save(item, &stack)
 }
@@ -530,8 +668,10 @@ pub fn put(item: &Item, mut entry: Entry) -> Result<(), String> {
 pub struct EntryView {
     #[serde(flatten)]
     pub entry: Entry,
+    pub key: String,
     pub definition: Option<Template>,
-    /// The transcript or note changed since it was made.
+    /// The transcript or note changed since it was made, or for a translation, the entry it came from
+    /// was made again.
     pub stale: bool,
     /// The template changed since it was made.
     pub template_changed: bool,
@@ -546,6 +686,7 @@ pub fn view(item: &Item) -> Vec<EntryView> {
     let Ok(input) = input(item) else { return vec![] };
     let all = templates();
     let hash = input.hash();
+    let made: BTreeMap<String, u64> = stack.stack.iter().filter(|e| e.via != "translated").map(|e| (e.template.id.clone(), e.created)).collect();
     stack
         .stack
         .into_iter()
@@ -555,9 +696,11 @@ pub fn view(item: &Item) -> Vec<EntryView> {
             collect_anchors(&entry.result, &mut |a| {
                 sources.entry(a.to_string()).or_insert_with(|| input.resolve(a));
             });
+            let source_remade = entry.from_created.is_some_and(|c| made.get(&entry.template.id).is_some_and(|m| *m != c));
             EntryView {
-                stale: entry.input_hash != hash,
+                stale: entry.input_hash != hash || source_remade,
                 template_changed: definition.as_ref().is_some_and(|d| d.hash != entry.template.hash),
+                key: entry.key(),
                 definition,
                 sources,
                 entry,
@@ -576,9 +719,9 @@ fn collect_anchors(v: &Value, f: &mut impl FnMut(&str)) {
 }
 
 /// Changes one entry of an item's stack.
-fn change(item: &Item, template_id: &str, f: impl FnOnce(&mut Entry) -> Result<(), String>) -> Result<(), String> {
+fn change(item: &Item, key: &str, f: impl FnOnce(&mut Entry) -> Result<(), String>) -> Result<(), String> {
     let mut stack = load(item);
-    let entry = stack.stack.iter_mut().find(|e| e.template.id == template_id).ok_or("That analysis no longer exists.")?;
+    let entry = stack.stack.iter_mut().find(|e| e.key() == key).ok_or("That analysis no longer exists.")?;
     f(entry)?;
     save(item, &stack)
 }
@@ -600,8 +743,8 @@ fn list<'a>(result: &'a mut Value, field: &str) -> Result<&'a mut Vec<Value>, St
     result.get_mut(field).and_then(Value::as_array_mut).ok_or_else(|| "That section no longer exists.".to_string())
 }
 
-pub fn edit(item: &Item, template_id: &str, edit: Edit) -> Result<(), String> {
-    change(item, template_id, |entry| {
+pub fn edit(item: &Item, key: &str, edit: Edit) -> Result<(), String> {
+    change(item, key, |entry| {
         let result = &mut entry.result;
         match edit {
             Edit::Set { field, index: None, value, .. } => {
@@ -650,22 +793,22 @@ pub fn edit(item: &Item, template_id: &str, edit: Edit) -> Result<(), String> {
     })
 }
 
-pub fn remove(item: &Item, template_id: &str) -> Result<(), String> {
+pub fn remove(item: &Item, key: &str) -> Result<(), String> {
     let mut stack = load(item);
-    stack.stack.retain(|e| e.template.id != template_id);
+    stack.stack.retain(|e| e.key() != key);
     save(item, &stack)
 }
 
 /// Moves an analysis up (-1) or down (+1) the stack.
-pub fn shift(item: &Item, template_id: &str, by: i32) -> Result<(), String> {
+pub fn shift(item: &Item, key: &str, by: i32) -> Result<(), String> {
     let mut stack = load(item);
-    let i = stack.stack.iter().position(|e| e.template.id == template_id).ok_or("That analysis no longer exists.")?;
+    let i = stack.stack.iter().position(|e| e.key() == key).ok_or("That analysis no longer exists.")?;
     let j = (i as i32 + by).clamp(0, stack.stack.len() as i32 - 1) as usize;
     stack.stack.swap(i, j);
     save(item, &stack)
 }
 
-/// Every analysis of an item as document sections, Markdown or plain text, for the exports. Citations show
+// Every analysis of an item as document sections, Markdown or plain text, for the exports. Citations show
 /// as times in a meeting and paragraph numbers in a note.
 pub fn render(stack: &Stack, input: &Input, md: bool) -> String {
     let all = templates();
@@ -674,7 +817,13 @@ pub fn render(stack: &Stack, input: &Input, md: bool) -> String {
     for e in &stack.stack {
         let Some(t) = all.iter().find(|t| t.id == e.template.id).and_then(|t| t.template.clone()) else { continue };
         out += &engine::render(&t, &e.result, &label, md);
-        let made = format!("Made on {} with {}. Check it against the transcript.", if e.engine.kind == "local" { "this device" } else { e.engine.host.as_deref().unwrap_or("a server") }, e.engine.model);
+        let place = if e.engine.kind == "local" { "this device" } else { e.engine.host.as_deref().unwrap_or("a server") };
+        let how = match e.via.as_str() {
+            "translated" => format!(" In {}, machine-translated.", stv_core::lang::name(&e.language)),
+            "translation" => " Made from an English translation of the transcript.".to_string(),
+            _ => String::new(),
+        };
+        let made = format!("Made on {place} with {}.{how} Check it against the transcript.", e.engine.model);
         out += &if md { format!("_{}_\n\n", engine::escape_md(&made)) } else { format!("{made}\n\n") };
     }
     out

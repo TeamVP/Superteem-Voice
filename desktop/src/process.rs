@@ -171,24 +171,44 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     // The person's vocabulary steers whisper's spelling, and corrects what it still gets wrong below.
     let terms = vocabulary::load();
     let prompt = vocabulary::prompt("", &terms);
+    // The meeting's languages decide the speech model; with two, each line is heard as whichever it
+    // sounds like, judged on the clearest microphone that heard it.
+    // A meeting processed for the first time starts in the languages the person set for new ones.
+    let p = crate::prefs::load();
+    let first_time = !library::has_meta(dir);
+    let mut item_languages = library::load_meta(dir).langs();
+    if item_languages.is_empty() && first_time {
+        item_languages = p.new_item_languages();
+    }
+    let languages = p.effective(&item_languages);
+    let mut line_language = vec![String::new(); utterances.len()];
     let transcription = if transcribe::model_ready() {
-        transcribe::Transcriber::load().and_then(|t| {
+        transcribe::Transcriber::for_languages(&languages).and_then(|t| {
             let readings: Vec<usize> = utterances.iter().map(|u| u.sources.len().min(merge::MAX_READINGS)).collect();
             let count = readings.iter().sum::<usize>().max(1) as f32;
             let mut done = 0;
             for (i, u) in utterances.iter().enumerate() {
+                let (start, end) = (samples(u.start_window), samples(u.end_window));
+                let language = match u.sources.first() {
+                    Some(&(clearest, _)) => t.detect(&sources[clearest].pcm, start, end, &languages),
+                    None => None,
+                }
+                .unwrap_or_else(|| languages[0].clone());
                 // Each microphone that heard it reads it, clearest first; they then vote on the words.
                 let mut heard = Vec::new();
                 for &(source, clarity) in &u.sources[..readings[i]] {
                     progress("Transcribing", 0.1 + 0.85 * done as f32 / count);
                     done += 1;
-                    let words = t.transcribe(&sources[source].pcm, samples(u.start_window), samples(u.end_window), prompt.as_deref())?;
+                    let words = t.transcribe(&sources[source].pcm, start, end, prompt.as_deref(), &language)?;
                     heard.push((vocabulary::drop_echo(words, &terms), clarity));
                 }
                 let combined = merge::combine(&heard);
                 texts[i] = combined.text;
                 if let Some(agreement) = combined.agreement {
                     confidences[i] = merge::boosted(u.confidence, agreement);
+                }
+                if language != languages[0] {
+                    line_language[i] = language;
                 }
             }
             Ok("transcript saved")
@@ -225,7 +245,8 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
         .iter()
         .zip(texts)
         .zip(confidences)
-        .map(|((u, text), confidence)| {
+        .zip(line_language)
+        .map(|(((u, text), confidence), language)| {
             let speaker = u.speaker_source.map_or(library::UNKNOWN.to_string(), |i| names[i].clone());
             let segment = Segment {
                 speaker,
@@ -234,6 +255,7 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
                 end_s: seconds(u.end_window),
                 text,
                 confidence,
+                language,
                 ..Default::default()
             };
             script::Clip { segment, heard: u.sources.iter().map(|(s, clarity)| (names[*s].clone(), *clarity)).collect() }
@@ -335,6 +357,9 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     progress("Saving", 0.98);
     let duration = sources.iter().map(|s| s.pcm.len()).max().unwrap_or(0) as f64 / RATE as f64;
     let mut meta = library::new_meta(dir, duration);
+    if first_time && meta.langs().is_empty() {
+        meta.set_langs(item_languages);
+    }
     name_from_prints(&mut meta, &segments, &line_voices);
     library::write_json(&dir.join(voices::LINE_VOICES), &line_voices)?;
     library::save(dir, &meta, &segments)?;

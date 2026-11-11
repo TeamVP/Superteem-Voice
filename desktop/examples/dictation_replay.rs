@@ -30,7 +30,7 @@ fn main() {
             let piece: Vec<i16> = pending.drain(..cut.at).collect();
             let start = taken as f32 / 16_000.0;
             taken += cut.at;
-            let text = if cut.speech && piece.len() > 4000 { listen::transcribe_all(&piece).unwrap_or_default() } else { String::new() };
+            let text = if cut.speech && piece.len() > 4000 { listen::transcribe_all(&piece, &[]).unwrap_or_default() } else { String::new() };
             let text = if process::is_silence(&text) { String::new() } else { text };
             println!("{now:6.1}s  piece {start:5.1}-{:5.1}s  {}", taken as f32 / 16_000.0, if text.is_empty() { "(nothing)".into() } else { text.clone() });
             last_empty = text.is_empty();

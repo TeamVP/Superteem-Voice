@@ -529,7 +529,8 @@ async function openNote(id, { dictate } = {}) {
   note = { id: data.id, title: data.title, body: data.body, keepAudio: !!data.keep_audio, archived: !!data.archived, status: data.status ?? "", dirty: false };
   view = { kind: "note", id: data.id };
   refreshItems();
-  renderNote({ ...data, langs: await languageData() }, dictate);
+  await languageData();
+  renderNote(data, dictate);
 }
 
 function renderNote(data, dictate) {
@@ -587,9 +588,9 @@ function renderNote(data, dictate) {
     }
   });
   const title = el("input", { class: "note-title", placeholder: "Title", value: data.title, "aria-label": "Title" });
-  const langs = data.langs;
-  note.language = data.language ?? "";
-  const noteLanguage = () => note.language || langs.primary;
+  note.languages = itemLanguages(data);
+  const noteLanguage = () => note.languages[0];
+  const langNotice = el("div", { class: "notice language-notice", hidden: true, "aria-live": "polite" });
   // An editable div rather than a textarea, so a dictation can hold its place in the text.
   const body = el("div", { class: "note-body", id: "note-body", contenteditable: "plaintext-only", role: "textbox", "aria-multiline": "true", "data-placeholder": isPhone()
     ? "Start typing, or press Dictate and talk. Your words appear at the cursor each time you pause, and it stops by itself when you finish."
@@ -626,28 +627,30 @@ function renderNote(data, dictate) {
     return invoke("export_note", { id: note.id, format });
   });
   main.replaceChildren(
-    el("div", { class: "topbar" }, picker, languagePicker(langs, note.language, async (value) => {
+    el("div", { class: "topbar" }, picker, languagePicker(note.languages, async (list) => {
       try {
         if (!note.id) {
           note.id = await invoke("save_note", { id: null, title: note.title, body: note.body, keepAudio: note.keepAudio });
           view.id = note.id;
           note.dirty = false;
         }
-        await invoke("set_note_language", { id: note.id, language: value });
-        note.language = value;
-        setLanguage([title, body], noteLanguage());
-        return true;
       } catch (e) {
         status.textContent = `Not saved: ${e}`;
         return false;
       }
+      const result = await changeItemLanguages("note", note.id, list, langNotice);
+      if (!result) return false;
+      note.languages = result.effective;
+      setLanguage([title, body], noteLanguage());
+      return true;
     }), status, el("span", { class: "grow" }),
       // The selection when there is one, else the whole note.
       readAloudButton(() => { const sel = getSelection().toString().trim(); return `${HEADING}${title.value}\n${sel || noteText(body)}`; }, "Read the note aloud", { lang: noteLanguage }),
       exporter, archive, remove),
-    exporter.status,
+    exporter.status, langNotice,
     el("div", { class: "note" }, title,
-      data.id ? analysisStack("note", data.id, { speakers: ["Me"], lang: noteLanguage, go: (source) => selectInNote(body, source) }) : null, chip, body),
+      data.id ? analysisStack("note", data.id, { speakers: ["Me"], lang: noteLanguage, go: (source) => selectInNote(body, source) }) : null,
+      data.id ? translationPanel("note", data.id, note.languages) : null, chip, body),
     el("div", { class: "toolbar" }, el("span", { class: "grow" }), talk, live));
   setLanguage([title, body], noteLanguage());
   // The cursor always starts in the body; a new note starts dictating straight away.
@@ -901,7 +904,7 @@ async function startDictation() {
   const started = Date.now();
   dictation.clockTimer = setInterval(() => { elapsed.textContent = clock((Date.now() - started) / 1000); }, 500);
   try {
-    dictation.session = await invoke("dictate_start", { continuous: true, note: keep ? note.id : null });
+    dictation.session = await invoke("dictate_start", { continuous: true, note: keep ? note.id : null, languages: note?.languages ?? null });
   } catch (e) {
     removeDictationSlot(dictation.anchor);
     endDictationUi();
@@ -1697,11 +1700,14 @@ function renderSession(session, processingError, suggestion) {
     return true;
   });
   // Fetched before the page is drawn (see openSession).
-  const langs = languageInfo ?? { all: [["en", "English"]], chosen: ["en"], primary: "en" };
-  const meetingLanguage = () => meta.language || langs.primary;
-  const languageChoice = languagePicker(langs, meta.language ?? "", async (language) => {
-    if (!(await save("set_session_language", { language }))) return false;
-    meta.language = language;
+  let meetingLanguages = itemLanguages(meta);
+  const meetingLanguage = () => meetingLanguages[0];
+  const langNotice = el("div", { class: "notice language-notice", hidden: true, "aria-live": "polite" });
+  const languageChoice = languagePicker(meetingLanguages, async (list) => {
+    const result = await changeItemLanguages("meeting", id, list, langNotice);
+    if (!result) return false;
+    meetingLanguages = result.effective;
+    meta.languages = result.languages;
     setLanguage([page], meetingLanguage());
     return true;
   });
@@ -1721,7 +1727,7 @@ function renderSession(session, processingError, suggestion) {
       "aria-label": "Open this meeting's folder", onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
     session.model_ready && !session.needs_processing && !meta.compacted ? reprocess : null,
     remove);
-  page.append(exporter.status, confirmBox, title);
+  page.append(exporter.status, confirmBox, langNotice, title);
 
   const processNow = el("button", { class: "primary" }, "Process now");
   processNow.addEventListener("click", () => processAgain(id));
@@ -1743,19 +1749,23 @@ function renderSession(session, processingError, suggestion) {
   }
   // Analyses sit under the title, above the transcript; their sources jump to the line and play from it.
   if (session.transcribed) {
+    const goToLine = (source) => {
+      const hit = lineEls.find((l) => l.seg.id === source.segment);
+      if (hit) {
+        hit.line.scrollIntoView({ behavior: "smooth", block: "center" });
+        hit.line.classList.add("flash");
+        setTimeout(() => hit.line.classList.remove("flash"), 1800);
+      }
+      if (player && source.at_s != null) player.seek(source.at_s);
+    };
     page.append(analysisStack("meeting", id, {
       lang: meetingLanguage,
       speakers: session.speakers.filter((sp) => sp.key !== "unknown").map((sp) => sp.name),
-      go: (source) => {
-        const hit = lineEls.find((l) => l.seg.id === source.segment);
-        if (hit) {
-          hit.line.scrollIntoView({ behavior: "smooth", block: "center" });
-          hit.line.classList.add("flash");
-          setTimeout(() => hit.line.classList.remove("flash"), 1800);
-        }
-        if (player && source.at_s != null) player.seek(source.at_s);
-      },
+      go: goToLine,
     }));
+    // A translation into another of the person's languages, under the analyses.
+    const translation = translationPanel("meeting", id, meetingLanguages, { go: (line) => goToLine({ segment: Number(line.id), at_s: line.at_s }) });
+    if (translation) page.append(translation);
   }
   // Shown behind the "?" with the other notes on reading the transcript.
   const extraHelp = [];
@@ -1960,7 +1970,20 @@ function renderSession(session, processingError, suggestion) {
     const original = double ? lineById.get(seg.echo_of) : null;
     const keep = double ? el("button", { class: "link", type: "button", title: "Put this line back in the script, as something said that the other line doesn't have" }, "Keep in script") : null;
     keep?.addEventListener("click", async () => { if (await save("keep_segment", { segment: seg.id })) reload(); });
-    const who = el("div", { class: "who" }, select,
+    // In a meeting in two languages, which one each line was heard in; choosing the other hears it again.
+    const lineLanguage = seg.language || meetingLanguages[0];
+    let languageMark = null;
+    if (meetingLanguages.length > 1 && !double) {
+      languageMark = el("select", { class: "line-language", title: "The language this line is in. Choosing the other transcribes it again.", "aria-label": "Language of this line" },
+        meetingLanguages.map((c) => el("option", { value: c, selected: c === lineLanguage }, languageName(c))));
+      languageMark.addEventListener("change", async () => {
+        languageMark.disabled = true;
+        if (await save("set_line_language", { segment: seg.id, language: languageMark.value })) reload();
+        else { languageMark.disabled = false; languageMark.value = lineLanguage; }
+      });
+    }
+    setLanguage([text], lineLanguage);
+    const who = el("div", { class: "who" }, select, languageMark,
       seg.overlap ? el("span", { class: "mark", title: "Someone else was speaking at the same time" }, "talking at once") : null,
       seg.edited ? el("span", { class: "edited" }, "edited") : null,
       double ? el("span", { class: "mark", title: original ? `Heard more clearly on ${trackName(original.stream)}: “${original.text}”` : "" },

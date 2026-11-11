@@ -4,6 +4,7 @@ use crate::library;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use stv_core::lang;
 
 const FILE: &str = "preferences.json";
 /// The name the pins are remembered under, as they are chosen together rather than one by one.
@@ -99,6 +100,16 @@ pub struct Prefs {
     /// The voice that reads each language, by code: a natural voice's id, or "system". A language not here
     /// reads with the main voice when it speaks that language.
     pub voice_for: std::collections::BTreeMap<String, String>,
+    /// The languages new notes and meetings start in; empty for the primary one alone.
+    pub default_languages: Vec<String>,
+    /// Languages notes and meetings are translated into when asked, or after processing when
+    /// `auto_translate` is on.
+    pub translate_into: Vec<String>,
+    /// Translate meetings into `translate_into` once they're processed. Unset: off.
+    pub auto_translate: Option<bool>,
+    /// The speech model used for languages other than English (an id from `transcribe::MODELS`); empty to
+    /// use the best one downloaded.
+    pub speech_model: String,
     /// Which set of example vocabulary has been added (see `vocabulary::add_examples`), so each is added once
     /// and one the person deletes stays deleted.
     pub vocab_examples: u32,
@@ -107,31 +118,36 @@ pub struct Prefs {
 /// Starred until the person chooses their own.
 pub const DEFAULT_STARRED: &[&str] = &["meeting-summary", "executive-brief", "engineering-actions", "lecture-notes"];
 
-/// The languages people can choose for now, as codes and their names.
-pub const LANGUAGES: &[(&str, &str)] = &[
-    ("ar", "Arabic"),
-    ("en", "English"),
-    ("zh", "Chinese (Mandarin)"),
-    ("fr", "French"),
-    ("hi", "Hindi"),
-    ("es", "Spanish"),
-    ("tr", "Turkish"),
-    ("cy", "Welsh"),
-];
-
-/// A language for a note or meeting: one of `LANGUAGES`, or empty for the person's primary language.
+/// A language for a note or meeting: one in the catalogue, or empty for the person's primary language.
 pub fn check_language(language: &str) -> Result<String, String> {
-    if language.is_empty() || LANGUAGES.iter().any(|(c, _)| *c == language) {
+    if language.is_empty() || lang::is_known(language) {
         Ok(language.to_string())
     } else {
         Err("That language isn't one Voice offers yet.".into())
     }
 }
 
+/// The languages a note or meeting is in, from its saved list or the single language older files kept.
+/// Empty means the person's primary language.
+pub fn item_languages(languages: &[String], language: &str) -> Vec<String> {
+    if !languages.is_empty() {
+        lang::clean_list(languages)
+    } else if lang::is_known(language) {
+        vec![language.to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
 impl Prefs {
     /// The person's languages, the primary one among them.
     pub fn languages(&self) -> Vec<String> {
-        let mut out: Vec<String> = self.languages.iter().filter(|l| LANGUAGES.iter().any(|(c, _)| c == l)).cloned().collect();
+        let mut out: Vec<String> = Vec::new();
+        for l in self.languages.iter().filter(|l| lang::is_known(l)) {
+            if !out.contains(l) {
+                out.push(l.clone());
+            }
+        }
         if out.is_empty() {
             out.push("en".into());
         }
@@ -143,7 +159,28 @@ impl Prefs {
     }
 
     pub fn primary_language(&self) -> String {
-        if LANGUAGES.iter().any(|(c, _)| *c == self.primary_language) { self.primary_language.clone() } else { "en".into() }
+        if lang::is_known(&self.primary_language) { self.primary_language.clone() } else { "en".into() }
+    }
+
+    /// The languages an item is in: its own, or the primary one.
+    pub fn effective(&self, item: &[String]) -> Vec<String> {
+        if item.is_empty() { vec![self.primary_language()] } else { item.to_vec() }
+    }
+
+    /// The languages a new note or meeting starts in; empty means the primary one.
+    pub fn new_item_languages(&self) -> Vec<String> {
+        let l = lang::clean_list(&self.default_languages);
+        if l.len() == 1 && l[0] == self.primary_language() { Vec::new() } else { l }
+    }
+
+    /// Languages to translate into, without the ones `item` is already in.
+    pub fn translate_targets(&self, item: &[String]) -> Vec<String> {
+        let mine = self.languages();
+        self.translate_into.iter().filter(|l| lang::is_known(l) && mine.contains(l) && !item.contains(l)).cloned().collect()
+    }
+
+    pub fn auto_translate(&self) -> bool {
+        self.auto_translate.unwrap_or(false)
     }
 
     pub fn starred(&self) -> Vec<String> {

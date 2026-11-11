@@ -61,18 +61,16 @@ pub struct LineIn<'a> {
     pub text: &'a str,
 }
 
-/// Said only to keep the conversation going; dropped from the input.
+/// Said only to keep the conversation going, in any of the languages Voice knows; dropped from the input.
 fn is_filler(text: &str) -> bool {
-    const FILLER: &[&str] = &[
-        "yeah", "yes", "yep", "ok", "okay", "mm", "mhm", "mm-hm", "uh-huh", "right", "sure", "um", "uh", "hmm", "so",
-        "cool", "great", "thanks", "thank you",
-    ];
     let words: Vec<String> = text
         .split_whitespace()
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '-').to_lowercase())
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '\'').to_lowercase())
         .filter(|w| !w.is_empty())
         .collect();
-    words.is_empty() || (words.len() <= 3 && words.iter().all(|w| FILLER.contains(&w.as_str())))
+    let filler = |w: &str| crate::lang::LANGUAGES.iter().map(|l| l.code).chain(["xx"]).any(|c| crate::lang::fillers(c).contains(&w));
+    let whole = words.join(" ");
+    words.is_empty() || filler(&whole) || (words.len() <= 3 && words.iter().all(|w| filler(w)))
 }
 
 /// Joins a speaker's consecutive lines into one turn and drops filler, keeping every line's id.
@@ -585,6 +583,8 @@ pub struct Context<'a> {
     pub glossary: &'a str,
     pub is_note: bool,
     pub bookmarks: &'a [Bookmark],
+    /// The language to write in, as a catalogue code; empty for English.
+    pub language: &'a str,
 }
 
 pub const ROLE: &str = "You write notes from a transcript. You are careful and literal.
@@ -661,6 +661,13 @@ only asked or mentioned (\"ask Priya\") isn't the owner; the person who has to a
         out += "Every item with evidence cites the ids of the lines it comes from.\n";
     }
     out += "A question stays a question: never give an answer nobody gave. Any list can be empty.\n";
+    if !ctx.language.is_empty() && ctx.language != crate::lang::ENGLISH {
+        out += &format!(
+            "Write every text value in {}, the language of the {}. Keep names as written.\n",
+            crate::lang::name(ctx.language),
+            if ctx.is_note { "note" } else { "transcript" }
+        );
+    }
     if t.bookmarks.expand && !bookmarks.is_empty() {
         out += "- bookmarks: the person marked these moments while it was happening. For each, in order, write one\n  complete point saying what was being discussed or decided there, with evidence:\n";
         for b in bookmarks {
@@ -837,12 +844,9 @@ const STOP: &[&str] = &[
 ];
 
 /// Content words, roughly stemmed so "sending" and "send" match.
+/// Chinese and Japanese, written without spaces, give pairs of characters instead.
 fn words(text: &str) -> BTreeSet<String> {
-    text.split(|c: char| !c.is_alphanumeric())
-        .map(str::to_lowercase)
-        .filter(|w| w.len() > 2 && !STOP.contains(&w.as_str()))
-        .map(|w| w.chars().take(5).collect())
-        .collect()
+    crate::lang::content_keys(text, STOP)
 }
 
 fn jaccard(a: &str, b: &str) -> f64 {
@@ -1646,6 +1650,24 @@ mod link_tests {
 mod tests {
     use super::*;
 
+    #[test]
+    fn chinese_claims_are_checked_by_character_pairs() {
+        assert!(!words("下周发布新版本").is_disjoint(&words("我们下周要发布")));
+        assert!(words("预算").is_disjoint(&words("我们下周要发布")));
+        assert!(is_filler("嗯嗯") || is_filler("好的"));
+        assert!(is_filler("diolch"));
+    }
+
+    #[test]
+    fn analyses_in_another_language_are_asked_for_in_it() {
+        let t = built_in().into_iter().find(|t| t.id == "meeting-summary").unwrap();
+        let speakers = vec!["Wen".to_string()];
+        let ctx = Context { title: "定价", date: "", duration_s: 60.0, speakers: &speakers, glossary: "", is_note: false, bookmarks: &[], language: "zh" };
+        assert!(instructions(&t, &ctx, &[], None).contains("Chinese (Mandarin, Simplified)"));
+        let en = Context { language: "", ..ctx };
+        assert!(!instructions(&t, &en, &[], None).contains("Write every text value in"));
+    }
+
     fn turns() -> Vec<Turn> {
         let lines = [
             (0, "Alice", 3.0, "Welcome. Today is about pricing."),
@@ -1924,7 +1946,7 @@ type = "refs""#,
     fn a_short_transcript_is_one_pass() {
         let mut fake = Fake(vec![r#"{"summary":"Pricing.","decisions":[],"action_items":[],"open_questions":[]}"#.into()]);
         let speakers = vec!["Alice".to_string(), "Raj".to_string()];
-        let ctx = Context { title: "Pricing", date: "", duration_s: 60.0, speakers: &speakers, glossary: "", is_note: false, bookmarks: &[] };
+        let ctx = Context { title: "Pricing", date: "", duration_s: 60.0, speakers: &speakers, glossary: "", is_note: false, bookmarks: &[], language: "" };
         let a = analyse(&mut fake, &summary(), &turns(), &ctx, |_, _| {}).unwrap();
         assert_eq!(a.result["summary"], "Pricing.");
     }

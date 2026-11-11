@@ -88,20 +88,31 @@ pub fn phrases_changed() {
     PHRASES_VERSION.fetch_add(1, Ordering::Relaxed);
 }
 
-/// Transcribes dictation, steered towards the app's name and the person's vocabulary, then corrected by it.
-pub fn transcribe_all(pcm: &[i16]) -> Result<String, String> {
-    let prompt = vocabulary::prompt(PROMPT, &vocabulary::load()).unwrap_or_else(|| PROMPT.to_string());
-    let words = with_transcriber(|t| t.transcribe_with_prompt(pcm, &prompt))?;
-    Ok(vocabulary::correct_text(&words))
+//// Transcribes dictation in `languages` (the note's, main one first), steered towards the app's name and
+/// the person's vocabulary, then corrected by it. With two languages, each clip is heard as whichever it
+/// sounds like.
+pub fn transcribe_all(pcm: &[i16], languages: &[String]) -> Result<String, String> {
+    let languages = if languages.is_empty() { vec![crate::prefs::load().primary_language()] } else { languages.to_vec() };
+    let terms = vocabulary::load();
+    with_transcriber(&languages, |t| {
+        let language = t.detect(pcm, 0, pcm.len(), &languages).unwrap_or_else(|| languages[0].clone());
+        // The app's name only steers English; elsewhere it would pull whisper towards English.
+        let base = if language == stv_core::lang::ENGLISH { PROMPT } else { "" };
+        let words = match vocabulary::prompt(base, &terms) {
+            Some(prompt) => t.transcribe_with_prompt(pcm, &prompt, &language)?,
+            None => t.transcribe_plain(pcm, &language)?,
+        };
+        Ok(vocabulary::correct_text(&words))
+    })
 }
 
 /// Returns the words spoken since `dictate_start`, and the audio they came from.
-pub fn dictate_stop() -> Result<(String, Vec<i16>), String> {
+pub fn dictate_stop(languages: &[String]) -> Result<(String, Vec<i16>), String> {
     let pcm = dictate_stop_audio()?;
     if pcm.len() < RATE as usize / 4 {
         return Ok((String::new(), pcm));
     }
-    Ok((transcribe_all(&pcm)?, pcm))
+    Ok((transcribe_all(&pcm, languages)?, pcm))
 }
 
 /// What whisper writes for the words spoken since `dictate_start` with nothing to steer or correct it, so
@@ -111,24 +122,42 @@ pub fn dictate_stop_plain() -> Result<String, String> {
     if pcm.len() < RATE as usize / 4 {
         return Ok(String::new());
     }
-    with_transcriber(|t| t.transcribe_plain(&pcm))
+    let primary = crate::prefs::load().primary_language();
+    with_transcriber(std::slice::from_ref(&primary), |t| t.transcribe_plain(&pcm, &primary))
 }
 
-/// Transcribes a short phrase heard by the listener, with no prompt for whisper to repeat.
+/// Transcribes a short phrase heard by the listener, with no prompt for whisper to repeat. The wake word
+/// and commands are English.
 pub fn transcribe_phrase(pcm: &[i16]) -> Result<String, String> {
-    with_transcriber(|t| t.transcribe_plain(pcm))
+    let english = [stv_core::lang::ENGLISH.to_string()];
+    with_transcriber(&english, |t| t.transcribe_plain(pcm, stv_core::lang::ENGLISH))
 }
 
-/// Loads the model once and keeps it, so each phrase is quick.
-fn with_transcriber(run: impl FnOnce(&Transcriber) -> Result<String, String>) -> Result<String, String> {
+/// Loads the model `languages` need once and keeps it, so each phrase is quick. Only one model is kept,
+/// as each takes hundreds of megabytes.
+fn with_transcriber(languages: &[String], run: impl FnOnce(&Transcriber) -> Result<String, String>) -> Result<String, String> {
     if !transcribe::model_ready() {
         return Err("Download the speech model first, in Settings.".into());
     }
+    let (model, ready) = transcribe::model_for(languages);
+    if !ready {
+        return Err(format!(
+            "{} needs the {} speech model. Download it in Settings › Languages.",
+            transcribe::names(languages),
+            model.name
+        ));
+    }
     let mut slot = TRANSCRIBER.lock().unwrap();
-    if slot.is_none() {
-        *slot = Some(Transcriber::load()?);
+    if slot.as_ref().is_none_or(|t| t.model != model.id) {
+        *slot = None;
+        *slot = Some(Transcriber::load(model)?);
     }
     run(slot.as_ref().unwrap())
+}
+
+/// Drops the loaded model, before its file is deleted.
+pub fn forget_transcriber() {
+    *TRANSCRIBER.lock().unwrap() = None;
 }
 
 const FRAME_MS: usize = 1000 * FRAME_SAMPLES / RATE as usize;

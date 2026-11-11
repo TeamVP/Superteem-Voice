@@ -21,7 +21,7 @@ fn main() {
     println!("loaded in a worker in {:.1} s", started.elapsed().as_secs_f32());
     let item = analysis::Item::new("meeting", &id).unwrap();
     let engine = analysis::Engine { kind: "local".into(), model: model.name.clone(), host: None };
-    let entry = analysis::make(&item, "meeting-summary", &mut model, engine, |_, _| {}).unwrap();
+    let entry = analysis::make(&item, "meeting-summary", &mut model, engine, |_, _, _| {}).unwrap().remove(0);
     println!("analysed in {:.1} s: {}", entry.seconds, entry.result["summary"]);
 }
 

@@ -30,14 +30,14 @@ fn main() {
     let device = llm::device();
     let mut model = llm::Local::load(&model_path, device.context, device.threads, true, Default::default()).unwrap();
     let engine = Engine { kind: "local".into(), model: model.name.clone(), host: None };
-    let entry = analysis::make(&item, &template, &mut model, engine.clone(), |k, n| eprintln!("part {k}/{n}")).unwrap();
-    analysis::put(&item, entry).unwrap();
+    let entry = analysis::make(&item, &template, &mut model, engine.clone(), |step, k, n| eprintln!("{step} {k}/{n}")).unwrap();
+    for e in entry { analysis::put(&item, e).unwrap(); }
 
     // The person ticks the first task, reassigns it and adds their own; then it's made again.
     analysis::edit(&item, &template, Edit::Done { field: "action_items".into(), index: 0, done: true }).unwrap();
     analysis::edit(&item, &template, Edit::Add { field: "action_items".into(), item: serde_json::json!({"who": "Me", "what": "Book the room", "when": null, "evidence": []}) }).unwrap();
-    let again = analysis::make(&item, &template, &mut model, engine, |_, _| {}).unwrap();
-    analysis::put(&item, again).unwrap();
+    let again = analysis::make(&item, &template, &mut model, engine, |_, _, _| {}).unwrap();
+    for e in again { analysis::put(&item, e).unwrap(); }
 
     let view = analysis::view(&item);
     std::fs::write(out.join("view.json"), serde_json::to_string_pretty(&serde_json::json!({

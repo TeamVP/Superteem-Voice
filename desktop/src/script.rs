@@ -203,6 +203,8 @@ pub fn find_echoes(clips: &mut [Clip]) -> Vec<Option<usize>> {
 fn stitch_blocker(line: &Segment, last_start: f64, next: &Segment, marks: &[f64]) -> Option<&'static str> {
     if line.speaker != next.speaker || line.stream != next.stream {
         Some("another voice or microphone")
+    } else if line.language != next.language {
+        Some("another language")
     } else if line.edited || next.edited {
         Some("edited by hand")
     } else if next.start_s - line.end_s > STITCH_GAP_S {
@@ -276,10 +278,16 @@ fn join_text(prev: &str, next: &str, overlapping: bool, note: Option<&str>) -> S
         Some(note) => format!("{} {note} {}", trailing_ellipsis(prev), next.trim()),
         None if next.trim().is_empty() => prev.trim().to_string(),
         // Whisper's "..." where a clip was cut off is mended by the clip that carries on.
-        None if !ends_sentence(prev) => format!("{} {}", trailing_ellipsis(prev), next.trim()),
-        None => format!("{} {}", prev.trim(), capitalised(next.trim())),
+        None if !ends_sentence(prev) => glue(&trailing_ellipsis(prev), next.trim()),
+        None => glue(prev.trim(), &capitalised(next.trim())),
     };
     text.trim().to_string()
+}
+
+/// Two pieces of text with a space between them, except between Chinese or Japanese, which has none.
+fn glue(a: &str, b: &str) -> String {
+    let wide = |c: Option<char>| c.is_some_and(|c| stv_core::lang::unspaced(c) || matches!(c, '，' | '。' | '？' | '！' | '：' | '；' | '、'));
+    if wide(a.chars().last()) && wide(b.chars().next()) { format!("{a}{b}") } else { format!("{a} {b}") }
 }
 
 /// Stitches each person's clips on one microphone into lines. `segments` are in time order, with ids equal

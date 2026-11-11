@@ -21,13 +21,15 @@ Voice by Superteem turns speech into text on your PC, Mac or phone. You can dict
 - **Voice notes:** start a note and talk. Your words are written into it as you go.
 - **Meeting transcripts:** record from several microphones at once. You get a timecoded transcript with speakers recognised by voice print, plus bookmarks and action items.
 - **Summaries and action items:** decisions, action items (who, what, when) and open questions, written by a small language model that runs on your device. Templates for standups, user interviews, sales calls, lectures and more stack at the top of a meeting or note; every point links to the line it came from. Make your own from a list of headings.
+- **Many languages:** each note or meeting is in one language, or two for people who switch between them, such as Chinese and English or Welsh and English. Choosing a language the app hasn't used yet adds it to yours and offers the speech model it needs.
+- **Translation:** translate a meeting or note line by line into your other languages, and correct any line. For languages the language model writes less well, analyses are made from an English translation and can be translated back.
 - **Voice commands (Windows and Mac):** say "Hey Superteem, start meeting", "take a note" or "bookmark that".
 - **Plain files:** each meeting is a folder of WAV audio and `transcript.json`. Text, Markdown and SRT copies are written next to them and regenerated on every edit. On Windows and the Mac the folders live in `Documents/Superteem Voice`; on iPhone, in the Files app under On My iPhone.
 - **Voice Pin (in development):** support for Seeed's wearable [reSpeaker Clip](https://github.com/Seeed-Studio/reSpeaker_Clip), which runs Seeed's own open-source firmware.
 
-Summaries use [llama.cpp](https://github.com/ggml-org/llama.cpp) with a small model you choose in Settings (Qwen2.5 1.5B, about 1.1 GB, is recommended), downloaded once. You can also point it at a local server such as Ollama.
+Summaries and translations use [llama.cpp](https://github.com/ggml-org/llama.cpp) with a small model you choose in Settings, downloaded once: Qwen3 1.7B (about 1.1 GB) is quick, and Qwen3.5 4B (about 2.7 GB) is much better for translation and for languages such as Welsh. You can also point it at a local server such as Ollama.
 
-Transcription uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with the English `base.en` model. The app downloads the model (about 140 MB) once on first run and then works offline.
+Transcription uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp). English uses the English `base.en` model, which the app downloads (about 150 MB) once on first run. Other languages use a multilingual Whisper model, offered when you first choose one: `large-v3-turbo` (about 570 MB) on PCs with a graphics card, `small` (about 260 MB) on phones and other PCs. Both then work offline. Spoken commands are English for now.
 
 ## Download
 

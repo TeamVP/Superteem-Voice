@@ -103,6 +103,9 @@ pub struct Segment {
     /// Words the vocabulary changed or suggests changing, so each can be undone or accepted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fixes: Vec<stv_core::vocab::Fix>,
+    /// The language it was heard in, when the meeting is in two; empty when it's in the meeting's main one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub language: String,
 }
 
 impl Segment {
@@ -141,9 +144,13 @@ pub struct Meta {
     /// The audio was deleted to save space; only the transcript is left, so it can't be processed again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub compacted: bool,
-    /// The language it's in, as a code ("cy"); empty for the person's primary language.
+    /// The language older versions kept, before a meeting could be in two; read into `languages`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub language: String,
+    /// The languages it's in, as codes ("cy", "en"), the main one first; empty for the person's primary
+    /// language.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<String>,
 }
 
 /// Workflow states a note or meeting can be in. Empty is the default: no status yet.
@@ -185,6 +192,16 @@ pub struct PrintLink {
 }
 
 impl Meta {
+    /// The languages it's in as saved; empty for the person's primary language.
+    pub fn langs(&self) -> Vec<String> {
+        crate::prefs::item_languages(&self.languages, &self.language)
+    }
+
+    pub fn set_langs(&mut self, languages: Vec<String>) {
+        self.languages = languages;
+        self.language.clear();
+    }
+
     pub fn name(&self, speaker: &str) -> String {
         match self.names.get(speaker) {
             Some(name) => name.clone(),
@@ -213,6 +230,11 @@ pub fn write_text(path: &Path, text: &str) -> Result<(), String> {
     let partial = path.with_extension("part");
     fs::write(&partial, text).map_err(|e| e.to_string())?;
     fs::rename(&partial, path).map_err(|e| e.to_string())
+}
+
+/// Whether a meeting has been saved with its details yet; a new recording hasn't until it's processed.
+pub fn has_meta(dir: &Path) -> bool {
+    dir.join(META).exists()
 }
 
 pub fn load_meta(dir: &Path) -> Meta {

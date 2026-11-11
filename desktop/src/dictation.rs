@@ -51,6 +51,8 @@ struct Session {
     keep_for: Option<String>,
     kept: Vec<i16>,
     clips: u64,
+    /// The languages the note is in, main one first.
+    languages: Vec<String>,
 }
 
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
@@ -59,11 +61,11 @@ static WORK: Mutex<()> = Mutex::new(());
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 /// The words in a piece, or nothing for silence or Whisper's markers for it.
-fn words(pcm: &[i16]) -> Result<String, String> {
+fn words(pcm: &[i16], languages: &[String]) -> Result<String, String> {
     if pcm.len() < process::RATE as usize / 4 {
         return Ok(String::new());
     }
-    let text = listen::transcribe_all(pcm)?;
+    let text = listen::transcribe_all(pcm, languages)?;
     Ok(if process::is_silence(&text) { String::new() } else { text.trim().to_string() })
 }
 
@@ -86,6 +88,7 @@ fn learn_noise(session: &mut Session, pcm: &[i16]) -> Option<f32> {
 /// `on_words` gets its words once written down, and `on_end` is told when it ends by itself.
 pub fn start(
     keep_for: Option<String>,
+    languages: Vec<String>,
     on_clip: impl Fn(Clip) + Send + 'static,
     on_words: impl Fn(Words) + Send + 'static,
     on_end: impl Fn(Ended) + Send + 'static,
@@ -95,7 +98,7 @@ pub fn start(
     }
     listen::dictate_start()?;
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    *SESSION.lock().unwrap() = Some(Session { id, started: Instant::now(), last_empty: false, heard: false, noise_db: None, keep_for, kept: Vec::new(), clips: 0 });
+    *SESSION.lock().unwrap() = Some(Session { id, started: Instant::now(), last_empty: false, heard: false, noise_db: None, keep_for, kept: Vec::new(), clips: 0, languages });
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(Duration::from_millis(300));
@@ -116,11 +119,12 @@ pub fn start(
                 }
                 session.clips += 1;
                 let clip = session.clips;
+                let languages = session.languages.clone();
                 on_clip(Clip { session: id, clip });
                 // Written down without holding the session, so the level meter and stop stay quick; the
                 // microphone keeps recording the next clip meanwhile.
                 drop(guard);
-                let text = words(&piece).unwrap_or_default();
+                let text = words(&piece, &languages).unwrap_or_default();
                 let mut guard = SESSION.lock().unwrap();
                 let Some(session) = guard.as_mut().filter(|s| s.id == id) else {
                     // Stopped while this clip was written down: its words still go in.
@@ -156,7 +160,7 @@ fn finish(id: u64) -> Result<String, String> {
         guard.take().expect("checked")
     };
     let rest = listen::dictate_stop_audio()?;
-    let text = words(&rest)?;
+    let text = words(&rest, &session.languages)?;
     if let Some(note) = &session.keep_for {
         let mut audio = session.kept;
         audio.extend_from_slice(&rest);

@@ -55,6 +55,7 @@ fn main() {
         glossary: &glossary,
         is_note: input.is_note,
         bookmarks: &input.bookmarks,
+        language: "",
     };
 
     let loading = Instant::now();

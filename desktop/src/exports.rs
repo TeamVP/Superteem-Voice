@@ -185,7 +185,7 @@ pub fn render_mix(tracks: &[(Vec<i16>, Vec<(f64, f64)>)], rate: u32) -> Vec<i16>
 }
 
 /// 16-bit mono PCM from a WAV written by this app.
-fn read_wav(path: &Path) -> Result<Vec<i16>, String> {
+pub fn read_wav(path: &Path) -> Result<Vec<i16>, String> {
     let data = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let at = data.windows(4).position(|w| w == b"data").ok_or_else(|| format!("{} is not a WAV file", path.display()))? + 8;
     Ok(data[at..].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect())
@@ -493,6 +493,18 @@ pub fn export_note(id: &str, format: &str) -> Result<PathBuf, String> {
         }
         _ => Err(format!("Unknown export format: {format}")),
     }
+}
+
+/// Exports a translation of a meeting or note as "txt" or "md".
+pub fn export_translation(item: &crate::analysis::Item, language: &str, format: &str) -> Result<PathBuf, String> {
+    if !matches!(format, "txt" | "md") {
+        return Err(format!("Unknown export format: {format}"));
+    }
+    let (title, text) = crate::translations::render(item, language, format == "md")?;
+    fs::create_dir_all(dir()).map_err(|e| e.to_string())?;
+    let path = fresh(&file_name(&title), format);
+    write(&path, &text)?;
+    Ok(path)
 }
 
 /// Shows an exported file or folder in File Explorer or Finder.

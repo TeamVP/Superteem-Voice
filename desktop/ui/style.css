@@ -763,7 +763,7 @@ button.primary.danger-fill { background: #c0262d; border-color: #c0262d; color: 
 .analysis-head .chevron { width: 28px; height: 28px; }
 .analysis-name { border: none; background: transparent; padding: 0; font-weight: 650; font-size: 15px; color: var(--text); cursor: pointer; min-height: 0; }
 .analysis-head .digest { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 200px; min-width: 0; }
-.analysis-card .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; border-radius: 999px; padding: 2px 8px; background: var(--raised); color: var(--soft); }
+.analysis-card .badge, .translation .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; border-radius: 999px; padding: 2px 8px; background: var(--raised); color: var(--soft); }
 .analysis-card .badge.stale, .badge.stale { background: var(--warn-bg); color: var(--in-progress); }
 .badge.ok { background: transparent; color: var(--ok); font-size: 12px; margin-left: 8px; }
 .analysis-card .badge .spinner { width: 12px; height: 12px; }
@@ -934,4 +934,27 @@ body[data-platform="ios"] { box-sizing: border-box; padding: env(safe-area-inset
   /* The language picker sits on the second line, with the date, so the status and icons keep the first. */
   .topbar:has(> .status-picker) > .language-picker { order: 10; }
   .topbar:has(> .status-picker) > .status, .meeting-top .top-info { flex-basis: calc(100% - 180px); flex-grow: 1; }
+}
+
+/* Languages: the picker beside the status, a line's language, and the translation panel. */
+.language-picker-wrap { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.language-picker-wrap select { max-width: 190px; }
+.language-picker-wrap select.second { max-width: 170px; color: var(--muted); }
+.who select.line-language { font-weight: 400; font-size: 11px; padding: 0 4px; min-height: 0; height: 22px; margin-left: 6px; color: var(--muted); }
+.language-notice p { margin: 0 0 6px; }
+.language-notice .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.badge.language { margin-left: 8px; font-weight: 500; }
+.translation { margin: 12px 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 8px 14px; }
+.translation-head { flex-wrap: wrap; }
+.translation-head select { max-width: 200px; }
+.translation-lines { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
+.translation-line { padding: 6px 0; border-top: 1px solid var(--line); }
+.translation-line:first-child { border-top: none; }
+.translation-line .editable { display: block; }
+.translation-line.same .editable { color: var(--muted); }
+.translation-who { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 2px; flex-wrap: wrap; }
+.translation-original { font-size: 12px; color: var(--muted); margin-top: 2px; }
+@media (max-width: 700px) {
+  .language-picker-wrap select, .language-picker-wrap select.second { max-width: 130px; }
+  .translation { padding: 8px 10px; }
 }

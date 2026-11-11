@@ -24,11 +24,15 @@ const jobKey = (j) => `${j.kind}/${j.id}/${j.template}`;
 
 listen("analysis-queue", () => refreshAnalyses());
 listen("analysing", (e) => {
-  analysisProgress.set(jobKey(e.payload), e.payload.parts > 1 ? `Reading part ${e.payload.part} of ${e.payload.parts}…` : "Reading…");
+  const step = e.payload.step === "Analysing" || !e.payload.step ? "Reading" : e.payload.step;
+  analysisProgress.set(jobKey(e.payload), e.payload.parts > 1 ? `${step}: part ${e.payload.part} of ${e.payload.parts}…` : `${step}…`);
   refreshAnalyses();
+  if (typeof refreshTranslation === "function") refreshTranslation(e.payload);
 });
 listen("analysed", (e) => {
   analysisProgress.delete(jobKey(e.payload));
+  if (typeof refreshTranslation === "function") refreshTranslation(e.payload, true);
+  if (e.payload.template.startsWith("translate:")) return;
   if (e.payload.error && analysisPage && analysisPage.kind === e.payload.kind && analysisPage.id === e.payload.id) {
     analysisPage.errors.set(e.payload.template, e.payload.error);
   }
@@ -65,13 +69,22 @@ function renderAnalyses(page, data) {
   if (open) return; // Don't redraw under an open menu; the next event will.
   const running = (t) => isJob(data.queue.current, page, t);
   const waiting = (t) => data.queue.waiting.some((j) => isJob(j, page, t));
-  const cards = data.entries.map((e) => analysisCard(page, e, data, running(e.template.id), waiting(e.template.id)));
-  // A template asked for that has no result yet shows as a card in progress.
-  const pending = data.templates.filter((t) => !data.entries.some((e) => e.template.id === t.id) && (running(t.id) || waiting(t.id)));
-  for (const t of pending) cards.push(pendingCard(page, t, running(t.id)));
+  const cards = data.entries.map((e) => analysisCard(page, e, data, running(e.key), waiting(e.key)));
+  // A template asked for that has no result yet shows as a card in progress, as does a translation of one.
+  const jobs = [data.queue.current, ...data.queue.waiting].filter((j) => isJob(j, page) && !j.template.startsWith("translate:"));
+  const pending = [];
+  for (const j of jobs) {
+    if (data.entries.some((e) => e.key === j.template) || pending.some((p) => p.key === j.template)) continue;
+    const [id, language] = j.template.split("@");
+    const t = data.templates.find((t) => t.id === id);
+    if (t) pending.push({ ...t, key: j.template, name: language ? `${t.name} · ${languageName(language)}` : t.name });
+  }
+  for (const t of pending) cards.push(pendingCard(page, t, running(t.key)));
   for (const [template, error] of page.errors) {
-    if (data.entries.some((e) => e.template.id === template) || pending.some((t) => t.id === template)) continue;
-    const name = data.templates.find((t) => t.id === template)?.name ?? template;
+    if (data.entries.some((e) => e.key === template) || pending.some((t) => t.key === template)) continue;
+    const [id, language] = template.split("@");
+    const base = data.templates.find((t) => t.id === id)?.name ?? id;
+    const name = language ? `${base} · ${languageName(language)}` : base;
     cards.push(el("div", { class: "analysis-card failed" }, el("div", { class: "analysis-head" }, el("strong", {}, name)),
       el("p", { class: "danger" }, String(error)),
       el("div", { class: "analysis-actions" },
@@ -89,7 +102,7 @@ function runAnalysis(page, template) {
 /// "Analysis templates": the first time, setting up a model; after that, the person's starred
 /// templates to run, the rest below them, and a cog for the settings.
 function addAnalysis(page, data) {
-  const used = new Set(data.entries.map((e) => e.template.id));
+  const used = new Set(data.entries.map((e) => e.key));
   const busy = (t) => data.queue.waiting.some((j) => isJob(j, page, t)) || isJob(data.queue.current, page, t);
   const bar = el("div", { class: "analysis-add" });
   const label = el("span", { class: "with-icon" }, svg("sparkle", 16), "Analysis templates");
@@ -143,12 +156,13 @@ function menuButton(label, choices, buttonClass = "icon-only") {
 }
 
 function pendingCard(page, t, running) {
-  const progress = analysisProgress.get(jobKey({ kind: page.kind, id: page.id, template: t.id }));
+  const key = t.key ?? t.id;
+  const progress = analysisProgress.get(jobKey({ kind: page.kind, id: page.id, template: key }));
   return el("div", { class: "analysis-card pending" },
     el("div", { class: "analysis-head" }, el("span", { class: "spinner" }), el("strong", {}, t.name),
       el("span", { class: "hint" }, running ? progress ?? "Loading the model…" : waitingText()),
       el("span", { class: "grow" }),
-      el("button", { class: "link", onclick: () => invoke("cancel_analysis", { kind: page.kind, id: page.id, template: t.id }) }, "Cancel")));
+      el("button", { class: "link", onclick: () => invoke("cancel_analysis", { kind: page.kind, id: page.id, template: key }) }, "Cancel")));
 }
 
 const waitingText = () => (recording ? "Waiting until the recording stops" : "Waiting its turn");
@@ -179,7 +193,8 @@ function fieldLabel(f) {
 
 function analysisCard(page, e, data, running, waiting) {
   const def = e.definition;
-  const template = e.template.id;
+  // The stack's name for it: the template, with the language after an @ for a translation of another.
+  const template = e.key ?? e.template.id;
   const card = el("div", { class: `analysis-card${e.collapsed ? " collapsed" : ""}` });
   const edit = async (change) => {
     try {
@@ -204,18 +219,25 @@ function analysisCard(page, e, data, running, waiting) {
     onclick: () => (running || waiting ? invoke("cancel_analysis", { kind: page.kind, id: page.id, template }) : runAnalysis(page, template)) },
     svg(running || waiting ? "close" : "refresh", 16));
   const index = data.entries.indexOf(e);
+  // Into the person's other languages, made from the entry it was translated from.
+  const written = e.language || "en";
+  const into = (languageInfo?.chosen ?? []).filter((c) => c !== written && !(e.via === "translated" && c === "en"));
+  const translations = into.map((c) => [`Translate into ${languageName(c)}`, data.entries.some((x) => x.key === `${e.template.id}@${c}`) ? "Make it again" : null,
+    () => runAnalysis(page, `${e.template.id}@${c}`), !data.ready]);
   const more = menuButton(svg("more", 16), [
     ["Copy as text", null, () => navigator.clipboard?.writeText(card.querySelector(".analysis-body")?.innerText ?? "")],
+    ...translations,
     ["Move up", null, () => invoke("move_analysis", { kind: page.kind, id: page.id, template, by: -1 }).then(refreshAnalyses), index === 0],
     ["Move down", null, () => invoke("move_analysis", { kind: page.kind, id: page.id, template, by: 1 }).then(refreshAnalyses), index === data.entries.length - 1],
     ["Remove", "Edits and ticks here are lost", remove],
   ]);
   more.querySelector("button").setAttribute("aria-label", "More");
   const head = el("div", { class: "analysis-head" }, toggle,
-    el("button", { class: "analysis-name", onclick: () => edit({ op: "collapse", collapsed: !e.collapsed }) }, e.template.name),
+    el("button", { class: "analysis-name", onclick: () => edit({ op: "collapse", collapsed: !e.collapsed }) }, e.template.name,
+      e.language ? el("span", { class: "badge language", title: e.via === "translated" ? "Machine-translated" : "Written in this language" }, languageName(e.language)) : null),
     e.collapsed && def ? el("span", { class: "digest" }, analysisDigest(def, e.result)) : null,
     // Minimised, it can still be read aloud; making it again waits until it's open.
-    ...badges, el("span", { class: "grow" }), def ? readAloudButton(() => analysisSpeech(card), "Read this aloud", { lang: () => page.ctx.lang?.() }) : null,
+    ...badges, el("span", { class: "grow" }), def ? readAloudButton(() => analysisSpeech(card), "Read this aloud", { lang: () => e.language || (e.via ? "en" : page.ctx.lang?.()) }) : null,
     e.collapsed && !(running || waiting) ? null : regenerate, more);
   card.append(head);
   if (error) card.append(el("p", { class: "danger analysis-error" }, `Couldn't make it again: ${error}`));
@@ -254,8 +276,9 @@ function analysisCard(page, e, data, running, waiting) {
     return card;
   }
   const made = e.engine.kind === "local" ? "this device" : e.engine.host ?? "a server";
+  const how = e.via === "translated" ? ` · Machine-translated into ${languageName(e.language)}` : e.via === "translation" ? " · Made via English translation" : "";
   const footer = el("div", { class: "analysis-foot" },
-    `Made on ${made} with ${e.engine.model} · ${dateText(e.created)} · Check it against the ${page.kind === "note" ? "note" : "transcript"}.`);
+    `Made on ${made} with ${e.engine.model}${how} · ${dateText(e.created)} · Check it against the ${page.kind === "note" ? "note" : "transcript"}.`);
   if (e.warnings?.length) {
     const list = el("ul", { class: "analysis-warnings", hidden: true }, e.warnings.map((w) => el("li", {}, w)));
     footer.append(" ", el("button", { class: "link inline", onclick: () => { list.hidden = !list.hidden; } },
@@ -1054,84 +1077,6 @@ function voiceForLanguages(page, status, langs) {
       el("small", {}, `For notes and meetings in ${name(code)}.${none}`)), select));
   }
   return el("div", {}, group, el("p", { class: "hint" }, "A note or meeting is in your primary language unless you choose another for it, beside its status."));
-}
-
-// ---------- Languages
-
-/// The person's languages, fetched once: { all: [[code, name]], chosen: [codes], primary }.
-let languageInfo = null;
-async function languageData() {
-  languageInfo ??= await invoke("get_languages").catch(() => ({ all: [["en", "English"]], chosen: ["en"], primary: "en" }));
-  return languageInfo;
-}
-
-/// The tag a voice or spell-checker knows a language by.
-const languageTag = (code) => ({ zh: "zh-CN" })[code] ?? code;
-const RIGHT_TO_LEFT = new Set(["ar"]);
-
-/// Marks text as being in `code`, for spell-checking and so right-to-left languages run that way.
-function setLanguage(nodes, code) {
-  for (const node of nodes) {
-    if (!node) continue;
-    node.lang = languageTag(code);
-    node.dir = RIGHT_TO_LEFT.has(code) ? "rtl" : "ltr";
-  }
-}
-
-/// The language picker beside a note's or meeting's status: its own language, or the primary one. Shown
-/// only to someone with more than one language, or for an item already given another.
-function languagePicker(info, current, onChange) {
-  const name = (c) => info.all.find(([code]) => code === c)?.[1] ?? c;
-  const codes = [...new Set([...info.chosen, ...(current ? [current] : [])])];
-  if (codes.length < 2 && !current) return null;
-  const select = el("select", { class: "language-picker", "aria-label": "Language", title: "The language this is in" },
-    el("option", { value: "" }, `${name(info.primary)} (primary)`),
-    codes.filter((c) => c !== info.primary).map((c) => el("option", { value: c, selected: c === current }, name(c))));
-  let previous = current ?? "";
-  select.addEventListener("change", async () => {
-    if (await onChange(select.value)) previous = select.value;
-    else select.value = previous;
-  });
-  return select;
-}
-
-// ---------- Settings › Languages
-
-/// Settings › Languages: the ones the person uses, and the primary one.
-async function showLanguages(message) {
-  leave();
-  showPage();
-  view = { kind: "languages" };
-  refreshItems();
-  const data = await invoke("get_languages");
-  const page = el("div", { class: "page" }, backLinks("‹ Settings", () => showSettings()), el("h1", {}, "Languages"));
-  page.append(el("p", { class: "hint" }, "Tick the languages you use. The primary one is what your notes and meetings are in unless you say otherwise."));
-  if (message) page.append(el("div", { class: "notice" }, message));
-  const group = el("div", { class: "group" });
-  const save = async (chosen, primary) => {
-    try { languageInfo = await invoke("save_languages", { languages: chosen, primary }); showLanguages(); } catch (e) { showError(page, e); }
-  };
-  for (const [code, name] of data.all) {
-    const on = data.chosen.includes(code);
-    const primary = data.primary === code;
-    const box = el("input", { type: "checkbox", checked: on, disabled: primary, "aria-label": `I use ${name}` });
-    box.addEventListener("change", () => save(box.checked ? [...data.chosen, code] : data.chosen.filter((c) => c !== code), data.primary));
-    const row = el("label", { class: "row language-row" }, box, el("span", { class: "label" }, name, primary ? el("small", {}, "Primary: can't be unticked") : null));
-    if (primary) row.append(el("span", { class: "badge ok" }, "Primary"));
-    else if (on) row.append(el("button", { class: "pill", type: "button", onclick: (e) => { e.preventDefault(); save(data.chosen, code); } }, "Make primary"));
-    group.append(row);
-  }
-  page.append(group, el("p", { class: "hint" }, "With more than one, each note and meeting can be given its own beside its status, and Reading aloud can have a voice for each. More languages are coming; transcripts and analyses are still in English for now."));
-  main.replaceChildren(page);
-}
-
-/// One line for the Settings row.
-async function languagesSummary() {
-  const data = await invoke("get_languages").catch(() => null);
-  if (!data) return "English";
-  const name = (c) => data.all.find(([code]) => code === c)?.[1] ?? c;
-  const others = data.chosen.filter((c) => c !== data.primary).map(name);
-  return [name(data.primary), ...others].join(", ");
 }
 
 async function refreshPrefs() {
