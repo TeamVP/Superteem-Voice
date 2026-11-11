@@ -115,6 +115,10 @@ pub struct Prefs {
     pub vocab_examples: u32,
     /// The suggestion to optimise for this device was dismissed.
     pub optimise_dismissed: bool,
+    /// The version that last ran, to notice an update; empty before 0.8.5 recorded it.
+    pub last_version: String,
+    /// When this device last moved to a new version (Unix seconds); 0 when it hasn't.
+    pub updated_at: u64,
 }
 
 /// Starred until the person chooses their own.

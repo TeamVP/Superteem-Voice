@@ -1367,6 +1367,12 @@ fn app_version() -> &'static str {
     update::current()
 }
 
+/// The version the app was just updated to, within a day of it.
+#[tauri::command]
+fn just_updated() -> Option<update::JustUpdated> {
+    update::just_updated()
+}
+
 /// Whether a newer version has been released.
 #[tauri::command]
 async fn check_update() -> Result<update::Update, String> {
@@ -2455,6 +2461,8 @@ pub fn run() {
                     eprintln!("The audio session didn't start: {e}");
                 }
             }
+            // An update shows on the home page for a day.
+            update::note_launch();
             let handle = app.handle().clone();
             let phrases = handle.clone();
             let practice = app.handle().clone();
@@ -2565,6 +2573,7 @@ pub fn run() {
             cancel_speech_download,
             delete_speech_model,
             optimise_plan,
+            just_updated,
             offered_voice,
             optimise_apply,
             optimise_cancel,

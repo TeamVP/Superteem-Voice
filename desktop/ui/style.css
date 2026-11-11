@@ -223,6 +223,8 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 /* Home: one button, two modes. */
 .home { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 40px 20px; text-align: center; }
 .home h1 { font-size: 28px; }
+.just-updated { display: inline-flex; align-items: center; gap: 6px; margin: 14px 0 0; font-size: 14px; color: var(--ok); }
+.just-updated .link { color: var(--ok); text-decoration: underline; }
 .segmented { display: inline-flex; background: var(--raised); border-radius: 999px; padding: 4px; }
 .segmented button { border: none; background: transparent; border-radius: 999px; padding: 6px 22px; color: var(--muted); }
 .segmented button.on { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }

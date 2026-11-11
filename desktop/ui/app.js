@@ -506,6 +506,13 @@ function showHome() {
     el("div", { class: "hint" }, homeMode === "note"
       ? (platform === "android" ? "Tap to write · or say “Hey Superteem, take a note”" : "Tap to start a note by voice · type as you go")
       : "Tap to set up · or say “Hey Superteem, start meeting”")));
+  // For a day after an update, which version this is and what changed.
+  invoke("just_updated").then((u) => {
+    if (!u || view.kind !== "home") return;
+    const hint = main.querySelector(".home > .hint");
+    hint?.after(el("p", { class: "just-updated" }, svg("check", 14), `Updated to ${u.version}`, " · ",
+      el("button", { class: "link inline", onclick: () => invoke("open_link", { url: u.notes }).catch(() => {}) }, "What's new")));
+  }).catch(() => {});
   // Once a note and a meeting are made, a suggestion to optimise, when it would change something.
   optimiseNudge().then((card) => { if (card && view.kind === "home") main.querySelector(".home")?.append(card); }).catch(() => {});
 }

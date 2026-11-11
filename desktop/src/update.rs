@@ -36,6 +36,46 @@ pub fn current() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// How long the home page says the app was updated.
+const UPDATED_FOR_S: u64 = 24 * 60 * 60;
+
+/// The app was just updated: shown on the home page for a day.
+#[derive(Debug, Clone, Serialize)]
+pub struct JustUpdated {
+    pub version: String,
+    /// What changed in this version.
+    pub notes: String,
+}
+
+/// Notes the version that's running, at start. A version other than the last one run is an update; so is
+/// the first launch of one that records it, by someone who has used the app already.
+pub fn note_launch() {
+    let p = crate::prefs::load();
+    if let Some(updated_at) = launched(&p.last_version, p.onboarded, current(), crate::library::now()) {
+        let _ = crate::prefs::update(|p| {
+            p.last_version = current().to_string();
+            p.updated_at = updated_at;
+        });
+    }
+}
+
+/// What starting `current` records, given the version last run: None when it's the same; else when it was
+/// updated, 0 for a new install.
+fn launched(last: &str, onboarded: bool, current: &str, now: u64) -> Option<u64> {
+    (last != current).then(|| if !last.is_empty() || onboarded { now } else { 0 })
+}
+
+/// The update to say on the home page, within a day of it.
+pub fn just_updated() -> Option<JustUpdated> {
+    let p = crate::prefs::load();
+    showing(p.updated_at, &p.last_version, current(), crate::library::now())
+        .then(|| JustUpdated { version: current().to_string(), notes: format!("https://github.com/TeamVP/Superteem-Voice/releases/tag/v{}", current()) })
+}
+
+fn showing(updated_at: u64, last: &str, current: &str, now: u64) -> bool {
+    updated_at > 0 && last == current && now.saturating_sub(updated_at) < UPDATED_FOR_S
+}
+
 /// "v0.3.1" or "0.3.1" as numbers, so 0.10 comes after 0.9.
 fn parse(version: &str) -> Vec<u64> {
     version.trim().trim_start_matches('v').split(['.', '-', '+']).map_while(|p| p.parse().ok()).collect()
@@ -160,5 +200,21 @@ mod tests {
         let update = check().unwrap();
         assert!(!parse(&update.latest).is_empty(), "{update:?}");
         assert!(update.download.ends_with(FILE), "{update:?}");
+    }
+
+    #[test]
+    fn an_update_shows_for_a_day() {
+        // Same version: nothing changes.
+        assert_eq!(launched("0.8.5", true, "0.8.5", 1000), None);
+        // From an earlier version, or the first that records it for someone already set up: updated now.
+        assert_eq!(launched("0.8.4", true, "0.8.5", 1000), Some(1000));
+        assert_eq!(launched("", true, "0.8.5", 1000), Some(1000));
+        // A new install isn't an update.
+        assert_eq!(launched("", false, "0.8.5", 1000), Some(0));
+        let day = 24 * 60 * 60;
+        assert!(showing(1000, "0.8.5", "0.8.5", 1000 + day - 1));
+        assert!(!showing(1000, "0.8.5", "0.8.5", 1000 + day));
+        assert!(!showing(0, "0.8.5", "0.8.5", 1000));
+        assert!(!showing(1000, "0.8.4", "0.8.5", 1001));
     }
 }
