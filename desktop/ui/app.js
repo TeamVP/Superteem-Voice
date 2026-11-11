@@ -1016,7 +1016,7 @@ function showDictationError(e) {
   if (!chip) return;
   chip.hidden = false;
   chip.replaceChildren(el("span", { class: "danger" }, String(e)), " ",
-    String(e).includes("model") ? el("button", { class: "pill", onclick: () => showSettings() }, "Open Settings") : micHelp(e));
+    String(e).includes("model") ? el("button", { class: "pill", onclick: () => showTranscription() }, "Open Transcription settings") : micHelp(e));
 }
 
 // Ctrl + Space starts dictation in a note, and finishes it; Esc cancels it.
@@ -3015,7 +3015,7 @@ async function showVocabulary(message) {
   refreshItems();
   const terms = await invoke("list_vocabulary").catch(() => []);
   const page = el("div", { class: "page" },
-    el("button", { class: "link", onclick: () => showSettings() }, "‹ Settings"),
+    el("button", { class: "link", onclick: () => showTranscription() }, "‹ Transcription"),
     el("h1", {}, "Vocabulary"),
     el("p", { class: "legend" }, "Names, products and acronyms that speech to text writes as everyday words, such as “SIBR” "
       + "written as “cyber”. Voice tells the speech model about these words before it listens, and corrects what it "
@@ -3248,24 +3248,6 @@ async function showSettings() {
     linkRow(`Optimise for this ${isPhone() ? "phone" : "computer"}`, "Your languages, then the best models and voices for them here", () => showOptimise(OPTIMISE_FROM.settings)),
     linkRow(`AI on this ${isPhone() ? "phone" : "computer"}`, "What runs here and how fast", () => showAiSettings())));
 
-  // The proxy and the model folder are only needed when the download doesn't work, so they sit behind a
-  // link in the row, opened already when the download has failed.
-  const more = el("div", { class: "model-more", hidden: true }, await modelHelp());
-  const toggle = el("button", { class: "link more-link", "aria-expanded": "false" });
-  const showMore = (open) => {
-    more.hidden = !open;
-    toggle.setAttribute("aria-expanded", String(open));
-    toggle.replaceChildren(ready ? "Model folder and download settings" : "Download problems? Proxy and adding it yourself",
-      el("span", { class: "more-caret", "aria-hidden": "true" }, open ? "▴" : "▾"));
-  };
-  toggle.addEventListener("click", () => showMore(more.hidden));
-  showMore(!ready && !!modelError);
-  const row = el("div", { class: "row" }, el("span", { class: "label" }, "Speech model",
-    el("small", {}, "Used for dictation, voice commands and transcripts. Runs on this device. English only."), toggle));
-  if (ready) row.append(el("span", { class: "value", style: "color:var(--ok)" }, "Ready"));
-  else row.append(modelDownloadButton(() => showSettings()));
-  const model = el("div", { class: "model-block" }, row, more);
-
   page.append(el("h2", {}, "Listening"), el("div", { class: "group windows-only" },
     toggleRow("“Hey Superteem”", "Listen for the wake word while the app is open. Nothing is recorded until you ask.", prefs.wake,
       async (on, box) => {
@@ -3283,16 +3265,20 @@ async function showSettings() {
     toggleRow("Keep dictation audio", "Keep the recording of each note dictation for 1 week. When off, the audio is deleted once the words are written.", prefs.keep_audio, async (on) => {
       prefs.keep_audio = on;
       await invoke("save_prefs", { keepAudio: on });
-    }),
-    model));
-  if (isPhone()) page.append(el("div", { class: "group" }, model));
+    })));
 
   if (platform === "android") {
     page.append(el("h2", {}, "This phone"), el("div", { class: "group" },
       linkRow("App permissions", "Microphone, Bluetooth, notifications", () => showPermissions())));
   }
-  page.append(el("h2", {}, "Transcription"), el("div", { class: "group" },
-    linkRow("Vocabulary", terms.length ? `${terms.length} word${terms.length === 1 ? "" : "s"}` : "Spell names and acronyms your way", () => showVocabulary())));
+  // Speech to text: its models, vocabulary and download settings, on their own page.
+  const speech = await invoke("speech_models").catch(() => []);
+  const inUse = speech.filter((m) => m.ready && m.used_for.length).map((m) => m.name);
+  const transcription = linkRow("Transcription", ready
+    ? [inUse.join(" and ") || "Speech model ready", terms.length ? `${terms.length} vocabulary word${terms.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")
+    : "The speech model needs downloading", () => showTranscription());
+  if (!ready) transcription.classList.add("needs-attention");
+  page.append(el("h2", {}, "Transcription"), el("div", { class: "group" }, transcription));
   page.append(el("h2", {}, "Analysis"), el("div", { class: "group" },
     linkRow("Model and when it runs", "The language model that makes analyses", () => showAnalysisSettings()),
     linkRow("Analysis templates", "Summary, standup, interview, SOAP and your own", () => showTemplates())));
@@ -3521,6 +3507,67 @@ function permissionsPanel(changed) {
   timer = setInterval(refresh, 2000);
   document.addEventListener("visibilitychange", refresh);
   return el("div", {}, holder, tips);
+}
+
+/// Settings › Transcription: the speech models that turn speech into text (which one each language uses,
+/// downloading and deleting them), vocabulary, and the download proxy and model folder.
+async function showTranscription(message) {
+  leave();
+  showPage();
+  view = { kind: "transcription" };
+  refreshItems();
+  const [models, terms, info, ready] = await Promise.all([invoke("speech_models").catch(() => []), invoke("list_vocabulary").catch(() => []),
+    languageData(true).catch(() => null), invoke("model_ready").catch(() => false)]);
+  const page = el("div", { class: "page" },
+    el("button", { class: "link back-link", onclick: () => showSettings() }, "‹ Settings"),
+    el("h1", {}, "Transcription"),
+    el("p", { class: "hint" }, "Speech is turned into text on this device by a Whisper model, for dictation, voice commands and meeting transcripts. Nothing is sent anywhere."));
+  if (message) page.append(el("div", { class: "notice" }, message));
+  if (!ready) page.append(el("div", { class: "notice" }, el("strong", {}, "A speech model is needed. "), "Download one below to dictate and transcribe."));
+
+  // The models: what each is for, which of the person's languages it transcribes, and getting or removing it.
+  const list = el("div", { class: "group" });
+  for (const m of models) {
+    const status = el("small", {}, m.about, m.used_for.length ? ` Transcribes ${m.used_for.map(languageName).join(" and ")} now.` : "");
+    const row = el("div", { class: "row" }, el("span", { class: "label" }, m.name,
+      m.used_for.length && m.ready ? el("span", { class: "badge ok" }, "In use") : null,
+      m.suggested && !m.ready ? el("span", { class: "badge" }, "Suits this device") : null, status));
+    if (m.ready) {
+      row.append(el("span", { class: "value" }, sizeText(m.size)));
+      // The English model stays: it's what dictation and commands fall back on.
+      if (m.multilingual) {
+        row.append(el("button", { class: "link", onclick: async () => {
+          try { await invoke("delete_speech_model", { id: m.id }); showTranscription(`${m.name} was deleted.`); } catch (e) { showError(page, e); }
+        } }, "Delete"));
+      }
+    } else {
+      const get = el("button", { class: m.suggested || (!ready && !m.multilingual) ? "primary pill" : "pill" }, `Download (${sizeText(m.size)})`);
+      get.addEventListener("click", async () => {
+        get.disabled = true;
+        const off = await listen("speech-model-download", (e) => { if (e.payload.id === m.id) status.textContent = `Downloading… ${Math.round(e.payload.fraction * 100)}%`; });
+        try { await invoke("download_speech_model", { id: m.id }); showTranscription(`${m.name} is ready.`); } catch (e) { get.disabled = false; status.textContent = String(e); } finally { off(); }
+      });
+      row.append(get);
+    }
+    list.append(row);
+  }
+  const multi = models.filter((m) => m.multilingual && m.ready);
+  if (multi.length > 1) {
+    const pick = el("select", { "aria-label": "Speech model for other languages" }, el("option", { value: "" }, "The best one downloaded"),
+      multi.map((m) => el("option", { value: m.id, selected: info?.speech_model === m.id }, m.name)));
+    pick.addEventListener("change", async () => {
+      try { await invoke("save_language_settings", { speechModel: pick.value }); showTranscription(); } catch (e) { showError(page, e); }
+    });
+    list.append(el("div", { class: "row" }, el("span", { class: "label" }, "For languages other than English", el("small", {}, "Which multilingual model transcribes them")), pick));
+  }
+  page.append(el("h2", {}, "Speech models"), list,
+    el("p", { class: "hint" }, "English uses the English model, unless the large one is chosen and a graphics processor runs it. Other languages need a multilingual model, offered when you first choose such a language. "
+      + "Spoken commands such as “Hey Superteem” and “bookmark that” are English for now."));
+
+  page.append(el("h2", {}, "Vocabulary"), el("div", { class: "group" },
+    linkRow("Vocabulary", terms.length ? `${terms.length} word${terms.length === 1 ? "" : "s"}` : "Spell names and acronyms your way", () => showVocabulary())));
+  page.append(await modelHelp(() => showTranscription()));
+  main.replaceChildren(page);
 }
 
 /// Settings › Voices: everything about voices in one place. How Voice reads aloud to you, and how it knows

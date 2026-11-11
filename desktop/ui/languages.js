@@ -195,39 +195,11 @@ async function showLanguages(message) {
   }
   page.append(el("h2", {}, "Translate into"), into);
 
-  // Speech models.
-  const list = el("div", { class: "group" });
-  for (const m of models) {
-    const status = el("small", {}, m.about);
-    const row = el("div", { class: "row" }, el("span", { class: "label" }, m.name, m.suggested ? el("span", { class: "badge" }, "Suits this device") : null, status));
-    if (m.ready) {
-      row.append(el("span", { class: "badge ok" }, "Downloaded"));
-      if (m.multilingual) {
-        row.append(el("button", { class: "link", onclick: async () => {
-          try { await invoke("delete_speech_model", { id: m.id }); showLanguages(); } catch (e) { showError(page, e); }
-        } }, "Delete"));
-      }
-    } else {
-      const get = el("button", { class: "pill" }, `Download (${sizeText(m.size)})`);
-      get.addEventListener("click", async () => {
-        get.disabled = true;
-        const off = await listen("speech-model-download", (e) => { if (e.payload.id === m.id) status.textContent = `Downloading… ${Math.round(e.payload.fraction * 100)}%`; });
-        try { await invoke("download_speech_model", { id: m.id }); showLanguages(); } catch (e) { get.disabled = false; status.textContent = String(e); } finally { off(); }
-      });
-      row.append(get);
-    }
-    list.append(row);
-  }
-  const multi = models.filter((m) => m.multilingual && m.ready);
-  if (multi.length > 1) {
-    const pick = el("select", { "aria-label": "Speech model for other languages" }, el("option", { value: "" }, "The best one downloaded"),
-      multi.map((m) => el("option", { value: m.id, selected: data.speech_model === m.id }, m.name)));
-    pick.addEventListener("change", () => settings({ speechModel: pick.value }));
-    list.append(el("div", { class: "row" }, el("span", { class: "label" }, "For languages other than English"), pick));
-  }
-  page.append(el("h2", {}, "Speech models"), list,
-    el("p", { class: "hint" }, "English uses the English model. Other languages need a multilingual one, which you're offered when you first choose such a language. "
-      + "Spoken commands such as “Hey Superteem” and “bookmark that” are English for now."));
+  // Speech models live with the rest of transcription.
+  const usedFor = models.filter((m) => m.ready && m.used_for.length).map((m) => m.name);
+  page.append(el("h2", {}, "Speech models"), el("div", { class: "group" },
+    linkRow("Speech models", usedFor.join(" and ") || "Choose and download them", () => showTranscription())),
+    el("p", { class: "hint" }, "Which model transcribes each of your languages, and downloading others, are in Settings › Transcription."));
   main.replaceChildren(page);
 }
 

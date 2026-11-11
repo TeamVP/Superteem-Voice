@@ -1940,10 +1940,14 @@ struct SpeechModelView {
     ready: bool,
     /// The multilingual model this device suits.
     suggested: bool,
+    /// The person's languages it transcribes now ("en"), empty when it isn't used.
+    used_for: Vec<String>,
 }
 
 fn speech_model_view(m: &'static transcribe::SpeechModel) -> SpeechModelView {
-    SpeechModelView { model: m, ready: transcribe::is_ready(m), suggested: m.multilingual && m.id == transcribe::suggested_multilingual().id }
+    // Each language on its own: English alone uses the English model, others the multilingual one.
+    let used_for = prefs::load().languages().into_iter().filter(|l| transcribe::model_for(std::slice::from_ref(l)).0.id == m.id).collect();
+    SpeechModelView { model: m, ready: transcribe::is_ready(m), suggested: m.multilingual && m.id == transcribe::suggested_multilingual().id, used_for }
 }
 
 #[tauri::command]

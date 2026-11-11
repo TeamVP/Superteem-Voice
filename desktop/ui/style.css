@@ -1001,3 +1001,4 @@ body[data-platform="ios"] { box-sizing: border-box; padding: env(safe-area-inset
 .optimise-step { color: var(--muted); font-size: 13px; margin: 4px 0 -4px; }
 .plan-tick { width: 18px; display: inline-flex; justify-content: center; flex: none; color: var(--ok); }
 .plan-done { color: var(--ok); font-size: 13px; font-weight: 600; }
+.link-row.needs-attention .value:not([aria-hidden]) { color: var(--danger); }
