@@ -21,6 +21,32 @@ fn store(terms: &[Term]) -> Result<(), String> {
     library::write_json(&library::data_dir().join(FILE), &terms)
 }
 
+/// Example terms, added once to everyone's vocabulary, by the set they came in.
+fn examples() -> Vec<(u32, Term)> {
+    vec![(
+        1,
+        Term {
+            spelling: "Superteem".into(),
+            sounds_like: vec!["super team".into(), "sup team".into()],
+            when: When::Always,
+            ..Default::default()
+        },
+    )]
+}
+
+/// Adds the example terms this person hasn't had yet; one already spelled that way is left as it is.
+pub fn add_examples() {
+    let had = crate::prefs::load().vocab_examples;
+    let new: Vec<(u32, Term)> = examples().into_iter().filter(|(set, _)| *set > had).collect();
+    let Some(latest) = new.iter().map(|(set, _)| *set).max() else { return };
+    for (_, term) in new {
+        if !load().iter().any(|t| vocab::plain(&t.spelling) == vocab::plain(&term.spelling)) {
+            let _ = save(term);
+        }
+    }
+    let _ = crate::prefs::update(|p| p.vocab_examples = latest);
+}
+
 /// Tidies a term from the page: trims, drops empty and repeated sounds, and gives a new term an id.
 fn tidy(mut term: Term, taken: &[Term]) -> Result<Term, String> {
     term.spelling = term.spelling.trim().to_string();

@@ -474,6 +474,7 @@ pub const BUILT_IN: &[&str] = &[
     include_str!("../templates/bant-call.toml"),
     include_str!("../templates/soap-note.toml"),
     include_str!("../templates/lecture-notes.toml"),
+    include_str!("../templates/prompt-builder.toml"),
 ];
 
 /// The templates that ship with the app, in the order they're offered.
@@ -1300,8 +1301,11 @@ pub fn analyse(model: &mut dyn Model, t: &Template, turns: &[Turn], ctx: &Contex
         // The grammar keeps the answer in shape; it only fails to parse when cut off at the token limit.
         results.push(validate(t, &answer, chunk, &owners, &marks)?);
     }
+    let source = source_text(turns, ctx);
     if results.len() == 1 {
-        return Ok(results.pop().expect("one part"));
+        let mut one = results.pop().expect("one part");
+        unlink(&mut one, &source);
+        return Ok(one);
     }
     let mut merged = merge(t, results);
     for f in t.fields.iter().filter(|f| f.kind == Kind::Text && f.reduce() == Reduce::Rewrite) {
@@ -1330,7 +1334,78 @@ pub fn analyse(model: &mut dyn Model, t: &Template, turns: &[Turn], ctx: &Contex
             }
         }
     }
+    unlink(&mut merged, &source);
     Ok(merged)
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Web addresses
+
+/// Endings of web addresses, for spotting one written without "https://". Those common for sites, and those
+/// cheap or free to register, which is where a planted address would point.
+const WEB_ENDINGS: &[&str] = &[
+    "com", "net", "org", "io", "ai", "co", "dev", "app", "xyz", "info", "biz", "me", "ly", "gg", "tk", "ml", "ga", "cf", "ru", "cn", "top",
+    "site", "online", "click", "link", "live", "tech", "cloud", "us", "uk", "au", "nz", "ca", "de", "fr", "eu", "in", "jp", "store", "shop",
+    "fun", "icu", "pw", "cc", "tv", "ws", "to", "sh", "is", "so", "im", "su", "onion", "zip", "mov", "page", "website", "space", "work",
+];
+
+/// Whether a word is a web address: with a scheme, starting www., or a host name with a web ending.
+fn web_address(word: &str) -> bool {
+    let w = word.trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | '<' | '>' | '"' | '\'' | ',' | ';' | '.' | '!' | '?' | '“' | '”'));
+    let lower = w.to_lowercase();
+    if lower.contains("://") || lower.starts_with("www.") {
+        return true;
+    }
+    // An email address isn't fetched by anything that shows it.
+    if lower.contains('@') && !lower.contains('/') {
+        return false;
+    }
+    let host = lower.split(['/', '?', '#', ':']).next().unwrap_or_default();
+    let labels: Vec<&str> = host.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|l| !l.is_empty() && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        && labels.last().is_some_and(|end| WEB_ENDINGS.contains(end))
+}
+
+/// Everything the model was shown, in lower case: an address in it may be repeated.
+fn source_text(turns: &[Turn], ctx: &Context) -> String {
+    let mut all: Vec<&str> = turns.iter().map(|t| t.text.as_str()).collect();
+    all.extend([ctx.title, ctx.glossary]);
+    all.extend(ctx.bookmarks.iter().map(|b| b.note.as_str()));
+    all.join("\n").to_lowercase()
+}
+
+/// Takes out web addresses the model wrote that aren't in what it was shown. Nothing in the app fetches an
+/// address in an analysis, but other apps do once it's copied or exported (a chat app's link preview, a
+/// Markdown viewer), so one the model made up could carry the notes it's in to somebody's server.
+fn unlink(checked: &mut Checked, source: &str) {
+    fn walk(v: &mut Value, source: &str, removed: &mut Vec<String>) {
+        match v {
+            Value::String(s) if s.split_whitespace().any(web_address) => {
+                let words: Vec<String> = s
+                    .split(' ')
+                    .map(|w| {
+                        let bare = w.trim_matches(|c: char| !c.is_alphanumeric() && c != '/');
+                        if web_address(w) && !source.contains(&bare.to_lowercase()) {
+                            removed.push(bare.chars().take(60).collect());
+                            "(link removed)".to_string()
+                        } else {
+                            w.to_string()
+                        }
+                    })
+                    .collect();
+                *s = words.join(" ");
+            }
+            Value::Array(items) => items.iter_mut().for_each(|i| walk(i, source, removed)),
+            Value::Object(map) => map.values_mut().for_each(|i| walk(i, source, removed)),
+            _ => {}
+        }
+    }
+    let mut removed = Vec::new();
+    walk(&mut checked.result, source, &mut removed);
+    for address in removed {
+        checked.warnings.push(format!("Took out a web address that isn't in the transcript: {address}"));
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -1538,6 +1613,33 @@ pub fn render(t: &Template, result: &Value, label: Label, md: bool) -> String {
         out += "\n";
     }
     out
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    #[test]
+    fn web_addresses_are_told_from_other_dotted_words() {
+        for w in ["https://x.example/a?b=c", "www.thing.org", "secret-notes.attacker.com", "evil.xyz/collect?d=1", "(https://a.io)."] {
+            assert!(web_address(w), "{w}");
+        }
+        for w in ["e.g.", "i.e.", "Node.js", "3.5", "v1.2.3", "U.S.", "dana@example.com", "report.pdf", "Qwen3.5-4B"] {
+            assert!(!web_address(w), "{w}");
+        }
+    }
+
+    #[test]
+    fn addresses_not_in_the_transcript_are_taken_out() {
+        let mut checked = Checked {
+            result: json!({"summary": "See acme.com for the plan; data at q7-budget-cut.leak.xyz now.", "items": [{"point": "Visit https://evil.io/?n=Dana"}]}),
+            warnings: vec![],
+        };
+        unlink(&mut checked, "the plan is on acme.com, dana said");
+        assert_eq!(checked.result["summary"], "See acme.com for the plan; data at (link removed) now.");
+        assert_eq!(checked.result["items"][0]["point"], "Visit (link removed)");
+        assert_eq!(checked.warnings.len(), 2);
+    }
 }
 
 #[cfg(test)]

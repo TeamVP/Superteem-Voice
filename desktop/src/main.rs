@@ -66,6 +66,12 @@ fn kws_check(data: &str, train: &str, test: &str) -> Result<(), String> {
 
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
+    // The analysis worker: the language model, in a process without network access.
+    #[cfg(any(windows, target_os = "macos"))]
+    if args.get(1).is_some_and(|a| a == superteem_voice_lib::isolate::ARG) {
+        superteem_voice_lib::isolate::serve();
+        return Ok(());
+    }
     if args.get(1).is_some_and(|a| a == "--self-test") {
         return self_test(args.get(2).and_then(|s| s.parse().ok()).unwrap_or(5));
     }

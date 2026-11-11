@@ -9,6 +9,8 @@ pub mod imports;
 pub mod keyphrases;
 pub mod library;
 pub mod llm;
+#[cfg(any(windows, target_os = "macos"))]
+pub mod isolate;
 pub mod listen;
 pub mod notes;
 pub mod prefs;
@@ -1447,7 +1449,12 @@ fn analysis_engine(cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Res
     }
     let path = llm::chosen(&p.llm_model).ok_or("No language model is installed. Get one in Settings › Analysis.")?;
     let device = llm::device();
-    let local = llm::Local::load(&path, device.context, device.threads, cancel)?;
+    let gpu = p.use_gpu.unwrap_or(true);
+    // On a computer, in a separate process that can't reach the network (see isolate.rs).
+    #[cfg(any(windows, target_os = "macos"))]
+    let local = isolate::Isolated::load(&path, device.context, device.threads, gpu, cancel)?;
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let local = llm::Local::load(&path, device.context, device.threads, gpu, cancel)?;
     let engine = analysis::Engine { kind: "local".into(), model: local.name.clone(), host: None };
     Ok((Box::new(local), engine))
 }
@@ -2055,6 +2062,8 @@ pub fn run() {
             let practice = app.handle().clone();
             listen::on_practice(move |p| drop(practice.emit("wake-practice", p)));
             listen::init(move |text| drop(handle.emit("heard", text)), move |heard| drop(phrases.emit("keyphrase", heard)));
+            // After the library is set up (above, on phones), so the vocabulary is in the right place.
+            vocabulary::add_examples();
             std::thread::spawn(notes::purge_old_audio);
             let root = library::root();
             std::fs::create_dir_all(&root)?;

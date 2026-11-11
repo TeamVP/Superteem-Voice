@@ -6,18 +6,19 @@ use crate::attribute::window_db;
 /// 20 ms frames at 16 kHz.
 pub const FRAME: usize = 320;
 const FRAMES_PER_S: usize = 50;
-/// A pause this long ends a clip once it has a few seconds in it: the gap between sentences, not between
-/// words.
+/// A pause this long ends a clip once it's long enough: the gap between sentences, not between words.
 const PAUSE_FRAMES: usize = 40;
-/// A clip shorter than this waits for a longer pause, so a sentence isn't split at a breath.
-const MIN_CLIP_FRAMES: usize = 3 * FRAMES_PER_S;
-/// A pause this long ends a clip however short it is.
-const LONG_PAUSE_FRAMES: usize = 75;
+/// A clip shorter than this carries on through pauses between sentences, so a thought isn't cut into pieces
+/// that read as separate sentences: whisper writes better with the whole of it.
+const MIN_CLIP_FRAMES: usize = 30 * FRAMES_PER_S;
+/// A pause this long ends a clip however short it is: the person has stopped, not paused to think.
+const LONG_PAUSE_FRAMES: usize = 4 * FRAMES_PER_S;
 /// Audio with no speech is let go in pieces this long, to notice a long silence.
 const SILENT_PIECE_FRAMES: usize = 3 * FRAMES_PER_S;
-/// Whisper reads 30 s at a time, so someone who doesn't pause is cut before that, at the quietest moment.
-const LONGEST_FRAMES: usize = 25 * FRAMES_PER_S;
-const SEARCH_QUIET_FRAMES: usize = 5 * FRAMES_PER_S;
+/// Someone who doesn't pause is cut by this length, at the quietest moment of the last few seconds, so the
+/// words keep coming. Whisper reads a longer clip 30 s at a time by itself.
+const LONGEST_FRAMES: usize = 55 * FRAMES_PER_S;
+const SEARCH_QUIET_FRAMES: usize = 10 * FRAMES_PER_S;
 /// Speech is this far above the background noise, and at least this loud.
 const ABOVE_NOISE_DB: f32 = 12.0;
 const SPEECH_FLOOR_DB: f32 = -50.0;
@@ -50,8 +51,8 @@ pub fn noise_level(db: &[f32]) -> f32 {
 }
 
 /// Where to cut `pcm`, the audio not yet transcribed, if anywhere yet: in the middle of the first pause of
-/// 0.8 s once the clip has 3 s in it, or of 1.5 s at any length; after a few seconds of no speech at all; or,
-/// for someone talking without a break, at the quietest moment before Whisper's limit.
+/// 0.8 s once the clip has 30 s in it, or of 4 s at any length; after a few seconds of no speech at all; or,
+/// for someone talking without a break, at the quietest moment before 55 s.
 pub fn find_cut(pcm: &[i16], noise_db: Option<f32>) -> Option<Cut> {
     let speech = speech_frames(pcm, noise_db);
     let Some(first) = speech.iter().position(|&s| s) else {
@@ -107,20 +108,22 @@ mod tests {
 
     #[test]
     fn cuts_in_the_middle_of_a_pause_after_speech() {
-        let pcm = audio(&[(false, 0.5), (true, 3.0), (false, 1.0), (true, 1.0)]);
-        let cut = find_cut(&pcm, None).unwrap();
+        let pcm = audio(&[(false, 0.5), (true, 30.0), (false, 1.0), (true, 1.0)]);
+        let cut = find_cut(&pcm, Some(-40.0)).unwrap();
         assert!(cut.speech);
-        // The pause starts at 3.5 s; 0.8 s of it is enough once the clip has 3 s, so the cut is 0.4 s in.
+        // The pause starts at 30.5 s; 0.8 s of it is enough once the clip has 30 s, so the cut is 0.4 s in.
         let at_s = cut.at as f32 / 16_000.0;
-        assert!((3.8..4.0).contains(&at_s), "{at_s}");
+        assert!((30.8..31.0).contains(&at_s), "{at_s}");
     }
 
     #[test]
-    fn a_breath_early_in_a_sentence_isnt_a_cut() {
-        // A short clip waits through a 1 s pause, and is cut at a 1.5 s one.
-        assert_eq!(find_cut(&audio(&[(true, 1.0), (false, 1.0), (true, 1.0), (false, 0.3)]), Some(-40.0)), None);
-        let cut = find_cut(&audio(&[(true, 1.0), (false, 1.6), (true, 0.5)]), Some(-40.0)).unwrap();
-        assert!(cut.speech && (cut.at as f32 / 16_000.0 - 1.75).abs() < 0.05);
+    fn pauses_between_sentences_dont_cut_a_short_clip() {
+        // Sentences with pauses of a second or two between them stay together until there's 30 s.
+        let talk = audio(&[(true, 4.0), (false, 1.5), (true, 6.0), (false, 2.5), (true, 5.0), (false, 1.0), (true, 3.0), (false, 0.3)]);
+        assert_eq!(find_cut(&talk, Some(-40.0)), None);
+        // A 4 s silence is a stop, so it's cut there.
+        let cut = find_cut(&audio(&[(true, 5.0), (false, 4.2), (true, 0.5)]), Some(-40.0)).unwrap();
+        assert!(cut.speech && (cut.at as f32 / 16_000.0 - 7.0).abs() < 0.05, "{}", cut.at as f32 / 16_000.0);
     }
 
     #[test]
@@ -138,8 +141,9 @@ mod tests {
     }
 
     #[test]
-    fn someone_who_never_pauses_is_cut_before_whispers_limit() {
-        let cut = find_cut(&audio(&[(true, 27.0)]), Some(-40.0)).unwrap();
-        assert!(cut.speech && cut.at <= 25 * 16_000);
+    fn someone_who_never_pauses_is_cut_within_a_minute() {
+        assert_eq!(find_cut(&audio(&[(true, 50.0)]), Some(-40.0)), None);
+        let cut = find_cut(&audio(&[(true, 57.0)]), Some(-40.0)).unwrap();
+        assert!(cut.speech && cut.at <= 55 * 16_000 && cut.at >= 45 * 16_000);
     }
 }

@@ -99,6 +99,9 @@ pub struct Prefs {
     /// The voice that reads each language, by code: a natural voice's id, or "system". A language not here
     /// reads with the main voice when it speaks that language.
     pub voice_for: std::collections::BTreeMap<String, String>,
+    /// Which set of example vocabulary has been added (see `vocabulary::add_examples`), so each is added once
+    /// and one the person deletes stays deleted.
+    pub vocab_examples: u32,
 }
 
 /// Starred until the person chooses their own.

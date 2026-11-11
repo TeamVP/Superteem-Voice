@@ -1,0 +1,51 @@
+# Thinking aloud, turned into prompts someone can act on.
+id = "prompt-builder"
+name = "Prompt builder"
+description = "Turns thinking aloud into clear prompts for an AI or a person."
+version = 1
+applies_to = ["meeting", "note"]
+
+[prompt]
+instructions = """
+The speaker is thinking aloud about something they want done or answered, and the talk rambles: false
+starts, asides, repeats and changes of mind. Write what they mean as a prompt that someone who never heard
+the talk could act on: an AI assistant, or a colleague.
+A prompt says, in plain sentences addressed to whoever will do it: the situation as it is now, what the
+speaker wants (where they changed their mind, what they settled on), the question they're asking if they
+are wondering about something, and what a useful answer or result would include.
+Keep every fact as the speaker said it: which thing is where, names, and what is current versus planned.
+Write one prompt. Write another only for a separate request about a different thing, never a reworded copy.
+Don't add facts or requirements; put what's missing under Still to decide.
+"""
+
+[[fields]]
+key = "issue"
+type = "text"
+max_len = 300
+hint = "what the speaker is trying to get done, in one or two plain sentences"
+
+[[fields]]
+key = "prompts"
+type = "object-list"
+max_items = 3
+  [[fields.items]]
+  key = "prompt"
+  type = "text"
+  max_len = 700
+  hint = "the prompt itself, ready to paste: the situation, what's wanted or asked, and what a good answer includes"
+  [[fields.items]]
+  key = "for"
+  type = "enum"
+  values = ["an AI", "a person", "either"]
+  hint = "who it's written for"
+  [[fields.items]]
+  key = "evidence"
+  type = "refs"
+
+[[fields]]
+key = "missing"
+type = "list"
+label = "Still to decide"
+max_items = 4
+max_len = 150
+hint = "details the prompts need that weren't said, as questions"

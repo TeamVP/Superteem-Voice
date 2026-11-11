@@ -58,7 +58,7 @@ fn main() {
     };
 
     let loading = Instant::now();
-    let mut model = llm::Local::load(&model_path, ctx_tokens, threads, Default::default()).unwrap_or_else(|e| panic!("{e}"));
+    let mut model = llm::Local::load(&model_path, ctx_tokens, threads, true, Default::default()).unwrap_or_else(|e| panic!("{e}"));
     let load_s = loading.elapsed().as_secs_f64();
     let started = Instant::now();
     let result = engine::analyse(&mut model, &template, &input.turns, &ctx, |k, n| eprintln!("Part {k} of {n}…"));

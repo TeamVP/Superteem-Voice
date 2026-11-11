@@ -28,7 +28,7 @@ fn main() {
     let item = Item::new("meeting", "session-1794000000").unwrap();
 
     let device = llm::device();
-    let mut model = llm::Local::load(&model_path, device.context, device.threads, Default::default()).unwrap();
+    let mut model = llm::Local::load(&model_path, device.context, device.threads, true, Default::default()).unwrap();
     let engine = Engine { kind: "local".into(), model: model.name.clone(), host: None };
     let entry = analysis::make(&item, &template, &mut model, engine.clone(), |k, n| eprintln!("part {k}/{n}")).unwrap();
     analysis::put(&item, entry).unwrap();

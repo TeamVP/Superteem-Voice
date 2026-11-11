@@ -679,12 +679,59 @@ function readAloudButton(text, what = "Read aloud", { label, lang } = {}) {
   return button;
 }
 
-/// Says the text a sentence or two at a time, which keeps long text going where a voice gives up after a
-/// while, and lets it stop between them.
+/// Marks a line of text to read aloud as a heading, so it has a pause before and after it.
+const HEADING = "\u2063";
+
+/// Pauses, in milliseconds at normal speed: after a sentence, after a paragraph (a line), and around a
+/// heading.
+const PAUSE = { phrase: 150, sentence: 350, paragraph: 700, heading: 800 };
+
+/// The text as pieces to say, each with the pause before and after it: a heading on its own; otherwise a
+/// sentence at a time, and a very long one at its commas.
+function speechPieces(text) {
+  const pieces = [];
+  const lines = (text ?? "").replace(/\r/g, "").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw) { if (pieces.length) pieces.at(-1).after = Math.max(pieces.at(-1).after, PAUSE.paragraph); continue; }
+    // A line marked as one, or written as one in Markdown.
+    if (raw.startsWith(HEADING) || /^#{1,6}\s/.test(raw)) {
+      const heading = raw.replace(HEADING, "").replace(/^#{1,6}\s+/, "").trim();
+      if (heading) pieces.push({ text: heading, before: PAUSE.heading, after: PAUSE.heading });
+      continue;
+    }
+    // Sentences end at . ! ? and their Chinese forms, which have no space after them.
+    const sentences = raw.split(/(?<=[.!?…])\s+|(?<=[。！？])/).map((s) => s.trim()).filter(Boolean);
+    sentences.forEach((sentence, n) => {
+      const last = n === sentences.length - 1;
+      const parts = sentence.length > 280 ? sentence.split(/(?<=[,;，；])\s*/).filter(Boolean) : [sentence];
+      parts.forEach((part, m) => {
+        const end = m === parts.length - 1;
+        pieces.push({ text: part, before: 0, after: !end ? PAUSE.phrase : last ? PAUSE.paragraph : PAUSE.sentence });
+      });
+    });
+  }
+  return pieces;
+}
+
+/// Waits `ms`, or less if reading is stopped.
+function pause(ms, mine) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const tick = () => (mine.cancelled || Date.now() - started >= ms ? resolve() : setTimeout(tick, 30));
+    tick();
+  });
+}
+
+/// Says the text a sentence at a time, with a pause after each and longer ones around headings and between
+/// paragraphs. Short pieces also keep long text going where a voice gives up after a while, and let it stop
+/// between them.
 async function readAloud(button, text, lang) {
-  const pieces = (text ?? "").replace(/\s+\n/g, "\n").split(/(?<=[.!?:])\s+|\n+/).map((s) => s.trim()).filter(Boolean)
-    .reduce((out, s) => { if (out.length && (out.at(-1) + " " + s).length < 220) out[out.length - 1] += " " + s; else out.push(s); return out; }, []);
+  const pieces = speechPieces(text);
   if (!pieces.length) return;
+  // The gap between two pieces: the longer of what the first wants after it and the next before it, shorter
+  // when reading faster.
+  const gap = (i) => (i + 1 < pieces.length ? Math.max(pieces[i].after, pieces[i + 1].before) : 0) / (prefs.read_speed ?? 1);
   const mine = { button, cancelled: false };
   reading = mine;
   button.classList.add("on");
@@ -698,17 +745,18 @@ async function readAloud(button, text, lang) {
     const voice = isDesktop() ? await invoke("reading_voice", { language: lang ?? null }).catch(() => null) : null;
     if (voice) {
       // The natural voice makes the next piece while this one plays, so there's no gap between them.
-      let next = invoke("natural_speak", { text: pieces[0], voice: voice.id });
+      let next = invoke("natural_speak", { text: pieces[0].text, voice: voice.id });
       for (let i = 0; i < pieces.length && !mine.cancelled; i++) {
         const wav = await next;
-        if (i + 1 < pieces.length) next = invoke("natural_speak", { text: pieces[i + 1], voice: voice.id });
+        if (i + 1 < pieces.length) next = invoke("natural_speak", { text: pieces[i + 1].text, voice: voice.id });
         if (mine.cancelled) break;
         await playWav(wav, mine);
+        await pause(gap(i), mine);
       }
     } else {
-      for (const piece of pieces) {
-        if (mine.cancelled) break;
-        await say(piece, lang);
+      for (let i = 0; i < pieces.length && !mine.cancelled; i++) {
+        await say(pieces[i].text, lang);
+        await pause(gap(i), mine);
       }
     }
   } catch (e) {
@@ -768,16 +816,17 @@ function stopReading() {
 function analysisSpeech(card) {
   const body = card.querySelector(".analysis-body");
   if (!body) return "";
-  const lines = [card.querySelector(".analysis-name")?.textContent ?? ""];
+  const lines = [HEADING + (card.querySelector(".analysis-name")?.textContent ?? "")];
   for (const node of body.querySelectorAll(".analysis-section > h3, .analysis-section > p, .analysis-points > li, .notice")) {
-    if (node.tagName === "H3") { lines.push(`${node.textContent}.`); continue; }
+    if (node.tagName === "H3") { lines.push(HEADING + node.textContent); continue; }
     if (node.tagName !== "LI") { lines.push(node.textContent); continue; }
     const who = node.querySelector(".who-chip")?.textContent;
     const what = [...node.querySelectorAll(":scope > .editable, :scope > .field-extra .editable")].map((n) => n.textContent).join(", ");
     const when = node.querySelector(".when-chip:not(.empty)")?.textContent;
     const done = node.classList.contains("done") ? " Done." : "";
     const time = node.querySelector(".bookmark-time")?.textContent;
-    lines.push(`${time ? `At ${time}. ` : ""}${who && who !== "Unassigned" ? `${who}: ` : ""}${what}${when ? `, ${when}` : ""}.${done}`);
+    const point = `${who && who !== "Unassigned" ? `${who}: ` : ""}${what}${when ? `, ${when}` : ""}`;
+    lines.push(`${time ? `At ${time}. ` : ""}${point}${/[.!?。！？]$/.test(point) ? "" : "."}${done}`);
   }
   return lines.join("\n");
 }

@@ -1,6 +1,6 @@
 [package]
 name = "superteem-voice"
-version = "0.6.6"
+version = "0.6.7"
 edition = "2021"
 license = "GPL-3.0-only"
 
@@ -70,4 +70,6 @@ opt-level = 2
 # models through sherpa-onnx (k2-fsa's own crate), offline. Its libraries are prebuilt DLLs installed beside
 # the app. Windows only for now.
 [target.'cfg(windows)'.dependencies]
+# The sandbox analyses run their model in (an AppContainer); see isolate.rs.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Isolation", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
 sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }

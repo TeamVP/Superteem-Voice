@@ -302,10 +302,10 @@ pub struct Local {
 
 impl Local {
     /// Loads a GGUF model. `ctx_tokens` is capped at what the model was trained for.
-    pub fn load(path: &Path, ctx_tokens: u32, threads: i32, cancel: Arc<AtomicBool>) -> Result<Self, String> {
+    /// `gpu`: every layer on the graphics processor when there is one.
+    pub fn load(path: &Path, ctx_tokens: u32, threads: i32, gpu: bool, cancel: Arc<AtomicBool>) -> Result<Self, String> {
         let backend = backend()?;
-        // Every layer on the graphics processor when there is one and the person hasn't turned it off.
-        let layers = if crate::prefs::load().use_gpu.unwrap_or(true) { 999 } else { 0 };
+        let layers = if gpu { 999 } else { 0 };
         let params = LlamaModelParams::default().with_n_gpu_layers(layers);
         let model = LlamaModel::load_from_file(backend, path, &params)
             .map_err(|e| format!("Couldn't load {}: {e}", path.display()))?;

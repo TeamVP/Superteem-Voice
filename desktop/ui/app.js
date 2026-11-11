@@ -643,7 +643,7 @@ function renderNote(data, dictate) {
       }
     }), status, el("span", { class: "grow" }),
       // The selection when there is one, else the whole note.
-      readAloudButton(() => { const sel = getSelection().toString().trim(); return `${title.value}.\n${sel || noteText(body)}`; }, "Read the note aloud", { lang: noteLanguage }),
+      readAloudButton(() => { const sel = getSelection().toString().trim(); return `${HEADING}${title.value}\n${sel || noteText(body)}`; }, "Read the note aloud", { lang: noteLanguage }),
       exporter, archive, remove),
     exporter.status,
     el("div", { class: "note" }, title,
