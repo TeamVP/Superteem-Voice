@@ -209,13 +209,26 @@ function exportMenu(choices, run) {
   const status = el("div", { class: "export-status", role: "status", "aria-live": "polite", hidden: true });
   const close = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outside, true); };
   const outside = (e) => { if (!wrap.contains(e.target)) close(); };
+  // Placed against the window, so it stays on screen wherever the button is: on a phone the button is
+  // not at the edge, and a menu hung from it would run off the left.
+  const place = () => {
+    const r = button.getBoundingClientRect();
+    const width = Math.min(300, window.innerWidth - 16);
+    Object.assign(menu.style, {
+      position: "fixed", right: "auto", width: `${width}px`,
+      left: `${Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8))}px`,
+      top: `${r.bottom + 6}px`, maxHeight: `${Math.max(160, window.innerHeight - r.bottom - 14)}px`, overflowY: "auto",
+    });
+  };
   button.addEventListener("click", () => {
     if (!menu.hidden) return close();
     menu.hidden = false;
+    place();
     button.setAttribute("aria-expanded", "true");
     document.addEventListener("click", outside, true);
     menu.querySelector("button")?.focus();
   });
+  window.addEventListener("resize", () => { if (!menu.hidden) place(); });
   menu.addEventListener("keydown", (e) => { if (e.key === "Escape") { close(); button.focus(); } });
   // On a computer, where exports go, and a way to choose another folder.
   if (isDesktop() && window.__TAURI__.dialog) {

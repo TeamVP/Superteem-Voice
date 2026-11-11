@@ -468,23 +468,10 @@ mod imp {
         }
     }
 
-    fn run_microphone(
-        stop: &AtomicBool,
-        phrases: mpsc::Sender<(Vec<i16>, bool)>,
-        checks: mpsc::Sender<(Heard, Vec<i16>)>,
-        ready: &mpsc::Sender<Result<(), String>>,
-    ) -> Result<(), String> {
-        // The microphone chosen when the person's voice print was made, while it is still connected.
-        let host = cpal::default_host();
-        let chosen = crate::prefs::load().enrol_input;
-        let device = chosen
-            .and_then(|name| host.input_devices().ok()?.find(|d| d.name().is_ok_and(|n| n == name)))
-            .or_else(|| host.default_input_device())
-            .ok_or("no microphone found")?;
+    /// Opens one microphone and starts it, sending its blocks, mixed to mono, down `tx`.
+    fn open_input(device: &cpal::Device, tx: mpsc::Sender<Vec<f32>>) -> Result<(cpal::Stream, u32), String> {
         let config = device.default_input_config().map_err(|e| e.to_string())?;
         let channels = config.channels() as usize;
-        let mut resampler = Resampler::new(config.sample_rate().0);
-        let (tx, rx) = mpsc::channel::<Vec<f32>>();
         let stream_config = config.config();
         let on_error = |_| {};
         let stream = match config.sample_format() {
@@ -504,6 +491,46 @@ mod imp {
         }
         .map_err(|e| e.to_string())?;
         stream.play().map_err(|e| e.to_string())?;
+        Ok((stream, config.sample_rate().0))
+    }
+
+    fn run_microphone(
+        stop: &AtomicBool,
+        phrases: mpsc::Sender<(Vec<i16>, bool)>,
+        checks: mpsc::Sender<(Heard, Vec<i16>)>,
+        ready: &mpsc::Sender<Result<(), String>>,
+    ) -> Result<(), String> {
+        // The microphone chosen when the person's voice print was made, then the system's default, then any
+        // other: whichever opens first. A voice print isn't needed for a microphone to be used.
+        let host = cpal::default_host();
+        let chosen = crate::prefs::load().enrol_input;
+        let mut candidates: Vec<cpal::Device> = Vec::new();
+        let all: Vec<cpal::Device> = host.input_devices().map(|d| d.collect()).unwrap_or_default();
+        let name = |d: &cpal::Device| d.name().unwrap_or_default();
+        if let Some(c) = &chosen {
+            candidates.extend(all.iter().filter(|d| name(d) == *c).cloned());
+        }
+        candidates.extend(host.default_input_device());
+        candidates.extend(all.iter().cloned());
+        let (tx, rx) = mpsc::channel::<Vec<f32>>();
+        let mut tried = std::collections::HashSet::new();
+        let mut last_error = String::from("no microphone found");
+        let mut opened = None;
+        for device in candidates {
+            if !tried.insert(name(&device)) {
+                continue;
+            }
+            match open_input(&device, tx.clone()) {
+                Ok(o) => {
+                    opened = Some(o);
+                    break;
+                }
+                Err(e) => last_error = e,
+            }
+        }
+        drop(tx);
+        let (stream, rate) = opened.ok_or(last_error)?;
+        let mut resampler = Resampler::new(rate);
         let _ = ready.send(Ok(()));
 
         let mut pending: Vec<i16> = Vec::new();
