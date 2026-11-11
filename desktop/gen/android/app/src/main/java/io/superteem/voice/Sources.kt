@@ -3,27 +3,18 @@ package io.superteem.voice
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
-import android.content.Context
-import android.media.AudioDeviceInfo
-import android.media.AudioFormat
-import android.media.AudioManager
-import android.media.AudioRecord
-import android.media.AudioRecordingConfiguration
-import android.media.MediaRecorder
-import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import java.io.File
 import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
 
 const val AUDIO_PSM = 0x0080
 private const val TAG = "StvSource"
 private const val SYNC_INTERVAL_MS = 1000L
 private const val RECONNECT_DELAY_MS = 2000L
 /** Two seconds of 20 ms frames of exact zeros: a microphone that is switched off, not a quiet room. */
-private const val SILENT_FRAMES = 100
+const val SILENT_FRAMES = 100
 const val SILENCED_DETAIL = "Android is giving Superteem silence. Check that Microphone access is on in Quick Settings, " +
     "and that no call or voice assistant is using the microphone."
 
@@ -35,6 +26,11 @@ data class SourceStats(
     val detail: String = "",
     /** Input level from 0 to 1 for the meter; pins report none. */
     val level: Float = 0f,
+    /** The last change of microphone to tell the person about, numbered so each is told once. */
+    val notice: String = "",
+    val noticeId: Int = 0,
+    /** Frames recorded by the microphone chosen, not one fallen back to: what says the chosen one works. */
+    val ownFrames: Long = 0,
 )
 
 /** Maps a 16-bit PCM frame's RMS level to 0..1 over a 70 dB range, matching the Windows meter. */
@@ -136,138 +132,3 @@ class PinSource(private val device: BluetoothDevice, private val dir: File, priv
     }
 }
 
-/**
- * Records the Bluetooth headset mic, or the phone's own mic when `headset` is false.
- * The phone's own sequence numbers fill the frame header. Without `dir` nothing is written: the microphone is
- * only listened to, for its meter.
- */
-@SuppressLint("MissingPermission")
-class MicSource(
-    private val context: Context,
-    private val dir: File?,
-    val label: String,
-    private val headset: Boolean,
-    private val stats: StatsTable = Stats,
-) : Thread(label) {
-    @Volatile private var running = true
-
-    override fun run() {
-        val audio = context.getSystemService(AudioManager::class.java)
-        var device: AudioDeviceInfo? = null
-        if (headset) {
-            audio.mode = AudioManager.MODE_IN_COMMUNICATION
-            device = routeToHeadset(audio)
-            if (device == null) {
-                stats.update(label) { it.copy(state = "no headset", detail = "Connect a Bluetooth headset and start again") }
-                audio.mode = AudioManager.MODE_NORMAL
-                return
-            }
-        }
-        val rate = 16_000
-        val samples = rate / 50
-        val minBuffer = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        val source = if (headset) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.MIC
-        val record = AudioRecord(
-            source, rate, AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, samples * 8),
-        )
-        // Android gives an app silence, without an error, when the microphone switch in Quick Settings is off
-        // or another app (a call, a voice assistant) has the microphone. That is told apart from a quiet room.
-        val silencedByAndroid = AtomicBoolean(false)
-        val watch = object : AudioManager.AudioRecordingCallback() {
-            override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
-                configs.firstOrNull { it.clientAudioSessionId == record.audioSessionId }?.let { silencedByAndroid.set(it.isClientSilenced) }
-            }
-        }
-        try {
-            if (record.state != AudioRecord.STATE_INITIALIZED) {
-                throw IllegalStateException("The microphone could not be opened. Another app may be using it.")
-            }
-            device?.let { record.setPreferredDevice(it) }
-            record.registerAudioRecordingCallback(context.mainExecutor, watch)
-            record.startRecording()
-            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                throw IllegalStateException("The microphone did not start. Another app may be using it.")
-            }
-            audio.activeRecordingConfigurations.firstOrNull { it.clientAudioSessionId == record.audioSessionId }
-                ?.let { silencedByAndroid.set(it.isClientSilenced) }
-            val actual = "${record.sampleRate} Hz via ${record.routedDevice?.productName ?: "unknown"}"
-            stats.update(label) { it.copy(state = "recording", detail = actual) }
-            val journal = dir?.let { JournalWriter(File(it, "$label.stvj")) }
-            try {
-                val buffer = ByteArray(samples * 2)
-                var sequence = 0
-                var lastSync = SystemClock.elapsedRealtime()
-                // Frames in a row of exact digital silence, which a working microphone never gives.
-                var zeroRun = 0
-                while (running) {
-                    var at = 0
-                    while (at < buffer.size && running) {
-                        val n = record.read(buffer, at, buffer.size - at)
-                        if (n < 0) throw IllegalStateException("AudioRecord error $n")
-                        at += n
-                    }
-                    if (at < buffer.size) break
-                    journal?.append(nowUs(), encodeFrame(1, sequence, sequence * samples, CODEC_RAW_PCM16, buffer, buffer.size))
-                    sequence++
-                    val level = meterLevel(buffer, buffer.size)
-                    zeroRun = if (buffer.all { it == 0.toByte() }) zeroRun + 1 else 0
-                    val silenced = silencedByAndroid.get() || zeroRun >= SILENT_FRAMES
-                    stats.update(label) {
-                        it.copy(
-                            frames = it.frames + 1,
-                            level = level,
-                            state = if (silenced) "silenced" else "recording",
-                            detail = if (silenced) SILENCED_DETAIL else actual,
-                        )
-                    }
-                    if (journal != null && SystemClock.elapsedRealtime() - lastSync >= SYNC_INTERVAL_MS) {
-                        journal.sync()
-                        lastSync = SystemClock.elapsedRealtime()
-                    }
-                }
-            } finally {
-                journal?.close()
-            }
-            stats.update(label) { it.copy(state = "stopped") }
-        } catch (e: Exception) {
-            Log.e(TAG, "headset capture failed", e)
-            stats.update(label) { it.copy(state = "failed", detail = e.message ?: "") }
-        } finally {
-            runCatching { record.unregisterAudioRecordingCallback(watch) }
-            runCatching { record.stop() }
-            record.release()
-            if (headset) {
-                clearRoute(audio)
-                audio.mode = AudioManager.MODE_NORMAL
-            }
-        }
-    }
-
-    private fun routeToHeadset(audio: AudioManager): AudioDeviceInfo? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val device = audio.availableCommunicationDevices.firstOrNull {
-                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
-            } ?: return null
-            return device.takeIf { audio.setCommunicationDevice(it) }
-        }
-        val device = audio.getDevices(AudioManager.GET_DEVICES_INPUTS)
-            .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO } ?: return null
-        @Suppress("DEPRECATION")
-        audio.startBluetoothSco()
-        return device
-    }
-
-    private fun clearRoute(audio: AudioManager) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            audio.clearCommunicationDevice()
-        } else {
-            @Suppress("DEPRECATION")
-            audio.stopBluetoothSco()
-        }
-    }
-
-    fun shutdown() {
-        running = false
-    }
-}

@@ -930,6 +930,11 @@ async function startDictation() {
     // to look like a quiet room.
     if (platform === "android" && ++ticks % 10 === 0) {
       const problem = await invoke("dictation_problem").catch(() => null);
+      const switched = await invoke("dictation_notice").catch(() => null);
+      if (switched && dictation && switched[0] > (dictation.noticeId ?? 0)) {
+        dictation.noticeId = switched[0];
+        micToast(switched[1]);
+      }
       const chip = document.getElementById("dictation-chip");
       if (problem && chip && chip.hidden) {
         chip.hidden = false;
@@ -1413,10 +1418,18 @@ function renderRecording(status) {
       const failing = ["failed", "disconnected", "silenced", "no headset"].includes(st.state);
       return el("div", { class: "lane" },
         el("span", { class: "name", style: `color:${colour}` }, streamName(st.name),
-          el("small", { class: failing ? "danger" : "" }, failing || st.state === "reconnecting" ? st.detail || st.state : st.state)),
+          el("small", { class: failing ? "danger" : "" }, failing || st.state === "reconnecting" || st.state === "waiting" ? st.detail || st.state : st.state)),
         el("span", { class: "spark" }, history.map((l) => el("span", { style: `height:${Math.max(2, Math.round(l * 24))}px;background:${l > 0.35 ? colour : "var(--line)"}` }))));
     }));
     if (!s.streams.length) lanes.replaceChildren(el("div", { class: "legend" }, "Starting the inputs…"));
+    // Android switched a stream to another microphone: said briefly, once per switch.
+    recording.notices ??= {};
+    for (const st of s.streams) {
+      if (st.notice_id > (recording.notices[st.name] ?? 0)) {
+        recording.notices[st.name] = st.notice_id;
+        micToast(st.notice);
+      }
+    }
     // Every microphone silent because of the system, not the room: say so, with the way to fix it.
     const blocked = s.streams.length && s.streams.every((st) => ["failed", "silenced", "no headset"].includes(st.state));
     if (!blocked) problem.replaceChildren();
@@ -3975,6 +3988,11 @@ function voiceReading(holder, next, device) {
       await stopReading(false).catch(() => {});
       return voiceSetup(holder, next, `${device} could not be used: ${stream.detail || "it did not start"}. Try another microphone.`);
     }
+    // Android switched to another microphone: this page checks the one chosen, so it says so instead.
+    if (stream.notice_id > 0) {
+      await stopReading(false).catch(() => {});
+      return voiceSetup(holder, next, `${device} isn't working: ${stream.notice}. Connect it, or pick another microphone.`);
+    }
     // Android is handing the app silence: the room isn't quiet, the microphone is switched off for it.
     if (stream.state === "silenced") {
       if (!status.querySelector(".mic-blocked")) {
@@ -4146,6 +4164,15 @@ function chime() {
       osc.stop(t + i * 0.09 + 0.18);
     }
   } catch {}
+}
+
+/// A brief message at the foot of the screen, such as the microphone being switched mid-recording.
+function micToast(text) {
+  if (!text) return;
+  document.getElementById("mic-toast")?.remove();
+  const toast = el("div", { class: "mic-toast", id: "mic-toast", role: "status" }, text);
+  document.body.append(toast);
+  setTimeout(() => toast.remove(), 4000);
 }
 
 function say(text, big = false) {

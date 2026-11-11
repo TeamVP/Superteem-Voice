@@ -222,8 +222,8 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             for (name in args.inputs) {
                 if (missingPermissions(false, name == INPUT_HEADSET).isNotEmpty()) continue
                 val source = when (name) {
-                    INPUT_HEADSET -> MicSource(activity, null, name, headset = true, stats = ProbeStats)
-                    INPUT_PHONE -> MicSource(activity, null, name, headset = false, stats = ProbeStats)
+                    INPUT_HEADSET -> MicSource(activity, null, name, Mic.HEADSET, stats = ProbeStats)
+                    INPUT_PHONE -> MicSource(activity, null, name, Mic.PHONE, stats = ProbeStats)
                     else -> continue
                 }
                 probes[name] = source
@@ -263,7 +263,13 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         if (CaptureService.running) return invoke.reject("Already recording.")
         // The microphones are let go by the meters before the recording opens them.
         stopProbes()
-        val missing = missingPermissions(args.pins, INPUT_HEADSET in args.inputs)
+        // A headset without Bluetooth access still records, from the phone's microphone, while Android asks for it.
+        val missing = missingPermissions(args.pins, false)
+        val forHeadset = missingPermissions(args.pins, INPUT_HEADSET in args.inputs) - missing.toSet()
+        if (missing.isEmpty() && forHeadset.isNotEmpty()) {
+            asked.edit().apply { forHeadset.forEach { putBoolean(it, true) } }.apply()
+            activity.requestPermissions(forHeadset.toTypedArray(), 1)
+        }
         if (missing.isNotEmpty()) {
             asked.edit().apply { missing.forEach { putBoolean(it, true) } }.apply()
             activity.requestPermissions(missing.toTypedArray(), 1)
@@ -291,6 +297,9 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             stream.put("frames", s.frames)
             stream.put("lost", s.lost)
             stream.put("level", s.level.toDouble())
+            stream.put("notice", s.notice)
+            stream.put("notice_id", s.noticeId)
+            stream.put("own_frames", s.ownFrames)
             streams.put(stream)
         }
         result.put("streams", streams)
