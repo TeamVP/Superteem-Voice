@@ -54,6 +54,8 @@ pub struct Installed {
     pub natural_on: bool,
     pub main_voice: String,
     pub primary: String,
+    /// Natural voices run on this device (Windows for now).
+    pub natural_voices: bool,
 }
 
 /// One thing the plan does.
@@ -118,6 +120,7 @@ pub fn installed() -> Installed {
         natural_on: p.natural_voice,
         main_voice: tts::chosen_in(&p, &tts::voices()).id,
         primary: p.primary_language(),
+        natural_voices: tts::supported(),
     }
 }
 
@@ -234,7 +237,7 @@ pub fn plan(languages: &[String], d: &Profile, have: &Installed, voices: &[tts::
     }
 
     // A natural voice for each language, when one is offered.
-    for l in languages {
+    for l in languages.iter().filter(|_| have.natural_voices) {
         let speaks: Vec<&tts::Voice> = voices.iter().filter(|v| v.langs.iter().any(|x| x == l)).collect();
         // The main language reads with the main voice once natural voices are on; others with any downloaded.
         let main = *l == have.primary;
@@ -549,7 +552,7 @@ mod tests {
 
     #[test]
     fn a_gaming_pc_gets_the_large_models_and_its_graphics_card() {
-        let p = plan(&langs(&["en", "es"]), &device(Some(("RTX 4060 Ti", 8.0, false)), 32.0, 200.0), &Installed::default(), &tts::offered());
+        let p = plan(&langs(&["en", "es"]), &device(Some(("RTX 4060 Ti", 8.0, false)), 32.0, 200.0), &Installed { natural_voices: true, ..Default::default() }, &tts::offered());
         assert_eq!(pick(&p, "speech").unwrap().id, "turbo");
         assert_eq!(pick(&p, "analysis").unwrap().id, "qwen3.5-4b");
         assert!(pick(&p, "gpu").is_some());
@@ -560,24 +563,24 @@ mod tests {
 
     #[test]
     fn a_laptop_without_a_graphics_card_gets_quick_models() {
-        let p = plan(&langs(&["en"]), &device(None, 8.0, 100.0), &Installed::default(), &tts::offered());
+        let p = plan(&langs(&["en"]), &device(None, 8.0, 100.0), &Installed { natural_voices: true, ..Default::default() }, &tts::offered());
         assert_eq!(pick(&p, "speech").unwrap().id, "base.en");
         assert!(pick(&p, "gpu").is_none());
-        let p = plan(&langs(&["en", "fr"]), &device(None, 6.0, 100.0), &Installed::default(), &tts::offered());
+        let p = plan(&langs(&["en", "fr"]), &device(None, 6.0, 100.0), &Installed { natural_voices: true, ..Default::default() }, &tts::offered());
         assert_eq!(pick(&p, "speech").unwrap().id, "small");
         assert_eq!(pick(&p, "analysis").unwrap().id, "qwen3-1.7b");
     }
 
     #[test]
     fn built_in_graphics_with_little_memory_stays_on_the_processor() {
-        let p = plan(&langs(&["en"]), &device(Some(("Intel UHD", 0.0, true)), 8.0, 100.0), &Installed::default(), &tts::offered());
+        let p = plan(&langs(&["en"]), &device(Some(("Intel UHD", 0.0, true)), 8.0, 100.0), &Installed { natural_voices: true, ..Default::default() }, &tts::offered());
         assert!(pick(&p, "gpu").is_none());
         assert!(p.notes.iter().any(|n| n.contains("shares")));
     }
 
     #[test]
     fn a_full_disk_steps_down_then_leaves_voices_out() {
-        let p = plan(&langs(&["en", "es"]), &device(Some(("RTX", 8.0, false)), 32.0, 6.0), &Installed::default(), &tts::offered());
+        let p = plan(&langs(&["en", "es"]), &device(Some(("RTX", 8.0, false)), 32.0, 6.0), &Installed { natural_voices: true, ..Default::default() }, &tts::offered());
         assert_eq!(pick(&p, "analysis").unwrap().id, "qwen3-1.7b");
         let need: u64 = p.steps.iter().filter(|s| !s.done).map(|s| s.download).sum();
         assert!(need + KEEP_FREE <= 6_000_000_000 || p.notes.iter().any(|n| n.contains("too little")));
@@ -596,6 +599,7 @@ mod tests {
             natural_on: true,
             main_voice: "vits-piper-en_GB-alba-medium".into(),
             primary: "en".into(),
+            natural_voices: true,
         };
         let p = plan(&langs(&["en"]), &device(Some(("RTX", 8.0, false)), 32.0, 200.0), &have, &tts::offered());
         assert!(pick(&p, "gpu").unwrap().done);

@@ -23,11 +23,13 @@ Voice by Superteem turns speech into text on your PC, Mac or phone. You can dict
 - **Summaries and action items:** decisions, action items (who, what, when) and open questions, written by a small language model that runs on your device. Templates for standups, user interviews, sales calls, lectures and more stack at the top of a meeting or note; every point links to the line it came from. Make your own from a list of headings.
 - **Many languages:** each note or meeting is in one language, or two for people who switch between them, such as Chinese and English or Welsh and English. Choosing a language the app hasn't used yet adds it to yours and offers the speech model it needs.
 - **Translation:** translate a meeting or note line by line into your other languages, and correct any line. For languages the language model writes less well, analyses are made from an English translation and can be translated back.
+- **Listen to translations:** read a translation aloud line by line, following along, or start from any line. Natural voices for about 40 languages download in one click (Windows).
+- **Optimise for this device:** one button picks the speech model, analysis model, graphics processor and a reading voice for each of your languages, for what your device runs well and the room it has, then tries each one. Settings › AI on this computer shows what runs and how fast.
 - **Voice commands (Windows and Mac):** say "Hey Superteem, start meeting", "take a note" or "bookmark that".
 - **Plain files:** each meeting is a folder of WAV audio and `transcript.json`. Text, Markdown and SRT copies are written next to them and regenerated on every edit. On Windows and the Mac the folders live in `Documents/Superteem Voice`; on iPhone, in the Files app under On My iPhone.
 - **Voice Pin (in development):** support for Seeed's wearable [reSpeaker Clip](https://github.com/Seeed-Studio/reSpeaker_Clip), which runs Seeed's own open-source firmware.
 
-Summaries and translations use [llama.cpp](https://github.com/ggml-org/llama.cpp) with a small model you choose in Settings, downloaded once: Qwen3 1.7B (about 1.1 GB) is quick, and Qwen3.5 4B (about 2.7 GB) is much better for translation and for languages such as Welsh. You can also point it at a local server such as Ollama.
+Summaries and translations use [llama.cpp](https://github.com/ggml-org/llama.cpp) with a small model you choose in Settings, downloaded once: Qwen3 1.7B (about 1.1 GB) is quick, and Qwen3.5 4B (about 2.7 GB) is much better for translation and for languages such as Welsh. You can also point it at a local server such as Ollama. On Windows, models run on the graphics processor through Vulkan when there's one that can (NVIDIA, AMD or Intel), and on the processor otherwise; the Mac uses Metal.
 
 Transcription uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp). English uses the English `base.en` model, which the app downloads (about 150 MB) once on first run. Other languages use a multilingual Whisper model, offered when you first choose one: `large-v3-turbo` (about 570 MB) on PCs with a graphics card, `small` (about 260 MB) on phones and other PCs. Both then work offline. Spoken commands are English for now.
 
@@ -55,7 +57,7 @@ Get the latest Windows installer, Mac disk image and Android APK from **[voice.s
 
 ## Building from source
 
-The Windows and Android apps are built on Windows, and the Mac and iPhone apps on a Mac. You need [Rust](https://rustup.rs), [Node.js](https://nodejs.org), Python, and Visual Studio 2022 with the C++ tools and the Windows SDK. The build scripts fetch the rest (libclang and a patched whisper-rs-sys).
+The Windows and Android apps are built on Windows, and the Mac and iPhone apps on a Mac. You need [Rust](https://rustup.rs), [Node.js](https://nodejs.org), Python, and Visual Studio 2022 with the C++ tools and the Windows SDK. Windows builds also need the [Vulkan SDK](https://vulkan.lunarg.com) (`winget install KhronosGroup.VulkanSDK`) for the graphics processor. The build scripts fetch the rest (libclang and a patched whisper-rs-sys).
 
 **Windows.** Build and install for the current user, with a Start Menu shortcut:
 
