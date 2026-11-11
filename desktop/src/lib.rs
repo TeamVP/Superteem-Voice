@@ -14,6 +14,7 @@ pub mod llm;
 pub mod isolate;
 pub mod listen;
 pub mod notes;
+pub mod optimise;
 pub mod prefs;
 pub mod probe;
 pub mod process;
@@ -1702,6 +1703,114 @@ fn delete_tts(id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Optimising for this device: the plan for the person's languages, how it went last time, and whether
+/// to suggest it (once a note and a meeting have been made, when it hasn't been done for this device and
+/// would change something).
+#[derive(Serialize)]
+struct OptimiseView {
+    plan: optimise::Plan,
+    last: Option<optimise::Measured>,
+    stale: bool,
+    suggest: bool,
+    progress: optimise::Progress,
+    current: AiNow,
+}
+
+/// What each job runs with now, for the AI page.
+#[derive(Serialize)]
+struct AiNow {
+    speech: String,
+    speech_ready: bool,
+    analysis: Option<String>,
+    server: Option<String>,
+    gpu_on: bool,
+    /// Each language, with what reads it aloud ("Alba", or None for the system's voice), how well it's
+    /// transcribed, and whether analyses are written in it directly.
+    languages: Vec<(String, Option<String>, stv_core::lang::Quality, bool)>,
+    /// Space the models take, in bytes.
+    storage: u64,
+}
+
+fn ai_now(languages: &[String]) -> AiNow {
+    let p = prefs::load();
+    let (speech, speech_ready) = transcribe::model_for(languages);
+    let models = library::models_dir();
+    let storage = std::fs::read_dir(&models).into_iter().flatten().flatten().filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum::<u64>()
+        + llm::installed().iter().map(|i| i.size).sum::<u64>()
+        + tts::status().voices.iter().filter(|v| v.ready).map(|v| v.voice.size).sum::<u64>();
+    AiNow {
+        speech: speech.name.to_string(),
+        speech_ready,
+        // The catalogue's name for it ("Qwen3.5 4B"), else the file's.
+        analysis: llm::chosen(&p.llm_model).and_then(|f| {
+            let file = f.file_name()?.to_string_lossy().into_owned();
+            Some(llm::CATALOGUE.iter().find(|c| c.file == file).map_or_else(|| f.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or(file.clone()), |c| c.name.to_string()))
+        }),
+        server: (!p.llm_server.trim().is_empty()).then(|| p.llm_server.clone()),
+        gpu_on: p.use_gpu.unwrap_or(true),
+        languages: languages
+            .iter()
+            .map(|l| {
+                let info = stv_core::lang::get(l);
+                (
+                    l.clone(),
+                    tts::for_language(&p, Some(l)).map(|v| v.name),
+                    info.map_or(stv_core::lang::Quality::None, |x| x.speech),
+                    info.is_some_and(|x| x.analysis == stv_core::lang::Analysis::Direct),
+                )
+            })
+            .collect(),
+        storage,
+    }
+}
+
+#[tauri::command]
+async fn optimise_plan() -> Result<OptimiseView, String> {
+    blocking(|| {
+        let p = prefs::load();
+        let languages = p.languages();
+        let profile = optimise::profile();
+        let plan = optimise::plan(&languages, &profile, &optimise::installed(), &tts::voices());
+        let stale = optimise::stale(&profile, &languages);
+        let used = !notes::list("").is_empty() && library::list("", &[]).iter().any(|m| !m.needs_processing && !m.preview.is_empty());
+        OptimiseView { suggest: stale && used && !p.optimise_dismissed && plan.worth_it(), stale, last: optimise::last(), current: ai_now(&languages), plan, progress: optimise::progress() }
+    })
+    .await
+}
+
+/// Does the chosen steps of a fresh plan, in the background; progress goes out as "optimise-progress".
+#[tauri::command]
+fn optimise_apply<R: Runtime>(app: AppHandle<R>, steps: Vec<(String, String)>) -> Result<(), String> {
+    if optimise::progress().running {
+        return Err("Voice is already being optimised.".into());
+    }
+    std::thread::spawn(move || {
+        let languages = prefs::load().languages();
+        let plan = optimise::plan(&languages, &optimise::profile(), &optimise::installed(), &tts::voices());
+        let handle = app.clone();
+        let _ = optimise::apply(&plan, &steps, |p| drop(handle.emit("optimise-progress", p.clone())));
+        listen::forget_transcriber();
+        let _ = app.emit("optimise-progress", optimise::progress());
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn optimise_cancel() {
+    optimise::cancel();
+}
+
+#[tauri::command]
+fn optimise_dismiss() -> Result<(), String> {
+    prefs::update(|p| p.optimise_dismissed = true).map(|_| ())
+}
+
+/// The natural voice offered first for `language`, to download.
+#[tauri::command]
+fn offered_voice(language: String) -> Option<tts::Voice> {
+    tts::first_for(&language)
+}
+
 /// The natural voice that reads `language`, or None when the system's voice does.
 #[tauri::command]
 fn reading_voice(language: Option<String>) -> Option<tts::Voice> {
@@ -2455,6 +2564,11 @@ pub fn run() {
             download_speech_model,
             cancel_speech_download,
             delete_speech_model,
+            optimise_plan,
+            offered_voice,
+            optimise_apply,
+            optimise_cancel,
+            optimise_dismiss,
             get_translation,
             translate_item,
             edit_translation,

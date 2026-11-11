@@ -964,8 +964,12 @@ async function showReadingSettings(message) {
     ? "Built into this device. Nothing to download."
     : "Built into this device. Natural voices are on Windows now, and coming here.",
   async () => { await saveReading({ natural: false }); showReadingSettings(); }));
+  // Voices for the person's languages are listed; the rest, one or two for each other language, fold away.
+  const mine = (await languageData()).chosen;
+  const others = el("div", { class: "group voice-list", role: "radiogroup", "aria-label": "Voices for other languages" });
   for (const v of status?.supported ? status.voices : []) {
     const on = natural && status.chosen === v.id;
+    const listed = on || v.ready || v.custom || status.downloading === v.model || v.langs?.some((l) => mine.includes(l));
     const size = v.size >= 1e9 ? `${(v.size / 1e9).toFixed(1)} GB` : `${Math.round(v.size / 1e6)} MB`;
     const extra = [];
     if (status.downloading && status.downloading === v.model) {
@@ -983,20 +987,31 @@ async function showReadingSettings(message) {
       showReadingSettings();
     }, extra);
     if (!v.ready) row.querySelector("input").disabled = !!status.downloading || v.custom;
-    group.append(row);
+    (listed ? group : others).append(row);
   }
   async function getVoice(v) {
     const run = invoke("download_tts", { id: v.id });
     setTimeout(() => showReadingSettings(), 150);
     try {
       await run;
-      await saveReading({ voice: v.id, natural: true });
-      if (view.kind === "reading-settings") showReadingSettings(`${v.name} is ready, and reads from now on.`);
+      // A voice for another language reads that language only; the main voice stays as it is.
+      const primary = languageInfo?.primary ?? "en";
+      if (v.custom || !v.langs?.length || v.langs.includes(primary)) {
+        await saveReading({ voice: v.id, natural: true });
+        if (view.kind === "reading-settings") showReadingSettings(`${v.name} is ready, and reads from now on.`);
+      } else if (view.kind === "reading-settings") {
+        await refreshPrefs();
+        showReadingSettings(`${v.name} is ready, and reads ${v.langs.map((l) => languageName(l)).join(" and ")} from now on.`);
+      }
     } catch (e) {
       if (view.kind === "reading-settings") showReadingSettings(String(e));
     }
   }
   page.append(el("h2", {}, "Voice"), group);
+  if (others.childElementCount) {
+    page.append(el("details", { class: "more-voices" }, el("summary", {}, `Voices for other languages (${others.childElementCount})`),
+      el("p", { class: "hint" }, "For reading translations and notes in those languages. A downloaded voice reads its language; your own language keeps the voice chosen above."), others));
+  }
   const langs = await languageData();
   if (status?.supported && langs.chosen.length > 1) page.append(el("h2", {}, "Voice for each language"), voiceForLanguages(page, status, langs));
   if (status?.supported) {

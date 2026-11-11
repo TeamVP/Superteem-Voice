@@ -332,6 +332,34 @@ function drawReadingStatus(page) {
   status.hidden = false;
 }
 
+/// When no natural voice that speaks the translation's language is downloaded but one is offered, a
+/// one-click download of it, so Listen sounds right.
+async function voiceOffer(page) {
+  if (!isDesktop()) return null;
+  const status = await invoke("tts_status").catch(() => null);
+  if (!status?.supported) return null;
+  const speaks = status.voices.filter((v) => v.langs?.includes(page.language));
+  if (!speaks.length || speaks.some((v) => v.ready)) return null;
+  const first = await invoke("offered_voice", { language: page.language }).catch(() => null);
+  const voice = speaks.find((v) => v.id === first?.id) ?? speaks[0];
+  const size = `${Math.round(voice.size / 1e6)} MB`;
+  const name = languageName(page.language);
+  const box = el("div", { class: "translation-voice" });
+  const get = el("button", { class: "pill", type: "button", disabled: !!status.downloading }, `Get ${voice.name} (${size})`);
+  get.addEventListener("click", async () => {
+    box.replaceChildren(el("span", { class: "spinner" }), " ", `Downloading ${voice.name}… `, el("span", { "data-tts-progress": voice.id }, ""));
+    try {
+      await invoke("download_tts", { id: voice.id });
+      await refreshPrefs();
+    } catch (e) {
+      page.error = String(e);
+    }
+    drawTranslation(page);
+  });
+  box.append(svg("speak", 16), el("span", { class: "grow" }, `Listen sounds best with a natural ${name} voice. ${voice.name} reads ${name} on this device, offline.`), get);
+  return box;
+}
+
 /// Called by the job events: redraws the panel when its translation moves on or finishes.
 function refreshTranslation(job, finished) {
   const page = translationPage;
@@ -429,6 +457,8 @@ async function drawTranslation(page) {
   if (page.error) parts.push(el("p", { class: "danger" }, page.error));
   if (data.advice) parts.push(el("p", { class: "hint" }, data.advice, " ", el("button", { class: "link inline", onclick: () => { analysisOrigin = { kind, id }; showAnalysisSettings(); } }, "Analysis settings")));
 
+  const offer = translated ? await voiceOffer(page) : null;
+  if (offer) parts.push(offer);
   if (page.open && translated) {
     const rows = el("div", { class: "translation-lines" });
     data.lines.forEach((line, index) => {

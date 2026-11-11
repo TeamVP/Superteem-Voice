@@ -113,6 +113,12 @@ pub fn model_for(languages: &[String]) -> (&'static SpeechModel, bool) {
     let chosen = model(&crate::prefs::load().speech_model).filter(|m| m.multilingual && is_ready(m));
     let best = chosen.or_else(|| MODELS.iter().find(|m| m.multilingual && is_ready(m)));
     if lang::english_only(languages) {
+        // The large model is the most accurate English too, and quick on a graphics processor: optimising
+        // chooses it there.
+        let p = crate::prefs::load();
+        if let Some(m) = chosen.filter(|m| m.id == "turbo" && p.use_gpu.unwrap_or(true) && cfg!(windows) && crate::llm::device().gpu.is_some()) {
+            return (m, true);
+        }
         return match (is_ready(english), best) {
             (false, Some(m)) => (m, true),
             _ => (english, is_ready(english)),

@@ -506,6 +506,8 @@ function showHome() {
     el("div", { class: "hint" }, homeMode === "note"
       ? (platform === "android" ? "Tap to write · or say “Hey Superteem, take a note”" : "Tap to start a note by voice · type as you go")
       : "Tap to set up · or say “Hey Superteem, start meeting”")));
+  // Once a note and a meeting are made, a suggestion to optimise, when it would change something.
+  optimiseNudge().then((card) => { if (card && view.kind === "home") main.querySelector(".home")?.append(card); }).catch(() => {});
 }
 
 // ---------- Notes: a text editor that listens ----------
@@ -3231,6 +3233,10 @@ async function showSettings() {
     invoke("list_vocabulary").catch(() => [])]);
   prefs = fresh;
   const page = el("div", { class: "page" }, el("h1", {}, "Settings"));
+  // Optimising for this device, offered first while it would change something; the page it leads to always.
+  const callout = await optimiseCallout().catch(() => null);
+  if (callout) page.append(callout);
+  page.append(el("div", { class: "group" }, linkRow(`AI on this ${isPhone() ? "phone" : "computer"}`, "Models, how fast they run, and optimising them", () => showAiSettings())));
 
   // The proxy and the model folder are only needed when the download doesn't work, so they sit behind a
   // link in the row, opened already when the download has failed.
@@ -3613,7 +3619,10 @@ async function showOnboarding(step = SETUP.welcome) {
     page.append(
       el("div", { class: "celebrate", role: "status" }, el("span", { class: "badge" }, svg("check", 44))),
       el("h1", {}, "You're all set"),
-      el("div", { class: "actions" }, el("button", { class: "primary pill big", onclick: finish }, "Start")));
+      el("div", { class: "actions" }, el("button", { class: "primary pill big", onclick: finish }, "Start")),
+      // Optional: the same as Settings › AI on this device.
+      el("p", { class: "legend" }, el("button", { class: "link inline", onclick: async () => { await finish(); showOptimise(); } }, "Optimise Voice for this device first"),
+        " · picks the best speech and analysis models and voices for your languages"));
   }
   main.replaceChildren(page);
 }

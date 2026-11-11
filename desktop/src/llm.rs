@@ -225,6 +225,8 @@ fn file_sha256(path: &Path) -> Result<String, String> {
 fn free_space(path: &Path) -> Option<u64> {
     let disks = sysinfo::Disks::new_with_refreshed_list();
     let path = std::fs::canonicalize(path).ok()?;
+    // Windows gives the canonical path as \\?\C:\..., which no disk's mount point (C:\) starts.
+    let path = PathBuf::from(path.to_string_lossy().trim_start_matches(r"\\?\").to_string());
     disks.iter().filter(|d| path.starts_with(d.mount_point())).max_by_key(|d| d.mount_point().as_os_str().len()).map(|d| d.available_space())
 }
 
@@ -262,6 +264,28 @@ pub fn device() -> Device {
             .map(|d| format!("{} ({})", if d.description.is_empty() { &d.name } else { &d.description }, d.backend))
     });
     Device { gpu, ram_gb, context, threads, too_small: ram_gb < 2.5 }
+}
+
+/// The graphics processor models run on: its name, its own memory in GB (0 when it shares the
+/// computer's), and whether it's built into the processor.
+pub fn gpu_device() -> Option<(String, f32, bool)> {
+    use llama_cpp_2::LlamaBackendDeviceType as Kind;
+    backend().ok()?;
+    llama_cpp_2::list_llama_ggml_backend_devices()
+        .into_iter()
+        .find(|d| matches!(d.device_type, Kind::Gpu | Kind::IntegratedGpu))
+        .map(|d| {
+            let integrated = matches!(d.device_type, Kind::IntegratedGpu);
+            let name = if d.description.is_empty() { d.name } else { d.description };
+            (name, if integrated { 0.0 } else { d.memory_total as f32 / 1e9 }, integrated)
+        })
+}
+
+/// Free space where models are kept.
+pub fn free_space_for_models() -> Option<u64> {
+    let d = library::models_dir();
+    std::fs::create_dir_all(&d).ok()?;
+    free_space(&d)
 }
 
 // ---------------------------------------------------------------------------------------------------------

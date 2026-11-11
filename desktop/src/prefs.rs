@@ -113,6 +113,8 @@ pub struct Prefs {
     /// Which set of example vocabulary has been added (see `vocabulary::add_examples`), so each is added once
     /// and one the person deletes stays deleted.
     pub vocab_examples: u32,
+    /// The suggestion to optimise for this device was dismissed.
+    pub optimise_dismissed: bool,
 }
 
 /// Starred until the person chooses their own.
