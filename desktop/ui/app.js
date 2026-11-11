@@ -516,12 +516,12 @@ function showHome() {
       onclick: () => { homeMode = mode; showHome(); } }, label));
   }
   const mic = el("button", { class: "big-mic", "aria-label": homeMode === "note" ? "New note" : "Record a meeting",
-    onclick: () => (homeMode === "note" ? openNote(null, { dictate: true }) : showMeeting()) }, svg("mic", 36));
+    onclick: () => (homeMode === "note" ? openNote(null) : showMeeting()) }, svg("mic", 36));
   main.replaceChildren(el("div", { class: "home" },
     el("h1", {}, homeMode === "note" ? "Capture a thought" : "Capture a meeting"),
     modes, mic,
     el("div", { class: "hint" }, homeMode === "note"
-      ? (platform === "android" ? "Tap to write · or say “Hey Superteem, take a note”" : "Tap to start a note by voice · type as you go")
+      ? (platform === "android" ? "Tap to write · or say “Hey Superteem, take a note”" : prefs.dictate_manually ? "Tap to start a note · type or press Dictate" : "Tap to start a note by voice · type as you go")
       : "Tap to set up · or say “Hey Superteem, start meeting”")));
   // For a day after an update, which version this is and what changed.
   invoke("just_updated").then((u) => {
@@ -539,7 +539,8 @@ function showHome() {
 let note = null; // { id, title, body, dirty }
 let noteTimer = null;
 
-/// `dictate` starts with the cursor in the body and dictation running; left out, only a new note does.
+/// `dictate` starts with the cursor in the body and dictation running; left out, only a new note does,
+/// unless Settings says to wait for Dictate.
 async function openNote(id, { dictate } = {}) {
   leave();
   showPage();
@@ -760,9 +761,9 @@ function renderNote(data, dictate) {
   note.syncStack();
   chat?.sync();
   setLanguage([title, body], noteLanguage());
-  // The cursor always starts in the body; a new note starts dictating straight away.
+  // The cursor always starts in the body; a new note starts dictating straight away unless Settings says not to.
   ed.focusEnd();
-  if (dictate ?? !data.id) startDictation();
+  if (dictate ?? (!data.id && !prefs.dictate_manually)) startDictation();
 }
 
 /// What save_note is given: the note's Markdown, and the editor's document with it.
@@ -3303,6 +3304,12 @@ async function showSettings() {
   const phone = platform === "android" ? [el("h2", {}, "This phone"), el("div", { class: "group" },
     linkRow("App permissions", "Microphone, Bluetooth, notifications", () => showPermissions(), { drop: true }))] : [];
 
+  const notesSection = [el("h2", {}, "Notes"), el("div", { class: "group" },
+    toggleRow("Start dictating straight away", "A new note starts listening as it opens. When off, press Dictate to begin.", !prefs.dictate_manually, async (on) => {
+      prefs.dictate_manually = !on;
+      await invoke("save_prefs", { dictateManually: !on });
+    }))];
+
   const meetings = [el("h2", {}, "Meetings"), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, "Consent question",
       el("small", {}, "Voice always confirms everyone agreed before a meeting is recorded.")), el("span", { class: "value" }, "Always asked")),
@@ -3337,7 +3344,7 @@ async function showSettings() {
     el("div", { class: "row" }, el("span", { class: "label" }, "Recordings and notes", el("small", {}, "Kept on this device only.")),
       isDesktop() ? el("button", { class: "pill", onclick: () => invoke("open_folder", { id: null }) }, "Open folder") : null))];
 
-  for (const section of [about, phone, optimise, languages, listening, meetings, transcription, analysis, voices, appearance, storage]) {
+  for (const section of [about, phone, optimise, languages, listening, notesSection, meetings, transcription, analysis, voices, appearance, storage]) {
     page.append(...section.filter(Boolean));
   }
   main.replaceChildren(page);

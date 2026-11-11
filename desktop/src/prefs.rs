@@ -64,6 +64,8 @@ pub struct Prefs {
     pub kws_verify: bool,
     /// Keep each dictation's audio beside its note for a week.
     pub keep_audio: bool,
+    /// A new note waits for Dictate to be pressed, rather than starting to dictate as it opens.
+    pub dictate_manually: bool,
     /// A proxy for downloading the speech model, such as "http://proxy:8080". Empty uses the system's.
     pub proxy: String,
     /// The language model file chosen for analyses; empty uses the first one installed.

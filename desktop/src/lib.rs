@@ -1046,9 +1046,13 @@ fn save_prefs(
     hidden_mics: Option<Vec<String>>,
     pins_added: Option<bool>,
     keep_audio: Option<bool>,
+    dictate_manually: Option<bool>,
     proxy: Option<String>,
 ) -> Result<(), String> {
     prefs::update(|p| {
+        if let Some(manual) = dictate_manually {
+            p.dictate_manually = manual;
+        }
         if let Some(proxy) = proxy {
             p.proxy = proxy.trim().to_string();
         }
