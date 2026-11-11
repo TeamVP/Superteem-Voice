@@ -3241,14 +3241,36 @@ async function showSettings() {
     invoke("list_vocabulary").catch(() => [])]);
   prefs = fresh;
   const page = el("div", { class: "page" }, el("h1", {}, "Settings"));
-  // Optimising for this device, offered first while it would change something; the page it leads to always.
-  const callout = await optimiseCallout().catch(() => null);
-  if (callout) page.append(callout);
-  page.append(el("div", { class: "group" },
-    linkRow(`Optimise for this ${isPhone() ? "phone" : "computer"}`, "Your languages, then the best models and voices for them here", () => showOptimise(OPTIMISE_FROM.settings)),
-    linkRow(`AI on this ${isPhone() ? "phone" : "computer"}`, "What runs here and how fast", () => showAiSettings())));
+  // Each section is made here, then added in the order the page shows them.
 
-  page.append(el("h2", {}, "Listening"), el("div", { class: "group windows-only" },
+  // About: the version, and checking for a newer one.
+  const version = el("span", { class: "value" }, update ? `Version ${update.current}` : "");
+  if (!update) invoke("app_version").then((v) => (version.textContent = `Version ${v}`)).catch(() => {});
+  const checkButton = el("button", { class: "pill" }, "Check for updates");
+  const checkResult = el("small", { role: "status" });
+  checkButton.addEventListener("click", async () => {
+    checkButton.disabled = true;
+    checkResult.textContent = "Checking…";
+    const found = await checkForUpdate(true);
+    checkButton.disabled = false;
+    checkResult.textContent = !found ? "Couldn't check. Check this device is online."
+      : found.newer ? `Version ${found.latest} is available. Use the button in the sidebar to get it.`
+      : `This is the latest version.`;
+    if (found?.newer) speak(`Version ${found.latest} is available.`);
+  });
+  const about = [el("h2", {}, "About"), el("div", { class: "group" },
+    el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult), checkButton))];
+
+  // Optimise: offered with a callout while it would change something; the pages it leads to always.
+  const callout = await optimiseCallout().catch(() => null);
+  const optimise = [el("h2", {}, "Optimise"), callout, el("div", { class: "group" },
+    linkRow(`Optimise for this ${isPhone() ? "phone" : "computer"}`, "Your languages, then the best models and voices for them here", () => showOptimise(OPTIMISE_FROM.settings)),
+    linkRow(`AI on this ${isPhone() ? "phone" : "computer"}`, "What runs here and how fast", () => showAiSettings()))];
+
+  const languages = [el("h2", {}, "Languages"), el("div", { class: "group" },
+    linkRow("Languages", await languagesSummary(), () => showLanguages()))];
+
+  const listening = [el("h2", {}, "Listening"), el("div", { class: "group windows-only" },
     toggleRow("“Hey Superteem”", "Listen for the wake word while the app is open. Nothing is recorded until you ask.", prefs.wake,
       async (on, box) => {
         try {
@@ -3265,33 +3287,32 @@ async function showSettings() {
     toggleRow("Keep dictation audio", "Keep the recording of each note dictation for 1 week. When off, the audio is deleted once the words are written.", prefs.keep_audio, async (on) => {
       prefs.keep_audio = on;
       await invoke("save_prefs", { keepAudio: on });
-    })));
+    }))];
+  // Android's permissions, with listening as what they're mostly for.
+  const phone = platform === "android" ? [el("h2", {}, "This phone"), el("div", { class: "group" },
+    linkRow("App permissions", "Microphone, Bluetooth, notifications", () => showPermissions()))] : [];
 
-  if (platform === "android") {
-    page.append(el("h2", {}, "This phone"), el("div", { class: "group" },
-      linkRow("App permissions", "Microphone, Bluetooth, notifications", () => showPermissions())));
-  }
-  // Speech to text: its models, vocabulary and download settings, on their own page.
-  const speech = await invoke("speech_models").catch(() => []);
-  const inUse = speech.filter((m) => m.ready && m.used_for.length).map((m) => m.name);
-  const transcription = linkRow("Transcription", ready
-    ? [inUse.join(" and ") || "Speech model ready", terms.length ? `${terms.length} vocabulary word${terms.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")
-    : "The speech model needs downloading", () => showTranscription());
-  if (!ready) transcription.classList.add("needs-attention");
-  page.append(el("h2", {}, "Transcription"), el("div", { class: "group" }, transcription));
-  page.append(el("h2", {}, "Analysis"), el("div", { class: "group" },
-    linkRow("Model and when it runs", "The language model that makes analyses", () => showAnalysisSettings()),
-    linkRow("Analysis templates", "Summary, standup, interview, SOAP and your own", () => showTemplates())));
-  page.append(el("h2", {}, "Languages"), el("div", { class: "group" },
-    linkRow("Languages", await languagesSummary(), () => showLanguages())));
-  page.append(el("h2", {}, "Voices"), el("div", { class: "group" },
-    linkRow("Voices", `${await readingAloudSummary()} · ${prints.length ? `${prints.length} voice print${prints.length === 1 ? "" : "s"}` : "No voice prints yet"}`, () => showVoices())));
-
-  page.append(el("h2", {}, "Meetings"), el("div", { class: "group" },
+  const meetings = [el("h2", {}, "Meetings"), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, "Consent question",
       el("small", {}, "Voice always confirms everyone agreed before a meeting is recorded.")), el("span", { class: "value" }, "Always asked")),
     el("div", { class: "row" }, el("span", { class: "label" }, "Tracks used last time"),
-      el("span", { class: "value" }, [...prefs.inputs, prefs.pins ? "Voice Pins" : null].filter(Boolean).join(", ") || "Default microphone"))));
+      el("span", { class: "value" }, [...prefs.inputs, prefs.pins ? "Voice Pins" : null].filter(Boolean).join(", ") || "Default microphone")))];
+
+  // Speech to text: its models, vocabulary and download settings, on their own page.
+  const speech = await invoke("speech_models").catch(() => []);
+  const inUse = speech.filter((m) => m.ready && m.used_for.length).map((m) => m.name);
+  const transcriptionRow = linkRow("Transcription", ready
+    ? [inUse.join(" and ") || "Speech model ready", terms.length ? `${terms.length} vocabulary word${terms.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")
+    : "The speech model needs downloading", () => showTranscription());
+  if (!ready) transcriptionRow.classList.add("needs-attention");
+  const transcription = [el("h2", {}, "Transcription"), el("div", { class: "group" }, transcriptionRow)];
+
+  const analysis = [el("h2", {}, "Analysis"), el("div", { class: "group" },
+    linkRow("Model and when it runs", "The language model that makes analyses", () => showAnalysisSettings()),
+    linkRow("Analysis templates", "Summary, standup, interview, SOAP and your own", () => showTemplates()))];
+
+  const voices = [el("h2", {}, "Voices"), el("div", { class: "group" },
+    linkRow("Voices", `${await readingAloudSummary()} · ${prints.length ? `${prints.length} voice print${prints.length === 1 ? "" : "s"}` : "No voice prints yet"}`, () => showVoices()))];
 
   const theme = el("div", { class: "theme", role: "group", "aria-label": "Theme" });
   const current = document.documentElement.dataset.theme ?? "system";
@@ -3299,28 +3320,15 @@ async function showSettings() {
     theme.append(el("button", { class: current === value ? "on" : "", "aria-pressed": String(current === value),
       onclick: () => { pickTheme(value); showSettings(); } }, label));
   }
-  page.append(el("h2", {}, "Appearance"), el("div", { class: "group" }, el("div", { class: "row" }, el("span", { class: "label" }, "Theme"), theme)));
+  const appearance = [el("h2", {}, "Appearance"), el("div", { class: "group" }, el("div", { class: "row" }, el("span", { class: "label" }, "Theme"), theme))];
 
-  const version = el("span", { class: "value" }, update ? `Version ${update.current}` : "");
-  if (!update) invoke("app_version").then((v) => (version.textContent = `Version ${v}`)).catch(() => {});
-  const checkButton = el("button", { class: "pill" }, "Check for updates");
-  const checkResult = el("small", { role: "status" });
-  checkButton.addEventListener("click", async () => {
-    checkButton.disabled = true;
-    checkResult.textContent = "Checking…";
-    const found = await checkForUpdate(true);
-    checkButton.disabled = false;
-    checkResult.textContent = !found ? "Couldn't check. Check this device is online."
-      : found.newer ? `Version ${found.latest} is available. Use the button in the sidebar to get it.`
-      : `This is the latest version.`;
-    if (found?.newer) speak(`Version ${found.latest} is available.`);
-  });
-  page.append(el("h2", {}, "About"), el("div", { class: "group" },
-    el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult), checkButton)));
-
-  page.append(el("h2", {}, "Storage"), el("div", { class: "group" },
+  const storage = [el("h2", {}, "Storage"), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, "Recordings and notes", el("small", {}, "Kept on this device only.")),
-      isDesktop() ? el("button", { class: "pill", onclick: () => invoke("open_folder", { id: null }) }, "Open folder") : null)));
+      isDesktop() ? el("button", { class: "pill", onclick: () => invoke("open_folder", { id: null }) }, "Open folder") : null))];
+
+  for (const section of [about, optimise, languages, listening, phone, meetings, transcription, analysis, voices, appearance, storage]) {
+    page.append(...section.filter(Boolean));
+  }
   main.replaceChildren(page);
 }
 
