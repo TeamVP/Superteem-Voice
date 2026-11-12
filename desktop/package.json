@@ -3,9 +3,51 @@
   "private": true,
   "license": "GPL-3.0-only",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:editor": "esbuild editor/note-editor.js --bundle --minify --format=iife --global-name=NoteEditor --target=es2020,safari16 --legal-comments=none --outfile=ui/vendor/note-editor.js"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "@tiptap/core": "3.26.1",
+    "@tiptap/extension-image": "3.26.1",
+    "@tiptap/extension-list": "3.26.1",
+    "@tiptap/extension-table": "3.26.1",
+    "@tiptap/extension-text-align": "3.26.1",
+    "@tiptap/extensions": "3.26.1",
+    "@tiptap/markdown": "3.26.1",
+    "@tiptap/pm": "3.26.1",
+    "@tiptap/starter-kit": "3.26.1",
+    "esbuild": "0.28.2"
+  },
+  "overrides": {
+    "@tiptap/core": "3.26.1",
+    "@tiptap/pm": "3.26.1",
+    "@tiptap/extensions": "3.26.1",
+    "@tiptap/extension-blockquote": "3.26.1",
+    "@tiptap/extension-bold": "3.26.1",
+    "@tiptap/extension-bullet-list": "3.26.1",
+    "@tiptap/extension-code": "3.26.1",
+    "@tiptap/extension-code-block": "3.26.1",
+    "@tiptap/extension-document": "3.26.1",
+    "@tiptap/extension-dropcursor": "3.26.1",
+    "@tiptap/extension-gapcursor": "3.26.1",
+    "@tiptap/extension-hard-break": "3.26.1",
+    "@tiptap/extension-heading": "3.26.1",
+    "@tiptap/extension-horizontal-rule": "3.26.1",
+    "@tiptap/extension-italic": "3.26.1",
+    "@tiptap/extension-link": "3.26.1",
+    "@tiptap/extension-list": "3.26.1",
+    "@tiptap/extension-list-item": "3.26.1",
+    "@tiptap/extension-list-keymap": "3.26.1",
+    "@tiptap/extension-ordered-list": "3.26.1",
+    "@tiptap/extension-paragraph": "3.26.1",
+    "@tiptap/extension-strike": "3.26.1",
+    "@tiptap/extension-text": "3.26.1",
+    "@tiptap/extension-underline": "3.26.1",
+    "@tiptap/extension-table": "3.26.1",
+    "@tiptap/extension-image": "3.26.1",
+    "@tiptap/extension-text-align": "3.26.1",
+    "@tiptap/markdown": "3.26.1",
+    "@tiptap/starter-kit": "3.26.1"
   }
 }

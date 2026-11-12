@@ -24,12 +24,14 @@ const jobKey = (j) => `${j.kind}/${j.id}/${j.template}`;
 
 listen("analysis-queue", () => refreshAnalyses());
 listen("analysing", (e) => {
+  if (e.payload.template === "chat") return; // A note's chat, which shows its own progress.
   const step = e.payload.step === "Analysing" || !e.payload.step ? "Reading" : e.payload.step;
   analysisProgress.set(jobKey(e.payload), e.payload.parts > 1 ? `${step}: part ${e.payload.part} of ${e.payload.parts}…` : `${step}…`);
   refreshAnalyses();
   if (typeof refreshTranslation === "function") refreshTranslation(e.payload);
 });
 listen("analysed", (e) => {
+  if (e.payload.template === "chat") return;
   analysisProgress.delete(jobKey(e.payload));
   if (typeof refreshTranslation === "function") refreshTranslation(e.payload, true);
   if (e.payload.template.startsWith("translate:")) return;
@@ -116,7 +118,7 @@ function addAnalysis(page, data) {
   if (!data.ready) {
     // Translating needs the analysis model too, so both lead to setting it up.
     const setUp = () => { from(); showAnalysisSettings(null, true); };
-    bar.append(el("button", { class: "link add-analysis", onclick: setUp }, label), el("span", { class: "grow" }),
+    bar.append(el("button", { class: "link add-analysis", onclick: setUp }, label), el("span", { class: "grow" }), ...(page.ctx.links ?? []),
       page.ctx.translations ? el("button", { class: "link add-analysis", onclick: setUp }, el("span", { class: "with-icon" }, svg("globe", 16), "Translate")) : null);
     return bar;
   }
@@ -130,7 +132,7 @@ function addAnalysis(page, data) {
   const choices = [...starred.map(choice)];
   if (others.length) choices.push(starred.length ? "More templates" : "Templates", ...others.map(choice));
   choices.push(["Star or edit templates…", null, () => { from(); showTemplates(); }]);
-  bar.append(menuButton(label, choices, "link add-analysis"), el("span", { class: "grow" }), translateMenu(page.kind, page.id));
+  bar.append(menuButton(label, choices, "link add-analysis"), el("span", { class: "grow" }), ...(page.ctx.links ?? []), translateMenu(page.kind, page.id));
   return bar;
 }
 

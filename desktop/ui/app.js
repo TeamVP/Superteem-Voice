@@ -246,6 +246,7 @@ function leave() {
   stopPlayback();
   clearInterval(pollTimer);
   flushNote();
+  document.body.classList.remove("note-chat-open");
 }
 
 // ---------- Theme: follows Windows by default; a pick is remembered on this device ----------
@@ -551,7 +552,8 @@ async function openNote(id, { dictate } = {}) {
       return;
     }
   }
-  note = { id: data.id, title: data.title, body: data.body, keepAudio: !!data.keep_audio, archived: !!data.archived, status: data.status ?? "", dirty: false };
+  // `body` is Markdown once the note has been written in the formatting editor (`rich`); `doc` is the editor's own copy.
+  note = { id: data.id, title: data.title, body: data.body, rich: data.format === "md", doc: data.doc ?? null, keepAudio: !!data.keep_audio, archived: !!data.archived, status: data.status ?? "", dirty: false };
   view = { kind: "note", id: data.id };
   refreshItems();
   await languageData();
@@ -601,9 +603,10 @@ function renderNote(data, dictate) {
     try {
       // A note gets its file on first save, so a status set first saves it.
       if (!note.id) {
-        note.id = await invoke("save_note", { id: null, title: note.title, body: note.body, keepAudio: note.keepAudio });
+        note.id = await invoke("save_note", noteArgs(null));
         view.id = note.id;
         note.dirty = false;
+        note.syncStack?.();
       }
       await invoke("set_note_status", { id: note.id, status: value });
       note.status = value;
@@ -618,23 +621,88 @@ function renderNote(data, dictate) {
   note.languages = itemLanguages(data);
   const noteLanguage = () => note.languages[0];
   const langNotice = el("div", { class: "notice language-notice", hidden: true, "aria-live": "polite" });
-  // An editable div rather than a textarea, so a dictation can hold its place in the text.
-  const body = el("div", { class: "note-body", id: "note-body", contenteditable: "plaintext-only", role: "textbox", "aria-multiline": "true", "data-placeholder": isPhone()
-    ? "Start typing, or press Dictate and talk. Your words appear at the cursor each time you pause, and it stops by itself when you finish."
-    : "Start typing, or press Dictate (Ctrl + Space) and talk. Your words appear at the cursor each time you pause, and it stops by itself when you finish.", "aria-label": "Note" });
-  body.textContent = data.body;
+  // The formatting editor: headings, lists, links, pictures and files, with places held for dictation.
+  const mine = note;
+  const noteFiles = `${platform === "windows" || platform === "android" ? "http://stvnote.localhost/" : "stvnote://localhost/"}`;
+  const editorHolder = el("div", { class: "note-editor" });
+  const ed = NoteEditor.create({
+    element: editorHolder,
+    placeholder: isPhone()
+      ? "Start typing, or press Dictate and talk. Your words appear at the cursor each time you pause, and it stops by itself when you finish."
+      : "Start typing, or press Dictate (Ctrl + Space) and talk. Your words appear at the cursor each time you pause, and it stops by itself when you finish.",
+    host: {
+      onChange: () => changed(),
+      notify: (text) => micToast(text),
+      resolve: (file) => `${noteFiles}${mine.id ?? ""}/${encodeURIComponent(file)}`,
+      open: (href) => invoke("open_note_link", { id: mine.id ?? "", href }).catch((e) => micToast(String(e))),
+      // A file is kept beside the note, so a new note is saved first to have somewhere to keep it.
+      addFile: async (file) => {
+        const id = await mine.save();
+        return invoke("add_note_file", new Uint8Array(await file.arrayBuffer()), { headers: { "x-note": id, "x-file-name": encodeURIComponent(file.name || "file") } });
+      },
+      importImage: async (url) => invoke("import_note_image", { id: await mine.save(), url }),
+    },
+  });
+  ed.setFrom(data.doc ? { doc: data.doc } : data.format === "md" ? { markdown: data.body } : { plain: data.body });
+  const body = ed.dom;
+  note.ed = ed;
   const chip = el("div", { class: "dictation-chip", id: "dictation-chip", hidden: true, "aria-live": "polite" });
   const changed = () => {
     note.title = title.value;
-    note.body = noteText(body);
-    body.classList.toggle("empty", !body.textContent && !body.querySelector(".dictation-slot"));
+    note.body = ed.markdown();
+    note.doc = ed.json();
+    note.rich = true;
     note.dirty = true;
     status.textContent = "Editing…";
     clearTimeout(noteTimer);
     noteTimer = setTimeout(() => saveNote(status), 600);
   };
   title.addEventListener("input", changed);
-  body.addEventListener("input", changed);
+
+  // "Analysis templates", "Versions" and "Translate" sit under the title from the start: greyed out
+  // until the note has something in it and is saved, then the real ones take their place.
+  const versionsLink = () => el("button", { class: "link add-analysis", type: "button", title: "Earlier versions of this note", onclick: () => showNoteVersions(status) },
+    el("span", { class: "with-icon" }, svg("history", 16), "Versions"));
+  const stackSlot = el("div", { class: "analyses-slot" });
+  let stackFor = null;
+  note.syncStack = () => {
+    if (stackFor && stackFor === note.id) return;
+    if (note.id && note.body.trim()) {
+      stackFor = note.id;
+      stackSlot.replaceChildren(analysisStack("note", note.id, { speakers: ["Me"], lang: noteLanguage, go: (source) => ed.select(source.text),
+        links: [versionsLink()], translations: translationStack("note", note.id, note.languages) }));
+    } else if (!stackSlot.firstChild) {
+      const off = (name, text) => el("button", { class: "link add-analysis", type: "button", disabled: true, title: "Write something in the note first" },
+        el("span", { class: "with-icon" }, svg(name, 16), text));
+      stackSlot.replaceChildren(el("section", { class: "analyses", "aria-label": "Analyses and translations" },
+        el("div", { class: "analysis-add" }, off("sparkle", "Analysis templates"), el("span", { class: "grow" }), off("history", "Versions"), off("globe", "Translate"))));
+    }
+  };
+  // Puts a text the app made in the editor: an assistant's rewrite, or an earlier version brought back.
+  note.apply = (fresh) => {
+    clearTimeout(noteTimer);
+    title.value = fresh.title;
+    ed.setFrom(fresh.doc ? { doc: fresh.doc } : fresh.format === "md" ? { markdown: fresh.body } : { plain: fresh.body });
+    Object.assign(note, { title: fresh.title, body: fresh.body, rich: fresh.format === "md", doc: fresh.doc ?? null, dirty: false, savedAt: fresh.updated });
+    showSaved(status);
+    refreshItems();
+    refreshAnalyses();
+  };
+  note.editorText = () => ed.markdown();
+  note.addText = (text) => ed.append(text);
+  note.save = async () => {
+    clearTimeout(noteTimer);
+    await saveNote(status);
+    if (!note.id) {
+      note.id = await invoke("save_note", noteArgs(null));
+      view.id = note.id;
+      note.dirty = false;
+      refreshItems();
+    }
+    note.syncStack();
+    return note.id;
+  };
+  const chat = isDesktop() ? noteChat(status) : null;
   title.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); body.focus(); } });
 
   const talk = el("button", { class: "talk", id: "talk", onclick: () => startDictation() }, svg("mic", 18), "Dictate");
@@ -657,9 +725,10 @@ function renderNote(data, dictate) {
     el("div", { class: "topbar" }, picker, languagePicker(note.languages, async (list) => {
       try {
         if (!note.id) {
-          note.id = await invoke("save_note", { id: null, title: note.title, body: note.body, keepAudio: note.keepAudio });
+          note.id = await invoke("save_note", noteArgs(null));
           view.id = note.id;
           note.dirty = false;
+          note.syncStack?.();
         }
       } catch (e) {
         status.textContent = `Not saved: ${e}`;
@@ -674,41 +743,27 @@ function renderNote(data, dictate) {
       // The buttons stay together: beside the status, or on the line under it when they don't fit.
       el("span", { class: "top-actions" },
         // The selection when there is one, else the whole note.
-        readAloudButton(() => { const sel = getSelection().toString().trim(); return `${HEADING}${title.value}\n${sel || noteText(body)}`; }, "Read the note aloud", { lang: noteLanguage }),
-        exporter, archive, remove)),
+        readAloudButton(() => { const sel = getSelection().toString().trim(); return `${HEADING}${title.value}\n${sel || ed.text()}`; }, "Read the note aloud", { lang: noteLanguage }),
+        chat?.toggle, exporter, archive, remove)),
     exporter.status, langNotice,
-    el("div", { class: "note" }, title,
-      data.id ? analysisStack("note", data.id, { speakers: ["Me"], lang: noteLanguage, go: (source) => selectInNote(body, source),
-        translations: translationStack("note", data.id, note.languages) }) : null, chip, body),
-    el("div", { class: "toolbar" }, el("span", { class: "grow" }), talk, live));
+    // With the chat open, the note scrolls beside it; closed, the page is laid out as it always was.
+    el("div", { class: "note-split" },
+      el("div", { class: "note-col" },
+        ed.toolbar,
+        el("div", { class: "note" }, title, stackSlot, chip, editorHolder),
+        el("div", { class: "toolbar" }, el("span", { class: "grow" }), talk, live)),
+      chat?.panel));
+  note.syncStack();
+  chat?.sync();
   setLanguage([title, body], noteLanguage());
   // The cursor always starts in the body; a new note starts dictating straight away.
-  body.classList.toggle("empty", !data.body);
-  body.focus();
-  getSelection().selectAllChildren(body);
-  getSelection().collapseToEnd();
+  ed.focusEnd();
   if (dictate ?? !data.id) startDictation();
 }
 
-/// Selects the sentence a source points at in the note being edited.
-function selectInNote(body, source) {
-  const text = body.textContent;
-  const at = text.indexOf(source.text.slice(0, 40));
-  if (at < 0) return;
-  const end = at + source.text.length;
-  const range = document.createRange();
-  let seen = 0;
-  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    const next = seen + node.textContent.length;
-    if (at >= seen && at <= next) range.setStart(node, at - seen);
-    if (end >= seen && end <= next) { range.setEnd(node, end - seen); break; }
-    seen = next;
-  }
-  body.focus();
-  getSelection().removeAllRanges();
-  getSelection().addRange(range);
-  range.startContainer.parentElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+/// What save_note is given: the note's Markdown, and the editor's document with it.
+function noteArgs(id) {
+  return { id, title: note.title, body: note.body, keepAudio: note.keepAudio, rich: note.rich, doc: note.rich ? note.doc : null };
 }
 
 async function saveNote(status) {
@@ -716,11 +771,12 @@ async function saveNote(status) {
   if (!note.id && !note.title.trim() && !note.body.trim()) return;
   note.dirty = false;
   try {
-    const id = await invoke("save_note", { id: note.id, title: note.title, body: note.body, keepAudio: note.keepAudio });
+    const id = await invoke("save_note", noteArgs(note.id));
     note.id = id;
     if (view.kind === "note") view.id = id;
     note.savedAt = Date.now() / 1000;
     if (status?.isConnected) showSaved(status);
+    note.syncStack?.();
     refreshItems();
   } catch (e) {
     note.dirty = true;
@@ -733,103 +789,16 @@ function flushNote() {
   if (note?.dirty) saveNote(null);
 }
 
-/// The note's text: the dictation widget adds nothing, and the editor's closing <br> is not a line.
-function noteText(body) {
-  let out = "";
-  const walk = (node) => {
-    for (const n of node.childNodes) {
-      if (n.nodeType === Node.TEXT_NODE) out += n.data;
-      else if (n.classList?.contains("dictation-slot")) continue;
-      else if (n.nodeName === "BR") { if (n !== body.lastChild) out += "\n"; }
-      else walk(n);
-    }
-  };
-  walk(body);
-  return out;
+/// Holds a dictation's place in the note: the marker its clips are written in before, in order.
+function placeDictationSlot() {
+  const places = note.ed.dictation;
+  const id = places.place();
+  return { id, classList: { add() {} }, replaceChildren() {}, remove: () => places.end(id, true), isConnected: true };
 }
 
-/// The cursor in the note body, or the end of the text when the cursor is elsewhere.
-function noteRange(body) {
-  const sel = getSelection();
-  if (document.activeElement === body && sel.rangeCount && body.contains(sel.getRangeAt(0).commonAncestorContainer)) return sel.getRangeAt(0).cloneRange();
-  const range = document.createRange();
-  range.selectNodeContents(body);
-  range.collapse(false);
-  return range;
-}
-
-/// The text either side of a range in the note body.
-function textAround(body, range) {
-  const head = document.createRange();
-  head.selectNodeContents(body);
-  head.setEnd(range.startContainer, range.startOffset);
-  const tail = document.createRange();
-  tail.selectNodeContents(body);
-  tail.setStart(range.endContainer, range.endOffset);
-  return [head.toString(), tail.toString()];
-}
-
-/// Holds a dictation's place: a line of its own at the cursor, with what followed the cursor moved to the next line.
-function placeDictationSlot(body) {
-  const range = noteRange(body);
-  range.collapse(false);
-  const [before, after] = textAround(body, range);
-  const slot = el("span", { class: "dictation-slot", contenteditable: "false" }, el("span", { class: "spinner" }), "Writing it down…");
-  const nodes = [];
-  if (before && !before.endsWith("\n")) nodes.push(document.createTextNode("\n"));
-  nodes.push(slot);
-  const tail = document.createTextNode("\n");
-  nodes.push(tail);
-  // A line at the very end needs a <br> for the cursor to sit on it.
-  if (!after) nodes.push(document.createElement("br"));
-  for (const n of nodes.reverse()) range.insertNode(n);
-  slot.added = nodes.filter((n) => n !== slot);
-  // Typing carries on below the widget; a cursor in the title stays there.
-  if (document.activeElement === body) {
-    const caret = document.createRange();
-    caret.setStartAfter(tail);
-    caret.collapse(true);
-    getSelection().removeAllRanges();
-    getSelection().addRange(caret);
-  }
-  body.dispatchEvent(new Event("input"));
-  return slot;
-}
-
-/// Takes the widget out again, along with the line breaks it added, when nothing is written.
+/// Takes the marker out again, along with the line made for it, when nothing was written.
 function removeDictationSlot(slot) {
-  if (!slot?.isConnected) return;
-  const body = slot.closest(".note-body");
-  for (const n of slot.added) if (n.isConnected && (n.nodeName === "BR" || n.data === "\n")) n.remove();
-  slot.remove();
-  body?.dispatchEvent(new Event("input"));
-}
-
-/// Puts words in place of a range, with the spacing and capital a typist would add.
-/// The new words show green and fade to the text colour.
-function insertWords(body, range, words) {
-  words = words.trim();
-  if (!words) return;
-  const [before, after] = textAround(body, range);
-  const sentenceStart = !before.trim() || /[.!?]["')\]]?\s*$/.test(before) || /\n\s*$/.test(before);
-  if (sentenceStart) words = words[0].toUpperCase() + words.slice(1);
-  else if (/^[A-Z][a-z]/.test(words) && !/^I\b/.test(words)) words = words[0].toLowerCase() + words.slice(1);
-  // Whisper ends most phrases with a full stop, which reads wrongly mid-sentence.
-  if (after.trim() && !/^[\s]*[A-Z\n]/.test(after)) words = words.replace(/[.]$/, "");
-  const lead = before && !/\s$/.test(before) ? " " : "";
-  const trail = after && !/^[\s.,;:!?)]/.test(after) ? " " : "";
-  const span = el("span", { class: "dictated" }, lead + words + trail);
-  // Once faded it is plain text again.
-  span.addEventListener("animationend", () => {
-    if (!span.isConnected) return;
-    const parent = span.parentNode;
-    span.replaceWith(...span.childNodes);
-    parent.normalize();
-  });
-  range.deleteContents();
-  range.insertNode(span);
-  body.dispatchEvent(new Event("input"));
-  return span;
+  if (slot) note?.ed?.dictation.end(slot.id, false);
 }
 
 let dictation = null; // { session, anchor, slots: Map(clip → slot), levelTimer, clockTimer, busy, wrote }
@@ -860,26 +829,15 @@ listen("dictation-ended", (e) => {
 
 /// A "Writing it down…" widget for a clip, just before the marker where the dictation goes.
 function clipSlot() {
-  const slot = el("span", { class: "dictation-slot", contenteditable: "false" }, el("span", { class: "spinner" }), "Writing it down…");
-  dictation.anchor.before(slot);
-  slot.scrollIntoView({ block: "nearest" });
-  document.getElementById("note-body")?.dispatchEvent(new Event("input"));
-  return slot;
+  const places = note?.ed?.dictation;
+  const id = places?.clip(dictation.anchor.id);
+  return { id, remove: () => places?.remove(id) };
 }
 
 /// Replaces a clip's widget with its words, or takes it away when nothing was said.
 function fillSlot(slot, words) {
-  const body = document.getElementById("note-body");
-  if (!slot?.isConnected || !body) return;
-  if (!words?.trim()) {
-    slot.remove();
-    body.dispatchEvent(new Event("input"));
-    return;
-  }
-  const range = document.createRange();
-  range.selectNode(slot);
-  insertWords(body, range, words);
-  if (dictation) dictation.wrote = true;
+  if (!slot || !note?.ed) return;
+  if (note.ed.dictation.fill(slot.id, words) && dictation) dictation.wrote = true;
 }
 
 /// A short falling chirp, and a buzz where the device has one, when dictation stops by itself.
@@ -914,7 +872,7 @@ async function startDictation() {
   if (keep && (!note.id || !note.keepAudio)) {
     note.keepAudio = true;
     try {
-      note.id = await invoke("save_note", { id: note.id, title: note.title, body: note.body, keepAudio: true });
+      note.id = await invoke("save_note", noteArgs(note.id));
       view.id = note.id;
     } catch {}
   }
@@ -928,9 +886,7 @@ async function startDictation() {
   live.hidden = false;
   document.getElementById("talk").hidden = true;
   // An invisible marker keeps the cursor's place: each clip is written in just before it, in order.
-  dictation.anchor = placeDictationSlot(body);
-  dictation.anchor.classList.add("dictation-anchor");
-  dictation.anchor.replaceChildren();
+  dictation.anchor = placeDictationSlot();
   const started = Date.now();
   dictation.clockTimer = setInterval(() => { elapsed.textContent = clock((Date.now() - started) / 1000); }, 500);
   try {
@@ -992,7 +948,6 @@ function tidyDictation() {
   const chip = document.getElementById("dictation-chip");
   if (dictation.wrote) dictation.anchor?.remove();
   else removeDictationSlot(dictation.anchor);
-  document.getElementById("note-body")?.dispatchEvent(new Event("input"));
   if (!dictation.wrote && chip) { chip.hidden = false; chip.textContent = "No speech heard."; setTimeout(() => (chip.hidden = true), 2500); }
   dictation = null;
 }

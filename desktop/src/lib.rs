@@ -3,6 +3,7 @@
 pub mod analysis;
 #[cfg(not(target_os = "android"))]
 pub mod capture;
+pub mod chat;
 pub mod dictation;
 pub mod exports;
 pub mod gpu;
@@ -1179,8 +1180,71 @@ fn get_note(id: String) -> Result<notes::Note, String> {
 }
 
 #[tauri::command]
-fn save_note(id: Option<String>, title: String, body: String, keep_audio: Option<bool>) -> Result<String, String> {
-    notes::save(id, title, body, keep_audio.unwrap_or(false))
+fn save_note(id: Option<String>, title: String, body: String, keep_audio: Option<bool>, rich: Option<bool>, doc: Option<serde_json::Value>) -> Result<String, String> {
+    let rich = rich.unwrap_or(false).then_some(notes::Rich { doc });
+    notes::save(id, title, body, keep_audio.unwrap_or(false), rich)
+}
+
+/// Keeps a picture or file with a note. The file's bytes are the request's body; the note and the
+/// file's name come in its headers.
+#[tauri::command]
+fn add_note_file(request: tauri::ipc::Request) -> Result<notes::Kept, String> {
+    let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let name = percent_decode(&header("x-file-name"));
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => notes::add_file(&header("x-note"), &name, bytes),
+        // Where the page can't send bytes as they are, they come as a list of numbers.
+        tauri::ipc::InvokeBody::Json(serde_json::Value::Array(numbers)) => {
+            let bytes: Option<Vec<u8>> = numbers.iter().map(|n| n.as_u64().and_then(|n| u8::try_from(n).ok())).collect();
+            notes::add_file(&header("x-note"), &name, &bytes.ok_or("The file didn't arrive.")?)
+        }
+        _ => Err("The file didn't arrive.".into()),
+    }
+}
+
+#[tauri::command]
+async fn import_note_image(id: String, url: String) -> Result<notes::Kept, String> {
+    tauri::async_runtime::spawn_blocking(move || notes::import_image(&id, &url)).await.map_err(|e| e.to_string())?
+}
+
+/// Opens a note's link: a kept file with the app the system uses for it, a web page in the browser.
+#[tauri::command]
+fn open_note_link(id: String, href: String) -> Result<(), String> {
+    if let Some(file) = href.strip_prefix("attachment:") {
+        let path = notes::file_path(&id, file)?;
+        if cfg!(any(target_os = "android", target_os = "ios")) {
+            return Err("Files kept in a note can't be opened on a phone yet.".into());
+        }
+        return shell::open(path);
+    }
+    if href.starts_with("https://") || href.starts_with("http://") || href.starts_with("mailto:") {
+        return recorder::open_url(&href);
+    }
+    Err("That link can't be opened from here.".into())
+}
+
+/// Serves a note's kept files to the page, at stvnote://localhost/<note>/<file> (http://stvnote.localhost/
+/// on Windows and Android). Everything a note shows comes through here, so this is the one place that
+/// changes when what's on disk is wrapped.
+fn serve_note_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
+    let respond = |status: u16, kind: &str, body: Vec<u8>| {
+        tauri::http::Response::builder()
+            .status(status)
+            .header("Content-Type", kind)
+            .header("X-Content-Type-Options", "nosniff")
+            .header("Cache-Control", "private, max-age=31536000, immutable")
+            .body(body)
+            .expect("a plain response")
+    };
+    let path = percent_decode(request.uri().path());
+    let mut parts = path.trim_start_matches('/').splitn(2, '/');
+    let (Some(id), Some(file)) = (parts.next(), parts.next()) else {
+        return respond(404, "text/plain", Vec::new());
+    };
+    match notes::file_path(id, file).and_then(|p| std::fs::read(p).map_err(|e| e.to_string())) {
+        Ok(bytes) => respond(200, notes::media_type(file), bytes),
+        Err(_) => respond(404, "text/plain", Vec::new()),
+    }
 }
 
 #[tauri::command]
@@ -1551,15 +1615,30 @@ fn enqueue_analysis<R: Runtime>(app: &AppHandle<R>, job: Job) {
     std::thread::spawn(move || {
         let state = app.state::<AppState>();
         let mut engine: Option<(Box<dyn stv_core::analysis::Model>, analysis::Engine)> = None;
+        // After a chat answer the model stays loaded for a while, so the next one starts at once.
+        let mut keep_until: Option<std::time::Instant> = None;
         loop {
+            if state.busy() || state.processing.lock().unwrap().is_some() {
+                engine = None;
+                keep_until = None;
+            }
             while state.busy() || state.processing.lock().unwrap().is_some() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
             }
             let next = {
                 let mut queue = state.analysis_queue.lock().unwrap();
                 let next = queue.pop_front();
+                let was_idle = state.analysing.lock().unwrap().is_none();
                 *state.analysing.lock().unwrap() = next.clone();
                 if next.is_none() {
+                    if keep_until.is_some_and(|until| std::time::Instant::now() < until) {
+                        drop(queue);
+                        if !was_idle {
+                            let _ = app.emit("analysis-queue", analysis_queue_state(&state));
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                        continue;
+                    }
                     state.analysis_worker.store(false, std::sync::atomic::Ordering::SeqCst);
                 }
                 next
@@ -1574,6 +1653,10 @@ fn enqueue_analysis<R: Runtime>(app: &AppHandle<R>, job: Job) {
                 let (model, info) = engine.as_mut().expect("just loaded");
                 let item = analysis::Item::new(&job.kind, &job.id)?;
                 let report = |step: &str, part, parts| drop(app.emit("analysing", AnalysisProgress { job: job.clone(), step: step.into(), part, parts }));
+                if job.template == chat::JOB {
+                    report("Thinking", 1, 1);
+                    return chat::answer(&job.id, model.as_mut());
+                }
                 if let Some(language) = job.template.strip_prefix(TRANSLATE) {
                     translations::update(&item, language, model.as_mut(), &info.model, |k, n| report("Translating", k, n))?;
                     return Ok(());
@@ -1584,6 +1667,13 @@ fn enqueue_analysis<R: Runtime>(app: &AppHandle<R>, job: Job) {
                 }
                 Ok(())
             })();
+            if job.template == chat::JOB {
+                keep_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(120));
+                // The model didn't load, or the note has gone: say so in the chat rather than leave it waiting.
+                if let Err(why) = &outcome {
+                    let _ = chat::settle(&job.id, Some(why));
+                }
+            }
             let _ = app.emit("analysed", Analysed { job, error: outcome.err() });
         }
         *state.analysing.lock().unwrap() = None;
@@ -1621,6 +1711,59 @@ fn get_analyses(state: State<AppState>, kind: String, id: String) -> Result<Anal
         elsewhere: elsewhere.into_iter().filter(|t| starred.contains(&t.id)).collect(),
         starred,
     })
+}
+
+#[derive(Serialize)]
+struct ChatView {
+    messages: Vec<chat::Message>,
+    /// A model is installed here, or a server is chosen.
+    ready: bool,
+    /// An answer is being written, or waiting its turn.
+    running: bool,
+}
+
+fn chat_job(id: &str) -> Job {
+    Job { kind: "note".into(), id: id.into(), template: chat::JOB.into() }
+}
+
+#[tauri::command]
+fn get_note_chat(state: State<AppState>, id: String) -> Result<ChatView, String> {
+    notes::load(&id)?;
+    let job = chat_job(&id);
+    let running = state.analysing.lock().unwrap().as_ref() == Some(&job) || state.analysis_queue.lock().unwrap().contains(&job);
+    if !running {
+        chat::settle(&id, None)?;
+    }
+    let p = prefs::load();
+    Ok(ChatView { messages: chat::load(&id).messages, ready: !p.llm_server.trim().is_empty() || !llm::installed().is_empty(), running })
+}
+
+/// Asks the assistant about a note, or to rewrite it. The answer arrives with the "analysed" event.
+#[tauri::command]
+fn chat_note<R: Runtime>(app: AppHandle<R>, id: String, text: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let job = chat_job(&id);
+    if state.analysing.lock().unwrap().as_ref() == Some(&job) || state.analysis_queue.lock().unwrap().contains(&job) {
+        return Err("Wait for the answer to the last one first.".into());
+    }
+    chat::ask(&id, &text)?;
+    enqueue_analysis(&app, job);
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_note_chat(id: String) -> Result<(), String> {
+    chat::clear(&id)
+}
+
+#[tauri::command]
+fn note_versions(id: String) -> Result<Vec<notes::Version>, String> {
+    notes::versions(&id)
+}
+
+#[tauri::command]
+fn restore_note_version(id: String, version: u32) -> Result<notes::Note, String> {
+    notes::restore(&id, version)
 }
 
 #[tauri::command]
@@ -2506,6 +2649,7 @@ pub fn run() {
             app.asset_protocol_scope().allow_directory(&root, true)?;
             Ok(())
         })
+        .register_uri_scheme_protocol("stvnote", |_ctx, request| serve_note_file(&request))
         .invoke_handler(tauri::generate_handler![
             platform,
             list_devices,
@@ -2628,6 +2772,14 @@ pub fn run() {
             get_analyses,
             analyse,
             cancel_analysis,
+            add_note_file,
+            import_note_image,
+            open_note_link,
+            get_note_chat,
+            chat_note,
+            clear_note_chat,
+            note_versions,
+            restore_note_version,
             edit_analysis,
             remove_analysis,
             move_analysis,
