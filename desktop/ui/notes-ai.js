@@ -59,12 +59,11 @@ function noteChat(status) {
   const input = el("textarea", { class: "chat-input", rows: "1", placeholder: "Ask about this note, or ask for a rewrite", "aria-label": "Message" });
   const send = el("button", { class: "primary icon-only chat-send", type: "submit", title: "Send (Enter)", "aria-label": "Send" }, svg("send", 16));
   const form = el("form", { class: "chat-form" }, input, send);
-  const clear = el("button", { class: "link", type: "button", hidden: true }, "Clear");
   const close = el("button", { class: "icon-only", type: "button", title: "Collapse the chat (Esc)", "aria-label": "Collapse the chat" }, svg("chevron", 16));
   const edge = el("div", { class: "chat-splitter", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the chat", tabindex: "0",
     title: "Drag to resize. Double-click to reset." });
   const panel = el("aside", { class: "note-chat", "aria-label": "Chat about this note", hidden: true }, edge,
-    el("div", { class: "chat-head" }, el("strong", {}, "Chat"), el("span", { class: "hint" }, "On this device"), el("span", { class: "grow" }), clear, close),
+    el("div", { class: "chat-head" }, el("strong", {}, "Chat"), el("span", { class: "hint" }, "On this device"), el("span", { class: "grow" }), close),
     log, form);
   const side = el("div", { class: "chat-side" }, rail, panel);
 
@@ -164,13 +163,6 @@ function noteChat(status) {
   });
   const grow = () => { input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight + 2, 160)}px`; };
   input.addEventListener("input", grow);
-  clear.addEventListener("click", async () => {
-    if (!mine.id || chat.running) return;
-    await invoke("clear_note_chat", { id: mine.id }).catch(() => {});
-    chat.notices.clear();
-    load();
-  });
-
   const bubble = (m) => {
     if (m.role === "user") return el("div", { class: "chat-msg mine" }, m.text);
     if (m.error) return el("div", { class: "chat-msg theirs failed" }, m.error);
@@ -269,7 +261,6 @@ function noteChat(status) {
     log.setAttribute("aria-busy", String(!!chat.running));
     log.replaceChildren(...rows);
     if (atEnd) log.scrollTop = log.scrollHeight;
-    clear.hidden = !chat.messages.length || chat.running;
     input.disabled = !chat.ready;
     send.disabled = !chat.ready || chat.running;
   };

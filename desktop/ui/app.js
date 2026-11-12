@@ -831,7 +831,8 @@ function renderNote(data, dictate) {
     if (!note.id) throw new Error("Write something in the note first.");
     return invoke("export_note", { id: note.id, format });
   });
-  main.replaceChildren(
+  // On a computer the chat runs the full height of the page, and the top bar and the note sit beside it.
+  main.replaceChildren(el("div", { class: "note-split" }, el("div", { class: "note-main" },
     el("div", { class: "topbar" }, picker, languagePicker(note.languages, async (list) => {
       try {
         if (!note.id) {
@@ -856,13 +857,12 @@ function renderNote(data, dictate) {
         readAloudButton(() => { const sel = getSelection().toString().trim(); return `${HEADING}${title.value}\n${sel || ed.text()}`; }, "Read the note aloud", { lang: noteLanguage }),
         exporter, archive, remove)),
     exporter.status, langNotice,
-    // On a computer the note scrolls beside the chat, which folds to a thin bar on the right.
-    el("div", { class: "note-split" },
-      el("div", { class: "note-col" },
-        ed.toolbar,
-        el("div", { class: "note" }, title, stackSlot, chip, editorHolder),
-        el("div", { class: "toolbar note-foot" }, el("span", { class: "grow" }), talk, live)),
-      chat?.panel));
+    // The note scrolls under the top bar; the chat folds to a thin bar on the right.
+    el("div", { class: "note-col" },
+      ed.toolbar,
+      el("div", { class: "note" }, title, stackSlot, chip, editorHolder),
+      el("div", { class: "toolbar note-foot" }, el("span", { class: "grow" }), talk, live))),
+    chat?.panel));
   note.syncStack();
   chat?.sync();
   setLanguage([title, body], noteLanguage());
