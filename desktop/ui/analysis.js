@@ -234,19 +234,20 @@ function analysisCard(page, e, data, running, waiting) {
   const translations = into.map((c) => [`Translate into ${languageName(c)}`, data.entries.some((x) => x.key === `${e.template.id}@${c}`) ? "Make it again" : null,
     () => runAnalysis(page, `${e.template.id}@${c}`), !data.ready]);
   const more = menuButton(svg("more", 16), [
-    ["Copy as text", null, () => navigator.clipboard?.writeText(card.querySelector(".analysis-body")?.innerText ?? "")],
+    ["Copy as text", null, () => writeClipboard(analysisCopyText(card).text)],
     ...translations,
     ["Move up", null, () => invoke("move_analysis", { kind: page.kind, id: page.id, template, by: -1 }).then(refreshAnalyses), index === 0],
     ["Move down", null, () => invoke("move_analysis", { kind: page.kind, id: page.id, template, by: 1 }).then(refreshAnalyses), index === data.entries.length - 1],
     ["Remove", "Edits and ticks here are lost", remove],
   ]);
   more.querySelector("button").setAttribute("aria-label", "More");
+  const copy = def ? copyIconButton(() => analysisCopyText(card), "Copy analysis") : null;
   const head = el("div", { class: "analysis-head" }, toggle,
     el("button", { class: "analysis-name", onclick: () => edit({ op: "collapse", collapsed: !e.collapsed }) }, e.template.name,
       e.language ? el("span", { class: "badge language", title: e.via === "translated" ? "Machine-translated" : "Written in this language" }, languageName(e.language)) : null),
     e.collapsed && def ? el("span", { class: "digest" }, analysisDigest(def, e.result)) : null,
     // Minimised, it can still be read aloud; making it again waits until it's open.
-    ...badges, el("span", { class: "grow" }), def ? readAloudButton(() => analysisSpeech(card), "Read this aloud", { lang: () => e.language || (e.via ? "en" : page.ctx.lang?.()) }) : null,
+    ...badges, el("span", { class: "grow" }), copy, def ? readAloudButton(() => analysisSpeech(card), "Read this aloud", { lang: () => e.language || (e.via ? "en" : page.ctx.lang?.()) }) : null,
     e.collapsed && !(running || waiting) ? null : regenerate, more);
   card.append(head);
   if (error) card.append(el("p", { class: "danger analysis-error" }, `Couldn't make it again: ${error}`));
@@ -849,6 +850,34 @@ function stopReading() {
   reading.cancelled = true;
   window.speechSynthesis?.cancel();
   if (platform === "android") invoke("stop_speaking").catch(() => {});
+}
+
+/// An analysis as text to paste: its name, then each part, without the source chips, ticks and buttons.
+/// Also a bit of HTML so a rich editor keeps the headings and lists.
+function analysisCopyText(card) {
+  const nameNode = card.querySelector(".analysis-name");
+  const name = nameNode
+    ? [...nameNode.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("").trim()
+    : "";
+  const body = card.querySelector(".analysis-body");
+  if (!body) return { text: name, html: "" };
+  const clone = body.cloneNode(true);
+  clone.hidden = false;
+  clone.querySelectorAll(".sources, .row-delete, .add-row, .badge, input, .when-chip.empty").forEach((n) => n.remove());
+  clone.querySelectorAll("select").forEach((s) => s.replaceWith(s.value ? (s.selectedOptions[0]?.textContent ?? "") : ""));
+  clone.querySelectorAll("button").forEach((b) => b.replaceWith(b.textContent));
+  clone.querySelectorAll("li.done").forEach((li) => li.append(" [done]"));
+  // Headings are drawn in capitals; the paste should read as the words, not the styling.
+  clone.querySelectorAll("h3").forEach((h) => { h.style.textTransform = "none"; });
+  const host = document.createElement("div");
+  host.style.cssText = "position:fixed;left:-10000px;top:0;width:640px;";
+  if (name) host.append(el("div", {}, name));
+  host.append(clone);
+  document.body.append(host);
+  const text = host.innerText.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  const html = host.innerHTML;
+  host.remove();
+  return { text, html };
 }
 
 /// An analysis card as it reads aloud: headings and points, who and when said as words, without the

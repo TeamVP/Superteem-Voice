@@ -58,7 +58,70 @@ const icon = {
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path>',
   // Lucide's refresh-cw.
   refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path>',
+  // Two overlapping pages, as a chat app's copy button.
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>',
 };
+
+/// Puts `text` on the clipboard. `html`, when given, goes with it so a rich editor pastes the formatting
+/// and a plain field pastes the text. Returns whether it landed.
+async function writeClipboard(text, html) {
+  const plain = String(text ?? "");
+  try {
+    if (html && typeof ClipboardItem !== "undefined") {
+      await navigator.clipboard.write([new ClipboardItem({
+        "text/plain": new Blob([plain], { type: "text/plain" }),
+        "text/html": new Blob([String(html)], { type: "text/html" }),
+      })]);
+      return true;
+    }
+    await navigator.clipboard.writeText(plain);
+    return true;
+  } catch {
+    try {
+      const area = document.createElement("textarea");
+      area.value = plain;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.left = "-9999px";
+      document.body.append(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/// An icon button that copies what `text()` returns — a string, or { text, html } — and shows a tick
+/// for a moment, the way a chat app copies one reply.
+function copyIconButton(text, label = "Copy") {
+  const button = el("button", { class: "icon-only copy-btn", type: "button", title: label, "aria-label": label }, svg("copy", 16));
+  let timer = null;
+  // The cursor stays where it was, so copying a note doesn't drop the caret out of it.
+  button.addEventListener("mousedown", (e) => e.preventDefault());
+  button.addEventListener("click", async () => {
+    const value = typeof text === "function" ? text() : text;
+    const plain = value && typeof value === "object" ? value.text : value;
+    const html = value && typeof value === "object" ? value.html : null;
+    const ok = await writeClipboard(plain, html);
+    button.classList.toggle("copied", ok);
+    const said = ok ? "Copied" : "Couldn't copy";
+    button.title = said;
+    button.setAttribute("aria-label", said);
+    button.replaceChildren(svg(ok ? "check" : "close", 16));
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (!button.isConnected) return;
+      button.classList.remove("copied");
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.replaceChildren(svg("copy", 16));
+    }, 1600);
+  });
+  return button;
+}
 
 function svg(name, size = 18) {
   const span = document.createElement("span");
@@ -648,6 +711,19 @@ function renderNote(data, dictate) {
   });
   ed.setFrom(data.doc ? { doc: data.doc } : data.format === "md" ? { markdown: data.body } : { plain: data.body });
   const body = ed.dom;
+  // Sits at the end of the formatting bar: copies the note as it reads, and as formatted text for a rich paste.
+  const copyNote = copyIconButton(() => {
+    const heading = title.value.trim();
+    const plain = [heading, ed.text().trim()].filter(Boolean).join("\n\n");
+    let html = "";
+    try {
+      const safe = heading.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      html = `${heading ? `<h1>${safe}</h1>` : ""}${NoteEditor.toHTML(ed.markdown(), () => "")}`;
+    } catch { /* The plain text still copies. */ }
+    return { text: plain, html };
+  }, "Copy note");
+  copyNote.classList.add("note-copy");
+  ed.toolbar.append(copyNote);
   note.ed = ed;
   const chip = el("div", { class: "dictation-chip", id: "dictation-chip", hidden: true, "aria-live": "polite" });
   const changed = () => {

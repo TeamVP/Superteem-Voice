@@ -533,6 +533,7 @@ body:is([data-platform="android"], [data-platform="ios"]) .windows-only { displa
 :root[data-theme="dark"] :is(.brand, .welcome-logo) .logo-dark-mode { display: block; }
 .icon-only { width: 32px; height: 32px; min-height: 0; padding: 0; border-radius: 16px; border: none; background: transparent; color: var(--muted); display: inline-grid; place-items: center; cursor: pointer; }
 .icon-only:hover { background: var(--line); color: inherit; }
+.icon-only.copy-btn.copied, .icon-only.copy-btn.copied:hover { color: var(--ok); }
 .icon-only.danger { color: var(--muted); }
 .icon-only.danger:hover { color: var(--danger); }
 /* Delete asks twice: the second click is spelt out in red. */
@@ -1133,6 +1134,7 @@ dialog.versions mark { background: #ffe27a; color: #1a1a1a; border-radius: 3px; 
 
 /* ---------- The note editor: a toolbar, and formatted text ---------- */
 .note-toolbar { position: sticky; top: 0; z-index: 12; display: flex; align-items: center; gap: 4px; padding: 6px 24px; background: var(--bg); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.note-toolbar .note-copy { margin-left: auto; flex: none; position: sticky; right: 0; border-radius: 8px; color: var(--soft); background: var(--bg); }
 .note-toolbar:has(.menu:not([hidden])) { overflow: visible; }
 .ne-btn { width: 32px; height: 30px; min-height: 0; padding: 0; flex: none; display: inline-grid; place-items: center; border-radius: 8px; background: transparent; color: var(--soft); }
 .ne-btn.on, .ne-btn.open { background: var(--highlight); border-color: var(--key-light); color: var(--accent-text); }
