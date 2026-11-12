@@ -3437,9 +3437,29 @@ async function showSettings() {
   const checkButton = el("button", { class: "pill" }, "Check for updates");
   const getButton = el("button", { class: "primary pill", hidden: true }, platform === "android" ? "Download" : "Update now");
   const whatsNew = el("button", { class: "link", hidden: true, onclick: () => invoke("open_link", { url: update.notes }).catch(() => {}) }, "What's new");
+  // Details sits centred under the check button, and shows (on hover, focus or click) what a check sends. It hides with the button.
+  const tipId = "about-details-tip";
+  const tip = el("div", { class: "details-tip", id: tipId, role: "tooltip", hidden: true },
+    "Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted.");
+  const details = el("button", { class: "link details", type: "button", "aria-describedby": tipId, "aria-expanded": "false" }, "Details");
+  const detailsWrap = el("div", { class: "details-wrap" }, details, tip);
+  let pinned = false;
+  const showTip = (on) => { tip.hidden = !on; };
+  detailsWrap.addEventListener("mouseenter", () => showTip(true));
+  detailsWrap.addEventListener("mouseleave", () => { if (!pinned) showTip(false); });
+  details.addEventListener("focus", () => showTip(true));
+  details.addEventListener("blur", () => { if (!pinned) showTip(false); });
+  details.addEventListener("click", () => {
+    pinned = !pinned;
+    details.setAttribute("aria-expanded", String(pinned));
+    showTip(pinned);
+  });
+  const checkStack = el("div", { class: "check-stack" }, checkButton, detailsWrap);
   const showNewer = () => {
     const newer = !!update?.newer;
     checkButton.hidden = newer;
+    detailsWrap.hidden = newer;
+    if (newer) { pinned = false; showTip(false); }
     getButton.hidden = whatsNew.hidden = !newer;
     if (newer) checkResult.textContent = `Version ${update.latest} is available. You have ${update.current}.`;
   };
@@ -3463,9 +3483,8 @@ async function showSettings() {
     installUpdate().finally(() => { getButton.disabled = false; });
   });
   const about = [el("h2", {}, "About"), el("div", { class: "group" },
-    el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult,
-      el("small", {}, "Checking for an update sends Superteem the app version, operating system, models in use, configured languages, and whether the check was automatic, requested, or the start of an install. Not recordings or notes.")),
-      whatsNew, checkButton, getButton))];
+    el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult),
+      whatsNew, checkStack, getButton))];
 
   // Optimise: offered with a callout while it would change something; the pages it leads to always.
   const callout = await optimiseCallout().catch(() => null);
