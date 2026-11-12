@@ -740,8 +740,15 @@ function renderNote(data, dictate) {
 
   // "Analysis templates", "Versions" and "Translate" sit under the title from the start: greyed out
   // until the note has something in it and is saved, then the real ones take their place.
+  // On a phone it gives the note's version number instead, "V3", so the line fits.
+  const versionNumber = el("span", { class: "narrow-only" });
+  note.showVersion = async () => {
+    const n = note.id ? await invoke("note_version_number", { id: note.id }).catch(() => 0) : 0;
+    versionNumber.textContent = n ? `V${n}` : "";
+    versionNumber.parentElement?.closest("button")?.setAttribute("aria-label", n ? `Versions: this is version ${n}` : "Versions");
+  };
   const versionsLink = () => el("button", { class: "link add-analysis", type: "button", title: "Earlier versions of this note", onclick: () => showNoteVersions(status) },
-    el("span", { class: "with-icon" }, svg("history", 16), "Versions"));
+    el("span", { class: "with-icon" }, svg("history", 16), el("span", { class: "wide-only" }, "Versions"), versionNumber));
   const stackSlot = el("div", { class: "analyses-slot" });
   let stackFor = null;
   note.syncStack = () => {
@@ -750,11 +757,13 @@ function renderNote(data, dictate) {
       stackFor = note.id;
       stackSlot.replaceChildren(analysisStack("note", note.id, { speakers: ["Me"], lang: noteLanguage, go: (source) => ed.select(source.text),
         links: [versionsLink()], translations: translationStack("note", note.id, note.languages) }));
+      note.showVersion();
     } else if (!stackSlot.firstChild) {
       const off = (name, text) => el("button", { class: "link add-analysis", type: "button", disabled: true, title: "Write something in the note first" },
         el("span", { class: "with-icon" }, svg(name, 16), text));
       stackSlot.replaceChildren(el("section", { class: "analyses", "aria-label": "Analyses and translations" },
-        el("div", { class: "analysis-add" }, off("sparkle", "Analysis templates"), el("span", { class: "grow" }), off("history", "Versions"), off("globe", "Translate"))));
+        el("div", { class: "analysis-add" }, off("sparkle", el("span", {}, "Analysis", el("span", { class: "wide-only" }, " templates"))), el("span", { class: "grow" }),
+          off("history", el("span", { class: "wide-only" }, "Versions")), off("globe", "Translate"))));
     }
   };
   // Puts a text the app made in the editor: an assistant's rewrite, or an earlier version brought back.
@@ -766,6 +775,7 @@ function renderNote(data, dictate) {
     showSaved(status);
     refreshItems();
     refreshAnalyses();
+    note.showVersion?.();
   };
   note.editorText = () => ed.markdown();
   note.addText = (text) => ed.append(text);
@@ -858,6 +868,7 @@ async function saveNote(status) {
     note.savedAt = Date.now() / 1000;
     if (status?.isConnected) showSaved(status);
     note.syncStack?.();
+    note.showVersion?.();
     refreshItems();
   } catch (e) {
     note.dirty = true;

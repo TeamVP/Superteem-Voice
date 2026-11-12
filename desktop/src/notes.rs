@@ -414,15 +414,11 @@ impl Versions {
     /// Keeps the note as a version unless the newest version already is it. Gives the number of the
     /// version that holds this text, and whether one was added.
     fn keep(&mut self, note: &Note, by: &str, label: &str, at: u64) -> (u32, bool) {
-        if let Some(v) = self.versions.last() {
-            if v.title == note.title && v.body == note.body {
-                return (v.n, false);
-            }
+        let n = self.number(note);
+        if n == 0 || n <= self.last {
+            return (n, false);
         }
-        if note.title.trim().is_empty() && note.body.trim().is_empty() {
-            return (0, false);
-        }
-        self.last += 1;
+        self.last = n;
         self.versions.push(Version {
             n: self.last,
             at,
@@ -439,6 +435,21 @@ impl Versions {
         }
         (self.last, true)
     }
+
+    /// The number of the version that holds this text: the newest when it already does, else the one it
+    /// will be kept as. 0 for an empty note, which isn't a version.
+    fn number(&self, note: &Note) -> u32 {
+        match self.versions.last() {
+            Some(v) if v.title == note.title && v.body == note.body => v.n,
+            _ if note.title.trim().is_empty() && note.body.trim().is_empty() => 0,
+            _ => self.last + 1,
+        }
+    }
+}
+
+/// The note's version number as it is now, as shown beside its title on a phone. Keeps nothing.
+pub fn version_number(id: &str) -> Result<u32, String> {
+    Ok(load_versions(id).number(&load(id)?))
 }
 
 fn load_versions(id: &str) -> Versions {
@@ -622,7 +633,9 @@ mod tests {
         let note = |body: &str| Note { body: body.into(), ..Default::default() };
         let mut all = Versions::default();
         assert_eq!(all.keep(&note(""), "you", "", 1), (0, false), "an empty note isn't a version");
+        assert_eq!(all.number(&note("first")), 1, "the number a change will be kept as");
         assert_eq!(all.keep(&note("first"), "you", "", 1), (1, true));
+        assert_eq!(all.number(&note("first")), 1);
         assert_eq!(all.keep(&note("first"), "you", "", 2), (1, false), "unchanged text isn't kept twice");
         assert_eq!(all.keep(&note("shorter"), "ai", "Make it shorter", 3), (2, true));
         assert_eq!(all.keep(&note("first"), "restore", "Version 1 brought back", 4), (3, true));

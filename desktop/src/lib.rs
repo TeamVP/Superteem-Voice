@@ -1795,6 +1795,11 @@ fn note_versions(id: String) -> Result<Vec<notes::Version>, String> {
 }
 
 #[tauri::command]
+fn note_version_number(id: String) -> Result<u32, String> {
+    notes::version_number(&id)
+}
+
+#[tauri::command]
 fn restore_note_version(id: String, version: u32) -> Result<notes::Note, String> {
     notes::restore(&id, version)
 }
@@ -2812,6 +2817,7 @@ pub fn run() {
             chat_note,
             clear_note_chat,
             note_versions,
+            note_version_number,
             restore_note_version,
             edit_analysis,
             remove_analysis,

@@ -442,13 +442,34 @@ export function create({ element, host, placeholder = "" }) {
     const wrap = h("span", { class: "ne-menu" });
     const list = h("div", { class: "menu", role: "menu", hidden: true });
     const opener = h("button", { class: "ne-btn", type: "button", title: label, "aria-label": label, "aria-haspopup": "menu", "aria-expanded": "false" }, icon(name));
-    const close = () => { list.hidden = true; opener.classList.remove("open"); opener.setAttribute("aria-expanded", "false"); document.removeEventListener("mousedown", outside, true); };
+    const close = () => {
+      list.hidden = true; opener.classList.remove("open"); opener.setAttribute("aria-expanded", "false");
+      document.removeEventListener("mousedown", outside, true);
+      removeEventListener("scroll", moved, true);
+      removeEventListener("resize", moved);
+    };
     const outside = (e) => { if (!wrap.contains(e.target)) close(); };
+    // The list hangs below the button, fixed to the window, so the toolbar can keep scrolling sideways on a phone.
+    // Anything scrolling under it but the list itself closes it, as it would leave it behind.
+    const moved = (e) => { if (!(e.target instanceof Node && list.contains(e.target))) close(); };
     opener.addEventListener("mousedown", (e) => e.preventDefault());
     opener.addEventListener("click", () => {
       if (!list.hidden) return close();
-      // Kept on screen: opens leftwards when the button is near the right edge.
-      list.classList.toggle("left", opener.getBoundingClientRect().left + 300 > window.innerWidth);
+      // Kept on screen: under the button, moved left as far as it needs to stay inside the window. A button
+      // half scrolled out of the toolbar is brought into it first.
+      opener.scrollIntoView({ block: "nearest", inline: "nearest" });
+      const at = opener.getBoundingClientRect();
+      const width = Math.min(290, innerWidth - 16);
+      list.style.width = `${width}px`;
+      list.style.top = `${at.bottom + 6}px`;
+      list.style.left = `${Math.max(8, Math.min(at.left, innerWidth - width - 8))}px`;
+      list.style.maxHeight = `${Math.max(160, innerHeight - at.bottom - 14)}px`;
+      // Watched from the next frame, after the scroll that brought the button into view.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (list.hidden) return;
+        addEventListener("scroll", moved, true);
+        addEventListener("resize", moved);
+      }));
       list.hidden = false;
       opener.classList.add("open");
       opener.setAttribute("aria-expanded", "true");

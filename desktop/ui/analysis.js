@@ -113,7 +113,9 @@ function addAnalysis(page, data) {
   const used = new Set(data.entries.map((e) => e.key));
   const busy = (t) => data.queue.waiting.some((j) => isJob(j, page, t)) || isJob(data.queue.current, page, t);
   const bar = el("div", { class: "analysis-add" });
-  const label = el("span", { class: "with-icon" }, svg("sparkle", 16), "Analysis templates");
+  // On a phone it says "Analysis", so it shares the line with Versions and Translate.
+  const label = el("span", { class: "with-icon" }, svg("sparkle", 16),
+    el("span", {}, "Analysis", el("span", { class: "wide-only" }, " templates")));
   const from = () => { analysisOrigin = { kind: page.kind, id: page.id }; };
   if (!data.ready) {
     // Translating needs the analysis model too, so both lead to setting it up.
@@ -622,7 +624,7 @@ async function showTemplates(message) {
     const star = el("button", { class: `icon-only star${on ? " on" : ""}`, title: on ? "Starred: offered first on meetings and notes" : "Star it, to offer it first",
       "aria-label": on ? `Unstar ${t.name}` : `Star ${t.name}`, "aria-pressed": String(on), disabled: !!t.errors.length,
       onclick: async () => { await invoke("star_template", { id: t.id, starred: !on }).catch((e) => showError(page, e)); showTemplates(); } }, svg(on ? "star-filled" : "star", 18));
-    const row = el("div", { class: "row" }, star, label);
+    const row = el("div", { class: "row template-row" }, star, label);
     row.append(el("button", { class: "pill", onclick: () => editTemplate(t) }, t.file ? "Edit" : "Customise"));
     if (t.file) {
       row.append(el("button", { class: "icon-only danger", title: t.source === "customised" ? "Back to the built-in" : "Delete", "aria-label": "Delete",

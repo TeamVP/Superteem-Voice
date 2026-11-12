@@ -298,7 +298,7 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .lane .name small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
 .spark { flex: 1; height: 28px; display: flex; align-items: center; gap: 2px; overflow: hidden; background: var(--raised); border-radius: 6px; padding: 0 4px; }
 .spark span { flex: 1 0 3px; max-width: 4px; border-radius: 2px; min-height: 2px; }
-.markers { display: flex; flex-direction: column; gap: 8px; max-height: 232px; overflow-y: auto; }
+.markers { display: flex; flex-direction: column; gap: 8px; max-height: 232px; overflow-y: auto; flex: none; }
 .marker { padding: 8px 12px; border-radius: 10px; background: var(--raised); font-size: 14px; cursor: pointer; flex: none; }
 .marker:hover:not(.editing) { box-shadow: inset 0 0 0 1px var(--muted); }
 .marker.action:hover:not(.editing) { box-shadow: inset 3px 0 0 var(--ok), inset 0 0 0 1px var(--muted); }
@@ -433,7 +433,8 @@ kbd { font: 600 11px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; paddi
 .mic-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); cursor: pointer; }
 .mic-row.untested, .mic-row.failed { cursor: default; }
 .mic-row.untested .mic-name, .mic-row.failed .mic-name { color: var(--muted); }
-.mic-name { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+/* break-word, not anywhere: "anywhere" lets a long state beside it squeeze the name to a letter a line. */
+.mic-name { display: flex; flex-direction: column; min-width: 0; overflow-wrap: break-word; }
 .mic-name .meter { display: block; max-width: 220px; }
 .mic-row.failed .meter { display: none; }
 .mic-state { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; text-align: right; }
@@ -718,6 +719,14 @@ button.more-link:hover { color: var(--text); text-decoration: underline; }
   .dictating { flex: 1; min-width: 0; justify-content: space-between; gap: 10px; padding-left: 14px; }
   /* While dictating, the bar takes the whole row rather than sharing it with the spacer. */
   .toolbar:has(.dictating:not([hidden])) .grow { display: none; }
+  /* A microphone's state ("Not working: …", "Connect when recording starts") goes under its name rather
+     than beside it, so the name keeps the row's width. */
+  .mic-row { grid-template-columns: auto minmax(0, 1fr); row-gap: 4px; }
+  .mic-row > .mic-state { grid-column: 2; text-align: left; }
+  .mic-row > .mic-state:empty { display: none; }
+  .mic-row.device { grid-template-columns: minmax(0, 1fr) auto; }
+  .mic-row.device > .mic-state { grid-column: 1; grid-row: 2; }
+  .mic-row.device > .link { grid-column: 2; grid-row: 1 / span 2; }
 }
 
 /* A newer version, in the sidebar so it shows on phones too. */
@@ -818,7 +827,12 @@ li:hover > .when-chip.empty, .when-chip.empty:focus-visible { opacity: 0.7; }
 .analysis-error { margin: 2px 0 6px 36px; font-size: 13px; }
 .analysis-actions { display: flex; gap: 12px; }
 .analysis-add { display: flex; align-items: center; gap: 8px; }
-.analysis-add .with-icon, .add-analysis .with-icon { display: inline-flex; align-items: center; gap: 6px; }
+.analysis-add .with-icon, .add-analysis .with-icon { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* On a phone, "Analysis templates" says "Analysis", so it shares the line with Versions and Translate. */
+@media (max-width: 640px) {
+  .analysis-add { gap: 4px 12px; flex-wrap: wrap; }
+  .analysis-add .grow { flex: 1 0 0; }
+}
 .analysis-menu .menu { left: 0; right: auto; }
 .analysis-head .analysis-menu .menu { left: auto; right: 0; }
 .analysis-menu.translate-menu .menu { left: auto; right: 0; width: 240px; }
@@ -834,8 +848,14 @@ li:hover > .when-chip.empty, .when-chip.empty:focus-visible { opacity: 0.7; }
 .row.column { flex-direction: column; align-items: stretch; }
 .heading-rows { display: flex; flex-direction: column; gap: 6px; }
 .heading-row { display: flex; gap: 6px; align-items: center; }
-.heading-row input { flex: 1; }
-.template-new input[type="text"] { padding: 6px 8px; }
+.heading-row input { flex: 1; min-width: 0; }
+.heading-row select { flex: 0 1 auto; min-width: 0; max-width: 50%; }
+/* A template's star, name, Edit and delete stay on one line on a phone too; the name wraps instead. */
+.template-row { flex-wrap: nowrap !important; gap: 8px; }
+.template-row > .label { flex: 1 1 auto !important; min-width: 0; overflow-wrap: break-word; }
+.template-row > button { flex: none; }
+.template-new input[type="text"], .template-new select { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
+.template-new .row > input[type="text"] { flex: 0 1 220px; min-width: 0; }
 .row .badge { font-size: 11px; margin-left: 8px; padding: 1px 6px; border-radius: 999px; background: var(--tint-2); color: var(--key-2); }
 @media (max-width: 640px) {
   .analysis-body { padding-left: 4px; }
@@ -895,8 +915,10 @@ body[data-platform="ios"] { box-sizing: border-box; padding: env(safe-area-inset
   background: var(--text, #222); color: var(--bg, #fff); font-size: 13px; line-height: 1.3; pointer-events: none;
   box-shadow: 0 4px 16px rgb(0 0 0 / 25%); }
 .row .label > .value { display: block; }
+.narrow-only { display: none; }
 @media (max-width: 640px) {
   .wide-only { display: none; }
+  .narrow-only { display: inline; }
   .row .label { min-width: 0; }
   /* A link row keeps its label and value on one line while they fit (the script marks it "tight" when
      they don't). Tight, the value goes under the label; or, where the heading says what the label would,
@@ -1133,16 +1155,20 @@ dialog.versions mark { background: #ffe27a; color: #1a1a1a; border-radius: 3px; 
 }
 
 /* ---------- The note editor: a toolbar, and formatted text ---------- */
-.note-toolbar { position: sticky; top: 0; z-index: 12; display: flex; align-items: center; gap: 4px; padding: 6px 24px; background: var(--bg); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
-.note-toolbar .note-copy { margin-left: auto; flex: none; position: sticky; right: 0; border-radius: 8px; color: var(--soft); background: var(--bg); }
-.note-toolbar:has(.menu:not([hidden])) { overflow: visible; }
+/* flex: none, or a phone's keyboard shrinking the window squashes the bar to a sliver: it scrolls sideways, so
+   nothing else stops the page's column from taking its height. */
+.note-toolbar { position: sticky; top: 0; z-index: 12; flex: none; display: flex; align-items: center; gap: 4px; padding: 6px 24px; background: var(--bg); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; scroll-padding-inline: 12px 52px; }
+.note-toolbar::-webkit-scrollbar { display: none; }
+.note-toolbar .note-copy { margin-left: auto; flex: none; position: sticky; right: 0; border-radius: 8px; color: var(--soft); background: var(--bg); box-shadow: -10px 0 8px -2px var(--bg); }
+/* A phone has no keyboard shortcuts to show. */
+body:is([data-platform="android"], [data-platform="ios"]) .ne-menu .menu kbd { display: none; }
 .ne-btn { width: 32px; height: 30px; min-height: 0; padding: 0; flex: none; display: inline-grid; place-items: center; border-radius: 8px; background: transparent; color: var(--soft); }
 .ne-btn.on, .ne-btn.open { background: var(--highlight); border-color: var(--key-light); color: var(--accent-text); }
 .ne-icon { display: inline-flex; }
 .ne-sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; flex: none; }
 .ne-menu { position: relative; display: inline-flex; flex: none; }
-.ne-menu .menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 290px; display: flex; flex-direction: column; padding: 6px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25); }
-.ne-menu .menu.left { left: auto; right: 0; }
+/* Placed by the script, fixed to the window, so the toolbar can keep scrolling sideways. */
+.ne-menu .menu { position: fixed; z-index: 30; width: 290px; overflow-y: auto; display: flex; flex-direction: column; padding: 6px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25); }
 .ne-menu .menu[hidden] { display: none; }
 .ne-menu .menu button { display: flex; align-items: center; gap: 12px; text-align: left; border: none; background: transparent; padding: 8px 10px; border-radius: 8px; min-height: 0; color: var(--text); }
 .ne-menu .menu button:hover, .ne-menu .menu button:focus-visible { background: var(--hover); }
