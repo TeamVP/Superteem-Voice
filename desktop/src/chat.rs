@@ -24,6 +24,23 @@ pub struct Message {
     /// Why there's no answer, shown in its place.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// How many earlier messages didn't fit in what the model read for this answer: the oldest ones.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub left_out: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+/// What an answer still being written shows so far.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Partial {
+    /// The words of an answer.
+    Reply { text: String },
+    /// A rewrite, and how many words of the new note there are yet.
+    Rewriting { words: usize },
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -134,8 +151,8 @@ fn schema(can_rewrite: bool) -> Value {
 }
 
 /// What the model is shown: the note, as much of the conversation as fits in `history_budget` tokens
-/// (the latest of it), and what the person just said.
-fn prompt(note: &notes::Note, earlier: &[Message], said: &str, history_budget: usize, count: impl Fn(&str) -> usize) -> String {
+/// (the latest of it), and what the person just said. Also gives how many earlier messages didn't fit.
+fn prompt(note: &notes::Note, earlier: &[Message], said: &str, history_budget: usize, count: impl Fn(&str) -> usize) -> (String, usize) {
     let mut out = String::new();
     let title = note.title.trim();
     if title.is_empty() {
@@ -148,7 +165,8 @@ fn prompt(note: &notes::Note, earlier: &[Message], said: &str, history_budget: u
     out += "\n>>>\n\n";
     let mut lines: Vec<String> = Vec::new();
     let mut used = 0;
-    for m in earlier.iter().rev().filter(|m| m.error.is_none() && !m.text.trim().is_empty()) {
+    let said_before: Vec<&Message> = earlier.iter().filter(|m| m.error.is_none() && !m.text.trim().is_empty()).collect();
+    for m in said_before.iter().rev() {
         let who = if m.role == "user" { "Person" } else { "Assistant" };
         let line = match m.version {
             Some(_) => format!("{who}: (rewrote the note) {}", m.text.trim()),
@@ -167,7 +185,58 @@ fn prompt(note: &notes::Note, earlier: &[Message], said: &str, history_budget: u
         out += "\n\n";
     }
     out += &format!("The person now says: {said}");
-    out
+    let left_out = said_before.len() - lines.len();
+    (out, left_out)
+}
+
+/// The JSON string under `key` in an answer still being written: as much of it as has arrived.
+fn string_so_far(json: &str, key: &str) -> Option<String> {
+    let quoted = format!("\"{key}\"");
+    let mut from = 0;
+    let rest = loop {
+        let at = json[from..].find(&quoted)? + from + quoted.len();
+        let after = json[at..].trim_start();
+        if let Some(value) = after.strip_prefix(':') {
+            break value.trim_start().strip_prefix('"')?;
+        }
+        from = at;
+    };
+    let mut out = String::new();
+    let mut chars = rest.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => break,
+            '\\' => match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => {}
+                Some('b' | 'f') => {}
+                Some('u') => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    match u32::from_str_radix(&hex, 16).ok().filter(|_| hex.len() == 4).and_then(char::from_u32) {
+                        Some(c) => out.push(c),
+                        None => break, // Not all here yet, or half of a pair: shown once the rest arrives.
+                    }
+                }
+                Some(c) => out.push(c),
+                None => break,
+            },
+            c => out.push(c),
+        }
+    }
+    Some(out)
+}
+
+/// What to show of an answer still being written.
+fn partial(so_far: &str) -> Option<Partial> {
+    let action = string_so_far(so_far, "action")?;
+    if action.starts_with("rewrite") {
+        let words = string_so_far(so_far, "note").map_or(0, |n| n.split_whitespace().count());
+        Some(Partial::Rewriting { words })
+    } else {
+        let text = string_so_far(so_far, "reply")?;
+        (!text.trim().is_empty()).then_some(Partial::Reply { text })
+    }
 }
 
 /// What came back: an answer, or a new text for the note with a line about it.
@@ -193,16 +262,19 @@ fn parse(answer: &str) -> Result<Reply, String> {
     }
 }
 
-/// Answers the last thing the person said, rewriting the note when that's what was asked.
-pub fn answer(id: &str, model: &mut dyn Model) -> Result<(), String> {
+/// Answers the last thing the person said, rewriting the note when that's what was asked. `on_partial`
+/// is given what there is to show of the answer while it's written, a few times a second.
+pub fn answer(id: &str, model: &mut dyn Model, on_partial: &mut dyn FnMut(Partial)) -> Result<(), String> {
     let mut chat = load(id);
     let Some((said, earlier)) = chat.messages.split_last().filter(|(m, _)| m.role == "user") else {
         return Ok(());
     };
+    let mut left_out = 0;
     let outcome = (|| {
         let note = notes::load(id)?;
         let context = model.context();
-        let user = prompt(&note, earlier, &said.text, context / 8, |t| model.count(t));
+        let (user, left) = prompt(&note, earlier, &said.text, context / 8, |t| model.count(t));
+        left_out = left;
         // What the chat format itself takes, and a little to spare.
         let used = model.count(&system(false)) + model.count(&user) + 160;
         if used + 200 > context {
@@ -211,7 +283,20 @@ pub fn answer(id: &str, model: &mut dyn Model) -> Result<(), String> {
         // A rewrite is the whole note again: offered only when that fits, so a long note gets an answer
         // saying so instead of a rewrite cut off after the model has spent minutes on it.
         let can_rewrite = rewrite_fits(&note.body, context - used, |t| model.count(t));
-        match parse(&model.complete(&system(can_rewrite), &user, &grammar(can_rewrite), &schema(can_rewrite), context - used)?)? {
+        let mut so_far = String::new();
+        let mut shown_at: Option<std::time::Instant> = None;
+        let mut on_text = |piece: &str| {
+            so_far.push_str(piece);
+            if shown_at.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(120)) {
+                return;
+            }
+            if let Some(p) = partial(&so_far) {
+                shown_at = Some(std::time::Instant::now());
+                on_partial(p);
+            }
+        };
+        let written = model.stream(&system(can_rewrite), &user, &grammar(can_rewrite), &schema(can_rewrite), context - used, &mut on_text)?;
+        match parse(&written)? {
             Reply::Answer(text) => Ok((text, None)),
             Reply::Rewrite { note: body, reply } => {
                 if body.trim() == note.body.trim() {
@@ -225,8 +310,8 @@ pub fn answer(id: &str, model: &mut dyn Model) -> Result<(), String> {
     })();
     let now = library::now();
     let reply = match outcome {
-        Ok((text, version)) => Message { role: "assistant".into(), text, at: now, version, error: None },
-        Err(e) => Message { role: "assistant".into(), text: String::new(), at: now, version: None, error: Some(shown(&e).into()) },
+        Ok((text, version)) => Message { role: "assistant".into(), text, at: now, version, left_out, ..Default::default() },
+        Err(e) => Message { role: "assistant".into(), at: now, error: Some(shown(&e).into()), ..Default::default() },
     };
     chat.messages.push(reply);
     save(id, &chat)
@@ -289,10 +374,107 @@ mod tests {
         let said = |role: &str, text: &str| Message { role: role.into(), text: text.into(), ..Default::default() };
         let earlier = [said("user", "first question"), said("assistant", "first answer"), said("user", "second question"), said("assistant", "second answer")];
         let words = |t: &str| t.split_whitespace().count();
-        let all = prompt(&note, &earlier, "When do we ship?", 100, words);
+        let (all, left_out) = prompt(&note, &earlier, "When do we ship?", 100, words);
+        assert_eq!(left_out, 0);
         assert!(all.contains("titled \"Plan\"") && all.contains("Ship on Friday.") && all.ends_with("The person now says: When do we ship?"));
         assert!(all.contains("Person: first question\nAssistant: first answer"));
-        let some = prompt(&note, &earlier, "When do we ship?", 9, words);
+        let (some, left_out) = prompt(&note, &earlier, "When do we ship?", 9, words);
+        assert_eq!(left_out, 2);
         assert!(!some.contains("first question") && some.contains("Assistant: second answer"));
+    }
+
+    #[test]
+    fn an_answer_being_written_shows_as_it_comes() {
+        assert_eq!(partial(r#"{"action":"ans"#), None);
+        assert_eq!(partial(r#"{"action":"answer","reply":"Three peo"#), Some(Partial::Reply { text: "Three peo".into() }));
+        assert_eq!(partial(r#"{"action":"answer","reply":"Say \"hi\"\nthen é"#), Some(Partial::Reply { text: "Say \"hi\"\nthen é".into() }));
+        // Half an escape waits for the rest.
+        assert_eq!(partial(r#"{"action":"answer","reply":"Line\"#), Some(Partial::Reply { text: "Line".into() }));
+        assert_eq!(partial(r#"{"action":"answer","reply":"caf\u00"#), Some(Partial::Reply { text: "caf".into() }));
+        assert_eq!(partial(r#"{"action":"rewrite","note":"one two three"#), Some(Partial::Rewriting { words: 3 }));
+        // A server writes the reply before the note.
+        assert_eq!(partial(r#"{"action":"rewrite","reply":"Shorter.","note":"a b"#), Some(Partial::Rewriting { words: 2 }));
+        // "reply" inside the text isn't the key.
+        assert_eq!(partial(r#"{"action":"answer","reply":"the \"reply\": no"#), Some(Partial::Reply { text: "the \"reply\": no".into() }));
+    }
+
+    /// A model that gives the answers it's handed, and keeps what it was asked.
+    struct Fake {
+        answers: Vec<Result<String, String>>,
+        asked: Vec<(String, String)>,
+        context: usize,
+    }
+
+    impl Model for Fake {
+        fn complete(&mut self, system: &str, _user: &str, grammar: &str, _schema: &Value, _max: usize) -> Result<String, String> {
+            self.asked.push((system.into(), grammar.into()));
+            self.answers.remove(0)
+        }
+        fn count(&self, text: &str) -> usize {
+            text.split_whitespace().count()
+        }
+        fn context(&self) -> usize {
+            self.context
+        }
+    }
+
+    fn fake(answer: Result<&str, &str>, context: usize) -> Fake {
+        Fake { answers: vec![answer.map(str::to_string).map_err(str::to_string)], asked: vec![], context }
+    }
+
+    #[test]
+    fn answering_rewriting_and_stopping() {
+        // Everything here is written in a folder of its own, never the app's own.
+        let base = std::env::temp_dir().join(format!("stv-chat-test-{}", std::process::id()));
+        library::init(base.join("sessions"), base.join("data"));
+        assert!(library::data_dir().starts_with(&base), "the test would write into another data folder");
+        let id = notes::save(None, "Plan".into(), "Ship on Friday with Ann.".into(), false, None).unwrap();
+        let last = || load(&id).messages.last().cloned().unwrap();
+        let asking = |text: &str| ask(&id, text).unwrap();
+
+        // An answer leaves the note as it is.
+        asking("When do we ship?");
+        let mut shown = Vec::new();
+        answer(&id, &mut fake(Ok(r#"{"action":"answer","reply":"On **Friday**."}"#), 4096), &mut |p| shown.push(p)).unwrap();
+        assert_eq!((last().text.as_str(), last().version), ("On **Friday**.", None));
+        assert_eq!(shown, [Partial::Reply { text: "On **Friday**.".into() }]);
+        assert_eq!(notes::load(&id).unwrap().body, "Ship on Friday with Ann.");
+
+        // A rewrite becomes a new version, and is the note now.
+        asking("Make it a list");
+        let mut model = fake(Ok(r#"{"action":"rewrite","note":"- Ship on Friday\n- With Ann","reply":"Made it a list."}"#), 4096);
+        answer(&id, &mut model, &mut |_| {}).unwrap();
+        let version = last().version.expect("a rewrite makes a version");
+        assert_eq!(notes::load(&id).unwrap().body, "- Ship on Friday\n- With Ann");
+        assert_eq!(notes::current_version(&id).unwrap(), Some(version));
+        assert!(model.asked[0].1.starts_with("root ::= answer | rewrite"));
+
+        // A rewrite that comes out the same changes nothing.
+        asking("Tidy it");
+        answer(&id, &mut fake(Ok(r#"{"action":"rewrite","note":"- Ship on Friday\n- With Ann","reply":"Tidied."}"#), 4096), &mut |_| {}).unwrap();
+        assert!(last().version.is_none() && last().text.contains("wasn't changed"));
+
+        // Stopped: the question stays, with "Stopped." under it.
+        asking("Translate it");
+        answer(&id, &mut fake(Err(CANCELLED), 4096), &mut |_| {}).unwrap();
+        assert_eq!(last().error.as_deref(), Some("Stopped."));
+        assert!(!waiting(&load(&id)));
+
+        // Too little room for the whole note again: only an answer is open, and the model is told why.
+        notes::save(Some(id.clone()), "Plan".into(), "word ".repeat(300), false, None).unwrap();
+        asking("Rewrite it");
+        let mut model = fake(Ok(r#"{"action":"answer","reply":"It's too long to rewrite here."}"#), 1100);
+        answer(&id, &mut model, &mut |_| {}).unwrap();
+        assert!(model.asked[0].1.starts_with("root ::= answer\n") && model.asked[0].0.contains("too long for you to rewrite"));
+
+        // Earlier messages that don't fit are left out, and the answer says how many.
+        clear(&id).unwrap();
+        for n in 0..40 {
+            asking(&format!("question {n} {}", "word ".repeat(20)));
+            answer(&id, &mut fake(Ok(r#"{"action":"answer","reply":"ok"}"#), 1200), &mut |_| {}).unwrap();
+        }
+        assert!(last().left_out > 0);
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

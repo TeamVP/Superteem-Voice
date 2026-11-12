@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use stv_core::analysis::CANCELLED;
 use stv_core::lang;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
@@ -150,7 +151,7 @@ pub fn download(id: &str, cancel: &AtomicBool, progress: impl Fn(f32)) -> Result
         let mut done = 0u64;
         loop {
             if cancel.load(Ordering::Relaxed) {
-                return Err("Cancelled.".into());
+                return Err(CANCELLED.into());
             }
             let n = reader.read(&mut buffer).map_err(|e| e.to_string())?;
             if n == 0 {
@@ -172,7 +173,7 @@ pub fn download(id: &str, cancel: &AtomicBool, progress: impl Fn(f32)) -> Result
     };
     outcome.map_err(|reason| {
         let _ = std::fs::remove_file(&partial);
-        if reason == "Cancelled." { reason } else { format!("The speech model could not be downloaded: {reason}") }
+        if reason == CANCELLED { reason } else { format!("The speech model could not be downloaded: {reason}") }
     })
 }
 

@@ -1237,6 +1237,13 @@ pub trait Model {
     /// The model's answer to a system and user message, held to the grammar (or the schema, for an
     /// endpoint).
     fn complete(&mut self, system: &str, user: &str, grammar: &str, schema: &Value, max_tokens: usize) -> Result<String, String>;
+    /// The same answer, with `on_text` given each piece as it's written. A model that can't stream gives
+    /// the whole answer as one piece at the end.
+    fn stream(&mut self, system: &str, user: &str, grammar: &str, schema: &Value, max_tokens: usize, on_text: &mut dyn FnMut(&str)) -> Result<String, String> {
+        let text = self.complete(system, user, grammar, schema, max_tokens)?;
+        on_text(&text);
+        Ok(text)
+    }
     /// Tokens in this text, for fitting the context.
     fn count(&self, text: &str) -> usize;
     fn context(&self) -> usize;

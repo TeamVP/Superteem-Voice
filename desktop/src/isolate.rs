@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
-use stv_core::analysis::Model;
+use stv_core::analysis::{Model, CANCELLED};
 
 /// The argument that starts the program as the worker.
 pub const ARG: &str = "--analysis-worker";
@@ -29,7 +29,15 @@ enum Request {
     Probe,
     Load { path: String, ctx: u32, threads: i32, gpu: bool },
     Count { text: String },
-    Complete { system: String, user: String, grammar: String, max_tokens: usize },
+    Complete {
+        system: String,
+        user: String,
+        grammar: String,
+        max_tokens: usize,
+        /// Send each piece of the answer as it's written, as `Text` replies before `Done`.
+        #[serde(default)]
+        stream: bool,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -39,6 +47,8 @@ enum Reply {
     Loaded { context: usize },
     Count { n: usize },
     Done { text: String },
+    /// A piece of an answer still being written.
+    Text { text: String },
     Error { message: String },
 }
 
@@ -101,11 +111,20 @@ pub fn serve() {
                 Some(m) => Reply::Count { n: m.count(&text) },
                 None => Reply::Error { message: "No model is loaded.".into() },
             },
-            Ok(Request::Complete { system, user, grammar, max_tokens }) => match model.as_mut() {
-                Some(m) => match m.complete(&system, &user, &grammar, &serde_json::Value::Null, max_tokens) {
-                    Ok(text) => Reply::Done { text },
-                    Err(message) => Reply::Error { message },
-                },
+            Ok(Request::Complete { system, user, grammar, max_tokens, stream }) => match model.as_mut() {
+                Some(m) => {
+                    let mut send = |text: &str| {
+                        if stream {
+                            if let Ok(line) = serde_json::to_string(&Reply::Text { text: text.into() }) {
+                                let _ = writeln!(stdout, "{line}").and_then(|_| stdout.flush());
+                            }
+                        }
+                    };
+                    match m.stream(&system, &user, &grammar, &serde_json::Value::Null, max_tokens, &mut send) {
+                        Ok(text) => Reply::Done { text },
+                        Err(message) => Reply::Error { message },
+                    }
+                }
                 None => Reply::Error { message: "No model is loaded.".into() },
             },
         };
@@ -205,6 +224,11 @@ impl Isolated {
     /// Sends a request and waits for the answer, ending the worker if the analysis is cancelled or the
     /// worker stops.
     fn ask_locked(&self, inner: &mut Inner, request: &Request) -> Result<Reply, String> {
+        self.ask_streaming(inner, request, &mut |_| {})
+    }
+
+    /// As `ask_locked`, with each `Text` piece that comes before the answer given to `on_text`.
+    fn ask_streaming(&self, inner: &mut Inner, request: &Request, on_text: &mut dyn FnMut(&str)) -> Result<Reply, String> {
         let worker = inner.worker.as_mut().ok_or("The analysis process isn't running.")?;
         let line = serde_json::to_string(request).map_err(|e| e.to_string())?;
         let sent = writeln!(worker.input, "{line}").and_then(|_| worker.input.flush());
@@ -215,10 +239,13 @@ impl Isolated {
         loop {
             if self.cancel.load(Ordering::Relaxed) {
                 inner.worker = None;
-                return Err("Cancelled.".into());
+                return Err(CANCELLED.into());
             }
             match worker.lines.recv_timeout(Duration::from_millis(200)) {
-                Ok(line) => return serde_json::from_str(&line).map_err(|e| format!("The analysis process answered oddly: {e}")),
+                Ok(line) => match serde_json::from_str(&line).map_err(|e| format!("The analysis process answered oddly: {e}"))? {
+                    Reply::Text { text } => on_text(&text),
+                    reply => return Ok(reply),
+                },
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     inner.worker = None;
@@ -243,8 +270,19 @@ impl Drop for Worker {
 
 impl Model for Isolated {
     fn complete(&mut self, system: &str, user: &str, grammar: &str, _schema: &serde_json::Value, max_tokens: usize) -> Result<String, String> {
-        let request = Request::Complete { system: system.into(), user: user.into(), grammar: grammar.into(), max_tokens };
+        let request = Request::Complete { system: system.into(), user: user.into(), grammar: grammar.into(), max_tokens, stream: false };
         match self.ask(&request)? {
+            Reply::Done { text } => Ok(text),
+            Reply::Error { message } => Err(message),
+            other => Err(format!("The analysis process answered oddly: {other:?}")),
+        }
+    }
+
+    fn stream(&mut self, system: &str, user: &str, grammar: &str, _schema: &serde_json::Value, max_tokens: usize, on_text: &mut dyn FnMut(&str)) -> Result<String, String> {
+        let request = Request::Complete { system: system.into(), user: user.into(), grammar: grammar.into(), max_tokens, stream: true };
+        self.ensure()?;
+        let mut inner = self.inner.lock().unwrap();
+        match self.ask_streaming(&mut inner, &request, on_text)? {
             Reply::Done { text } => Ok(text),
             Reply::Error { message } => Err(message),
             other => Err(format!("The analysis process answered oddly: {other:?}")),

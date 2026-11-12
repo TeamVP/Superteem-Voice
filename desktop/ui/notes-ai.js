@@ -15,12 +15,19 @@ icon.search = '<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></pa
 let noteChatNow = null;
 /// What the model is doing for the chat on the page: "Loading the model…" until it starts thinking.
 let noteChatStep = null;
+/// What the answer being written shows so far: { kind: "reply", text } or { kind: "rewriting", words }.
+let noteChatPartial = null;
 
 const CHAT_IDEAS = ["Summarise this note", "Fix spelling and grammar", "Make it shorter", "Turn it into bullet points"];
 
 listen("analysing", (e) => {
   if (e.payload.template !== "chat" || e.payload.id !== note?.id) return;
   noteChatStep = "Thinking…";
+  noteChatNow?.draw();
+});
+listen("chat-partial", (e) => {
+  if (e.payload.id !== note?.id) return;
+  noteChatPartial = e.payload;
   noteChatNow?.draw();
 });
 listen("analysed", (e) => {
@@ -51,7 +58,7 @@ function noteChat(status) {
     toggle.classList.toggle("on", open);
     document.body.classList.toggle("note-chat-open", open);
     if (remember) localStorage.setItem("note-chat", open ? "1" : "");
-    if (open) { load(); if (remember) input.focus(); }
+    if (open) { atEnd = true; load(); if (remember) input.focus(); }
   };
   toggle.addEventListener("click", () => setOpen(!isOpen()));
   close.addEventListener("click", () => setOpen(false));
@@ -63,7 +70,7 @@ function noteChat(status) {
       const data = await invoke("get_note_chat", { id: mine.id });
       if (note !== mine) return;
       Object.assign(chat, data, { loaded: true });
-      if (!chat.running) noteChatStep = null;
+      if (!chat.running) { noteChatStep = null; noteChatPartial = null; }
     } catch (e) {
       chat.error = String(e);
     }
@@ -80,8 +87,10 @@ function noteChat(status) {
       const id = await mine.save();
       chat.sent = mine.editorText();
       noteChatStep = null;
+      noteChatPartial = null;
       chat.running = true;
       chat.messages.push({ role: "user", text, at: Date.now() / 1000 });
+      atEnd = true;
       input.value = "";
       grow();
       draw();
@@ -110,7 +119,11 @@ function noteChat(status) {
     if (m.role === "user") return el("div", { class: "chat-msg mine" }, m.text);
     if (m.error) return el("div", { class: "chat-msg theirs failed" }, m.error);
     const actions = el("div", { class: "chat-actions" });
-    const box = el("div", { class: "chat-msg theirs" }, el("div", { class: "chat-text" }, m.text), actions);
+    const box = el("div", { class: "chat-msg theirs" }, formatted(m.text), actions);
+    if (m.left_out) {
+      box.append(el("div", { class: "hint", title: "The note and the latest messages are always read; the oldest messages are left out when there isn't room for them." },
+        `The ${m.left_out === 1 ? "oldest message" : `${m.left_out} oldest messages`} didn't fit, so this answer didn't see ${m.left_out === 1 ? "it" : "them"}.`));
+    }
     if (m.version) {
       box.classList.add("rewrote");
       box.prepend(el("div", { class: "chat-made with-icon" }, svg("history", 14), `Rewrote the note · Version ${m.version}`));
@@ -133,6 +146,37 @@ function noteChat(status) {
     return box;
   };
 
+  /// An answer as the note would show it: headings, lists, tables and links, read-only.
+  const formatted = (text) => {
+    const box = el("div", { class: "chat-text note-body" });
+    try {
+      box.innerHTML = NoteEditor.toHTML(text, mine.fileUrl);
+    } catch (e) {
+      box.textContent = text; // Shown as it came, rather than not at all.
+      box.classList.add("plain");
+    }
+    box.querySelectorAll('input[type="checkbox"]').forEach((c) => { c.disabled = true; });
+    // Only pictures kept with the note are shown: one from the web would be fetched just by reading the answer.
+    const kept = mine.fileUrl("");
+    box.querySelectorAll("img").forEach((img) => {
+      if (!img.getAttribute("src")?.startsWith(kept)) img.replaceWith(img.alt ? `[${img.alt}]` : "");
+    });
+    // A link the editor wouldn't keep (such as javascript:) comes through with no address: it's just its words.
+    box.querySelectorAll('a:not([href]), a[href=""]').forEach((a) => a.replaceWith(...a.childNodes));
+    return box;
+  };
+  // Links in answers open like links in the note: a kept file with its app, a web page in the browser.
+  log.addEventListener("click", (e) => {
+    const a = e.target.closest?.(".chat-text a[href]");
+    if (!a) return;
+    e.preventDefault();
+    mine.openLink(a.getAttribute("href"));
+  });
+
+  // The log follows new messages only while it's scrolled to the end, so an earlier answer being read stays put.
+  let atEnd = true;
+  log.addEventListener("scroll", () => { atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 32; });
+
   const draw = () => {
     if (note !== mine || !isOpen()) return;
     const rows = [];
@@ -152,12 +196,21 @@ function noteChat(status) {
     }
     chat.messages.forEach((m) => rows.push(bubble(m)));
     if (chat.running) {
-      rows.push(el("div", { class: "chat-msg theirs pending" }, el("span", { class: "spinner" }), noteChatStep ?? (recording ? "Waiting until the recording stops…" : "Getting the model ready…"),
-        el("button", { class: "link", type: "button", onclick: () => invoke("cancel_analysis", { kind: "note", id: mine.id, template: "chat" }).then(() => setTimeout(load, 300)) }, "Stop")));
+      const stop = el("button", { class: "link", type: "button", onclick: () => invoke("cancel_analysis", { kind: "note", id: mine.id, template: "chat" }).then(() => setTimeout(load, 300)) }, "Stop");
+      const partial = noteChatPartial;
+      if (partial?.kind === "reply") {
+        rows.push(el("div", { class: "chat-msg theirs writing" }, formatted(partial.text), el("div", { class: "chat-actions" }, stop)));
+      } else {
+        const step = partial?.kind === "rewriting"
+          ? `Rewriting the note… ${partial.words} word${partial.words === 1 ? "" : "s"} so far`
+          : noteChatStep ?? (recording ? "Waiting until the recording stops…" : "Getting the model ready…");
+        rows.push(el("div", { class: "chat-msg theirs pending" }, el("span", { class: "spinner" }), step, stop));
+      }
     }
     if (chat.error) rows.push(el("div", { class: "chat-msg theirs failed" }, chat.error));
+    log.setAttribute("aria-busy", String(!!chat.running));
     log.replaceChildren(...rows);
-    log.scrollTop = log.scrollHeight;
+    if (atEnd) log.scrollTop = log.scrollHeight;
     clear.hidden = !chat.messages.length || chat.running;
     input.disabled = !chat.ready;
     send.disabled = !chat.ready || chat.running;
@@ -196,6 +249,7 @@ async function noteChatAnswered(id) {
   }
   Object.assign(chat, data, { loaded: true });
   noteChatStep = null;
+  noteChatPartial = null;
   chat.draw();
 }
 

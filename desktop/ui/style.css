@@ -1052,12 +1052,29 @@ body.note-chat-open .note-col { display: flex; flex-direction: column; flex: 1; 
 .chat-msg.failed { color: var(--muted); font-size: 13px; background: none; border: 1px dashed var(--line); }
 .chat-msg.pending { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
 .chat-msg.pending .spinner { width: 14px; height: 14px; margin: 0; }
+/* An answer still being written: a caret after its last words. */
+.chat-msg.writing .chat-text > :last-child::after { content: ""; display: inline-block; width: 0.5em; height: 1em; margin-left: 2px; vertical-align: -0.15em; background: var(--key); opacity: 0.6; animation: chat-caret 1s steps(2) infinite; }
+@keyframes chat-caret { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .chat-msg.writing .chat-text > :last-child::after { animation: none; } }
 .chat-msg.rewrote { border: 1px solid var(--key-light); background: var(--highlight); }
 .chat-made { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 650; color: var(--accent-text); margin-bottom: 4px; }
 .chat-actions { display: flex; gap: 14px; margin-top: 4px; }
 .chat-actions:empty { display: none; }
 .chat-actions .link { font-size: 12px; padding: 0; }
 .chat-msg .hint { margin-top: 4px; font-size: 12px; }
+/* An answer, formatted as the note is but at the chat's size. */
+.chat-msg .chat-text.note-body { flex: none; min-height: 0; font-size: inherit; line-height: inherit; cursor: auto; white-space: normal; }
+.chat-msg .chat-text.plain { white-space: pre-wrap; }
+.chat-text.note-body h1 { font-size: 1.25em; margin: 0.6em 0 0.25em; }
+.chat-text.note-body h2 { font-size: 1.12em; margin: 0.6em 0 0.25em; }
+.chat-text.note-body h3 { font-size: 1em; margin: 0.5em 0 0.2em; }
+.chat-text.note-body > :first-child { margin-top: 0; }
+.chat-text.note-body > :last-child { margin-bottom: 0; }
+.chat-text.note-body a { cursor: pointer; }
+.chat-text.note-body table { table-layout: auto; font-size: 0.95em; }
+.chat-text.note-body th, .chat-text.note-body td { padding: 4px 8px; }
+.chat-text.note-body pre { padding: 8px 10px; }
+.chat-text.note-body ul[data-type="taskList"] input[type="checkbox"] { cursor: default; }
 .chat-empty { margin: auto 0; padding: 8px 6px; text-align: center; font-size: 14px; }
 .chat-empty p { margin: 0 0 8px; }
 .chat-ideas { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 12px; }

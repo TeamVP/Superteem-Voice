@@ -1661,7 +1661,8 @@ fn enqueue_analysis<R: Runtime>(app: &AppHandle<R>, job: Job) {
                 let report = |step: &str, part, parts| drop(app.emit("analysing", AnalysisProgress { job: job.clone(), step: step.into(), part, parts }));
                 if job.template == chat::JOB {
                     report("Thinking", 1, 1);
-                    return chat::answer(&job.id, model.as_mut());
+                    let id = job.id.clone();
+                    return chat::answer(&job.id, model.as_mut(), &mut |partial| drop(app.emit("chat-partial", ChatPartial { id: id.clone(), partial })));
                 }
                 if let Some(language) = job.template.strip_prefix(TRANSLATE) {
                     translations::update(&item, language, model.as_mut(), &info.model, |k, n| report("Translating", k, n))?;
@@ -1717,6 +1718,14 @@ fn get_analyses(state: State<AppState>, kind: String, id: String) -> Result<Anal
         elsewhere: elsewhere.into_iter().filter(|t| starred.contains(&t.id)).collect(),
         starred,
     })
+}
+
+/// What a note's chat answer shows so far, while it's written.
+#[derive(Serialize, Clone)]
+struct ChatPartial {
+    id: String,
+    #[serde(flatten)]
+    partial: chat::Partial,
 }
 
 #[derive(Serialize)]

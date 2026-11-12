@@ -7,7 +7,7 @@
 //! kept name lost. A line that fails is tried once more on its own, and kept with a warning if it fails
 //! again.
 
-use crate::analysis::{Field, Kind, Model, Template};
+use crate::analysis::{Field, Kind, Model, Template, CANCELLED};
 use crate::lang::{self, Script};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -233,7 +233,7 @@ pub fn translate(
     let mut out: Vec<Done> = Vec::with_capacity(lines.len());
     for (k, range) in ranges.into_iter().enumerate() {
         if model.cancelled() {
-            return Err("Cancelled.".into());
+            return Err(CANCELLED.into());
         }
         progress(k + 1, n);
         let before: Vec<&Line> = lines[range.start.saturating_sub(CONTEXT)..range.start].iter().collect();

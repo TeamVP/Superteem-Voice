@@ -198,14 +198,14 @@ function dictationApi(editor) {
 
 // ---------- The editor
 
-export function create({ element, host, placeholder = "" }) {
-  const resolve = (src) => (src && src.startsWith(ATTACHMENT) ? host.resolve(src.slice(ATTACHMENT.length)) : src);
+/// What a note can hold, and Markdown in and out. `files(file)` gives the address a kept file is shown from.
+function noteExtensions(files) {
+  const resolve = (src) => (src && src.startsWith(ATTACHMENT) ? files(src.slice(ATTACHMENT.length)) : src);
   const unresolve = (src) => {
     if (!src) return src;
-    const base = host.resolve("");
+    const base = files("");
     return base && src.startsWith(base) ? ATTACHMENT + decodeURIComponent(src.slice(base.length)) : src;
   };
-
   const NoteImage = Image.extend({
     addAttributes() {
       return {
@@ -215,6 +215,34 @@ export function create({ element, host, placeholder = "" }) {
       };
     },
   });
+  return [
+    StarterKit.configure({
+      heading: { levels: [1, 2, 3] },
+      link: { openOnClick: false, autolink: true, protocols: ["attachment"], HTMLAttributes: { rel: "noopener noreferrer" } },
+    }),
+    NoteImage.configure({ inline: false, allowBase64: false }),
+    TaskList,
+    TaskItem.configure({ nested: true }),
+    TableKit.configure({ table: { resizable: false } }),
+    TextAlign.configure({ types: ["heading", "paragraph"] }),
+    Markdown,
+  ];
+}
+
+/// One editor, never shown, that turns Markdown into the same HTML a note shows, for text that is only read.
+let reader = null;
+let readerFiles = () => "";
+
+/// Markdown as HTML, made from what a note can hold and nothing else, so no markup in the text comes
+/// through as it is. `files(file)` gives the address a kept file is shown from.
+export function toHTML(markdown, files = () => "") {
+  readerFiles = files;
+  reader ??= new Editor({ element: document.createElement("div"), editable: false, extensions: noteExtensions((f) => readerFiles(f)) });
+  reader.commands.setContent(markdown ?? "", { contentType: "markdown", emitUpdate: false });
+  return reader.getHTML();
+}
+
+export function create({ element, host, placeholder = "" }) {
 
   const Shortcuts = Extension.create({
     name: "noteShortcuts",
@@ -238,20 +266,7 @@ export function create({ element, host, placeholder = "" }) {
 
   const editor = new Editor({
     element: content,
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3] },
-        link: { openOnClick: false, autolink: true, protocols: ["attachment"], HTMLAttributes: { rel: "noopener noreferrer" } },
-      }),
-      NoteImage.configure({ inline: false, allowBase64: false }),
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      TableKit.configure({ table: { resizable: false } }),
-      TextAlign.configure({ types: ["heading", "paragraph"] }),
-      Placeholder.configure({ placeholder }),
-      Markdown,
-      Shortcuts,
-    ],
+    extensions: [...noteExtensions(host.resolve), Placeholder.configure({ placeholder }), Shortcuts],
     editorProps: {
       attributes: { class: "note-body", id: "note-body", role: "textbox", "aria-multiline": "true", "aria-label": "Note" },
       handlePaste(view, event) {

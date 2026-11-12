@@ -624,6 +624,8 @@ function renderNote(data, dictate) {
   // The formatting editor: headings, lists, links, pictures and files, with places held for dictation.
   const mine = note;
   const noteFiles = `${platform === "windows" || platform === "android" ? "http://stvnote.localhost/" : "stvnote://localhost/"}`;
+  const fileUrl = (file) => `${noteFiles}${mine.id ?? ""}/${encodeURIComponent(file)}`;
+  const openLink = (href) => invoke("open_note_link", { id: mine.id ?? "", href }).catch((e) => micToast(String(e)));
   const editorHolder = el("div", { class: "note-editor" });
   const ed = NoteEditor.create({
     element: editorHolder,
@@ -633,8 +635,8 @@ function renderNote(data, dictate) {
     host: {
       onChange: () => changed(),
       notify: (text) => micToast(text),
-      resolve: (file) => `${noteFiles}${mine.id ?? ""}/${encodeURIComponent(file)}`,
-      open: (href) => invoke("open_note_link", { id: mine.id ?? "", href }).catch((e) => micToast(String(e))),
+      resolve: fileUrl,
+      open: openLink,
       // A file is kept beside the note, so a new note is saved first to have somewhere to keep it.
       addFile: async (file) => {
         const id = await mine.save();
@@ -690,6 +692,8 @@ function renderNote(data, dictate) {
   };
   note.editorText = () => ed.markdown();
   note.addText = (text) => ed.append(text);
+  note.fileUrl = fileUrl;
+  note.openLink = openLink;
   note.save = async () => {
     clearTimeout(noteTimer);
     await saveNote(status);
