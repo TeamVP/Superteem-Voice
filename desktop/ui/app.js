@@ -1201,7 +1201,7 @@ async function showMeeting() {
       testing ? el("button", { class: "pill", onclick: () => showDevices(true) }, "Add or test devices") : null),
     el("div", { class: "legend" }, testing
       ? "Each microphone is recorded as its own track. Only microphones that have been heard working are listed."
-      : "Connect a Bluetooth headset before starting. The phone may not record its own mic and a headset at the same time."),
+      : "A Bluetooth headset can be used once it's connected, even while this page is open. The phone may not record its own mic and a headset at the same time."),
     el("div", { class: "mic-list" },
       boxes.map((b) => b.row),
       known.length || !testing ? null : el("div", { class: "empty" }, "No tested microphones yet. ",
@@ -1242,12 +1242,19 @@ async function showMeeting() {
       const b = live.find((x) => x.name === p.name);
       if (!b) continue;
       b.meter.style.width = `${Math.round(p.level * 100)}%`;
-      if (p.state === "failed") {
+      if (p.state === "failed" || p.state === "absent") {
         b.box.disabled = true;
-        if (b.box.checked) { b.box.checked = false; update(); }
-        b.row.className = "mic-row failed";
-        b.state.textContent = `Not working: ${p.detail}`;
+        // Ticked, it is ticked again if it comes back while the page is open.
+        if (b.box.checked) { b.box.checked = false; b.untickedAway = true; update(); }
+        // A headset that isn't connected is shown as any missing microphone is, not as a fault.
+        b.row.className = p.state === "absent" ? "mic-row absent" : "mic-row failed";
+        b.state.textContent = p.state === "absent" ? "Not connected" : `Not working: ${p.detail}`;
       } else if (p.state === "listening") {
+        // Connected again (or for the first time) while the page is open: usable as a track.
+        if (b.box.disabled) {
+          b.box.disabled = false;
+          if (b.untickedAway) { b.box.checked = true; b.untickedAway = false; update(); }
+        }
         b.row.className = "mic-row working";
         b.state.replaceChildren(svg("check", 14), p.level > 0.3 ? " Hearing you" : " Connected");
       }

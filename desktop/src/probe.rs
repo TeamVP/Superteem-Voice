@@ -6,7 +6,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Probe {
     pub name: String,
-    /// "opening", "listening" or "failed".
+    /// "opening", "listening", "failed", or on Android "absent" (no headset connected right now).
     pub state: String,
     /// 0 to 1, for the meter.
     pub level: f32,
@@ -176,6 +176,8 @@ mod imp {
                 let state = match p.state.as_str() {
                     "recording" => "listening",
                     "starting" | "stopped" => "opening",
+                    // No headset connected: not a fault, and it comes back by itself when one connects.
+                    "no headset" | "waiting" => "absent",
                     _ => "failed",
                 };
                 Probe { heard: p.level > 0.35, name: p.name, state: state.into(), level: p.level, detail: p.detail }
