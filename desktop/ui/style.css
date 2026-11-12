@@ -423,6 +423,12 @@ kbd { font: 600 11px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; paddi
 .row .label { flex: 1; }
 .row .label small { display: block; color: var(--muted); font-size: 12px; }
 .row .value { color: var(--muted); font-size: 14px; }
+.check-stack { display: flex; flex-direction: column; align-items: center; flex: none; }
+.details-wrap { position: relative; margin-top: 2px; }
+.details-wrap[hidden] { display: none; }
+button.link.details { font-size: 12px; color: var(--muted); padding: 2px 4px; text-align: center; text-decoration: underline; }
+.details-tip { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); z-index: 5; width: max-content; max-width: min(300px, 80vw); margin-top: 6px; padding: 10px 12px; border-radius: 8px; background: var(--panel); color: var(--text); border: 1px solid var(--line); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); font-size: 12px; line-height: 1.45; text-align: left; white-space: normal; }
+.details-tip[hidden] { display: none; }
 .switch { appearance: none; width: 44px; height: 26px; border-radius: 13px; background: var(--line); position: relative; cursor: pointer; flex: none; margin: 0; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 10px; background: #fff; transition: left 0.15s; box-shadow: 0 1px 2px rgb(0 0 0 / 0.3); }
 .switch:checked { background: var(--key); }
