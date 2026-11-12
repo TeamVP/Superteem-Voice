@@ -279,7 +279,7 @@ function noteChat(status) {
   /// Opens the panel if it was left open, else reads the chat so the bar can show a new answer; called once
   /// the page is in place.
   const sync = () => {
-    document.body.classList.add("note-chat");
+    document.body.classList.add("note-chat-page");
     let open = false;
     try { open = localStorage.getItem("note-chat") === "1"; } catch {}
     setOpen(open, false);

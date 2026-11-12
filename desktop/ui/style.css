@@ -1062,9 +1062,9 @@ dialog.sheet .actions { display: flex; justify-content: flex-end; gap: 8px; marg
 /* ---------- A note's chat and versions ---------- */
 /* Without a chat (on a phone) the note page is laid out as it always was; with one, the note scrolls beside it. */
 .analyses-slot, .note-split, .note-col, .chat-side { display: contents; }
-body.note-chat #main-wrap { overflow: hidden; }
-body.note-chat .note-split { display: flex; flex: 1; min-height: 0; position: relative; }
-body.note-chat .note-col { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow-y: auto; }
+body.note-chat-page #main-wrap { overflow: hidden; }
+body.note-chat-page .note-split { display: flex; flex: 1; min-height: 0; position: relative; }
+body.note-chat-page .note-col { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow-y: auto; }
 /* Folded, the chat is a thin bar down the right; its button shows a dot for an answer not seen yet. */
 .chat-rail { flex: none; width: 48px; display: flex; flex-direction: column; align-items: center; padding-top: 10px; border-left: 1px solid var(--line); background: var(--panel); cursor: pointer; }
 .chat-rail:hover { background: var(--raised); }

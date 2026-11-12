@@ -322,7 +322,7 @@ function leave() {
   stopPlayback();
   clearInterval(pollTimer);
   flushNote();
-  document.body.classList.remove("note-chat-open", "note-chat");
+  document.body.classList.remove("note-chat-open", "note-chat-page");
 }
 
 // ---------- Theme: follows Windows by default; a pick is remembered on this device ----------
