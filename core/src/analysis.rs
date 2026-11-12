@@ -1229,6 +1229,9 @@ pub fn parts(turns: &[Turn], budget: usize, count: impl Fn(&str) -> usize) -> Ve
 // ---------------------------------------------------------------------------------------------------------
 // Running
 
+/// The error a model, or loading one, gives when it was told to stop.
+pub const CANCELLED: &str = "Cancelled.";
+
 /// Runs the language model. Implemented by the app for llama.cpp and for an endpoint, and by a fake in tests.
 pub trait Model {
     /// The model's answer to a system and user message, held to the grammar (or the schema, for an
@@ -1293,7 +1296,7 @@ pub fn analyse(model: &mut dyn Model, t: &Template, turns: &[Turn], ctx: &Contex
     let mut results = Vec::new();
     for (k, range) in ranges.into_iter().enumerate() {
         if model.cancelled() {
-            return Err("Cancelled.".into());
+            return Err(CANCELLED.into());
         }
         progress(k + 1, n);
         let part = (n > 1).then_some((k + 1, n));

@@ -464,6 +464,12 @@ pub fn versions(id: &str) -> Result<Vec<Version>, String> {
     Ok(all.versions)
 }
 
+/// The newest version that holds the note's text as it is now, if one does. Unlike `versions`, keeps nothing.
+pub fn current_version(id: &str) -> Result<Option<u32>, String> {
+    let note = load(id)?;
+    Ok(load_versions(id).versions.iter().rev().find(|v| v.title == note.title && v.body == note.body).map(|v| v.n))
+}
+
 /// Replaces the note's text with the assistant's, as a new version. The text before it is kept as a
 /// version too. Gives the new version's number.
 pub fn rewrite(id: &str, body: String, label: &str) -> Result<u32, String> {

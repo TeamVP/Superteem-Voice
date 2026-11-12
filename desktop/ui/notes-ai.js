@@ -106,7 +106,7 @@ function noteChat(status) {
     load();
   });
 
-  const bubble = (m, last) => {
+  const bubble = (m) => {
     if (m.role === "user") return el("div", { class: "chat-msg mine" }, m.text);
     if (m.error) return el("div", { class: "chat-msg theirs failed" }, m.error);
     const actions = el("div", { class: "chat-actions" });
@@ -116,7 +116,8 @@ function noteChat(status) {
       box.prepend(el("div", { class: "chat-made with-icon" }, svg("history", 14), `Rewrote the note · Version ${m.version}`));
       const notice = chat.notices.get(m.version);
       if (notice) box.append(el("div", { class: "hint" }, notice));
-      if (last && !notice) actions.append(el("button", { class: "link", type: "button", onclick: () => undoRewrite(m.version, status) }, "Undo"));
+      // Only while this rewrite is still the note: not once undone, replaced, or kept aside for the person's own text.
+      if (m.version === chat.current && !chat.running) actions.append(el("button", { class: "link", type: "button", onclick: () => undoRewrite(m.version, status) }, "Undo"));
       actions.append(el("button", { class: "link", type: "button", onclick: () => showNoteVersions(status, m.version) }, "See versions"));
     } else {
       const copy = el("button", { class: "link", type: "button" }, "Copy");
@@ -149,7 +150,7 @@ function noteChat(status) {
         el("p", { class: "hint" }, "A rewrite becomes a new version of the note, so the one you have now is never lost."),
         el("div", { class: "chat-ideas" }, CHAT_IDEAS.map((idea) => el("button", { class: "pill", type: "button", onclick: () => ask(idea) }, idea)))));
     }
-    chat.messages.forEach((m, i) => rows.push(bubble(m, i === chat.messages.length - 1)));
+    chat.messages.forEach((m) => rows.push(bubble(m)));
     if (chat.running) {
       rows.push(el("div", { class: "chat-msg theirs pending" }, el("span", { class: "spinner" }), noteChatStep ?? (recording ? "Waiting until the recording stops…" : "Getting the model ready…"),
         el("button", { class: "link", type: "button", onclick: () => invoke("cancel_analysis", { kind: "note", id: mine.id, template: "chat" }).then(() => setTimeout(load, 300)) }, "Stop")));
@@ -186,6 +187,9 @@ async function noteChatAnswered(id) {
       chat.notices.set(last.version, "You changed the note while this was being written, so your text was kept. The rewrite is in Versions if you want it.");
       mine.dirty = true;
       await mine.save().catch(() => {});
+      // The person's text is the note now, not the rewrite, so the chat is read again without its Undo.
+      try { data = await invoke("get_note_chat", { id }); } catch (e) { /* Keep what was read. */ }
+      if (note !== mine) return;
     } else {
       try { mine.apply(await invoke("get_note", { id })); } catch (e) { /* The note stays as it is. */ }
     }
@@ -201,12 +205,18 @@ async function undoRewrite(version, status) {
   if (!mine?.id) return;
   try {
     await mine.save();
+    // Changed since the rewrite (by typing, or another version brought back): undoing would throw that
+    // away too, so the versions open instead to choose from.
+    const { current } = await invoke("get_note_chat", { id: mine.id });
     const all = await invoke("note_versions", { id: mine.id });
     const at = all.findIndex((v) => v.n === version);
-    if (at < 1) return showNoteVersions(status, version);
+    if (current !== version || at < 1) {
+      await mine.chat?.load();
+      return showNoteVersions(status, version);
+    }
     mine.apply(await invoke("restore_note_version", { id: mine.id, version: all[at - 1].n }));
     mine.chat?.notices.set(version, `Undone: the note is as it was before (version ${all[at - 1].n}).`);
-    mine.chat?.draw();
+    await mine.chat?.load();
   } catch (e) {
     if (status?.isConnected) status.textContent = String(e);
   }

@@ -1604,7 +1604,13 @@ fn enqueue_analysis<R: Runtime>(app: &AppHandle<R>, job: Job) {
     }
     let start_worker = {
         let mut queue = state.analysis_queue.lock().unwrap();
-        queue.push_back(job);
+        // Someone is waiting on a chat answer, so it goes ahead of analyses, after any other chat.
+        if job.template == chat::JOB {
+            let at = queue.iter().position(|j| j.template != chat::JOB).unwrap_or(queue.len());
+            queue.insert(at, job);
+        } else {
+            queue.push_back(job);
+        }
         state.analysing.lock().unwrap().is_none() && !state.analysis_worker.swap(true, std::sync::atomic::Ordering::SeqCst)
     };
     let _ = app.emit("analysis-queue", analysis_queue_state(&state));
@@ -1720,39 +1726,53 @@ struct ChatView {
     ready: bool,
     /// An answer is being written, or waiting its turn.
     running: bool,
+    /// The version the note's text is now, so a rewrite offers Undo only while it is still the note.
+    current: Option<u32>,
 }
 
 fn chat_job(id: &str) -> Job {
     Job { kind: "note".into(), id: id.into(), template: chat::JOB.into() }
 }
 
+/// An answer for this note's chat is being written, or waiting its turn.
+fn chat_running(state: &AppState, id: &str) -> bool {
+    let job = chat_job(id);
+    state.analysing.lock().unwrap().as_ref() == Some(&job) || state.analysis_queue.lock().unwrap().contains(&job)
+}
+
 #[tauri::command]
 fn get_note_chat(state: State<AppState>, id: String) -> Result<ChatView, String> {
     notes::load(&id)?;
-    let job = chat_job(&id);
-    let running = state.analysing.lock().unwrap().as_ref() == Some(&job) || state.analysis_queue.lock().unwrap().contains(&job);
+    let running = chat_running(&state, &id);
     if !running {
         chat::settle(&id, None)?;
     }
     let p = prefs::load();
-    Ok(ChatView { messages: chat::load(&id).messages, ready: !p.llm_server.trim().is_empty() || !llm::installed().is_empty(), running })
+    Ok(ChatView {
+        messages: chat::load(&id).messages,
+        ready: !p.llm_server.trim().is_empty() || !llm::installed().is_empty(),
+        running,
+        current: notes::current_version(&id)?,
+    })
 }
 
 /// Asks the assistant about a note, or to rewrite it. The answer arrives with the "analysed" event.
 #[tauri::command]
 fn chat_note<R: Runtime>(app: AppHandle<R>, id: String, text: String) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let job = chat_job(&id);
-    if state.analysing.lock().unwrap().as_ref() == Some(&job) || state.analysis_queue.lock().unwrap().contains(&job) {
+    if chat_running(&app.state::<AppState>(), &id) {
         return Err("Wait for the answer to the last one first.".into());
     }
     chat::ask(&id, &text)?;
-    enqueue_analysis(&app, job);
+    enqueue_analysis(&app, chat_job(&id));
     Ok(())
 }
 
 #[tauri::command]
-fn clear_note_chat(id: String) -> Result<(), String> {
+fn clear_note_chat(state: State<AppState>, id: String) -> Result<(), String> {
+    // The answer being written would put the cleared conversation back when it's saved.
+    if chat_running(&state, &id) {
+        return Err("Wait for the answer, or stop it, before clearing the chat.".into());
+    }
     chat::clear(&id)
 }
 

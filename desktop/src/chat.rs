@@ -6,7 +6,7 @@ use crate::{library, notes};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use stv_core::analysis::Model;
+use stv_core::analysis::{Model, CANCELLED};
 
 /// The job name a chat answer waits under in the analysis queue.
 pub const JOB: &str = "chat";
@@ -85,26 +85,50 @@ and nothing left out that wasn't asked to go. The note is written in Markdown (#
 **bold**, tables), and so is your rewrite. Pictures and files appear as ![words](attachment:name) and \
 [words](attachment:name): keep each of those exactly as it is, where it belongs.";
 
-/// A grammar for the two forms of answer.
-fn grammar() -> String {
-    r#"root ::= answer | rewrite
-answer ::= "{" ws "\"action\"" ws ":" ws "\"answer\"" ws "," ws "\"reply\"" ws ":" ws string ws "}"
-rewrite ::= "{" ws "\"action\"" ws ":" ws "\"rewrite\"" ws "," ws "\"note\"" ws ":" ws string ws "," ws "\"reply\"" ws ":" ws string ws "}"
-ws ::= [ \t\n]{0,8}
-string ::= "\"" ( [^"\\\x00-\x1f] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4}) )* "\""
-"#
-    .into()
+/// Said instead of offering a rewrite when the whole note wouldn't fit in what the model has left to write.
+const TOO_LONG_TO_REWRITE: &str = "\n\nThis note is too long for you to rewrite in one go, so only the first form is open to you. \
+If the person asks you to change the note, say plainly that it is too long to rewrite whole here, and offer to help \
+with one part of it at a time (they can paste that part into the chat), or suggest choosing a larger model in Settings.";
+
+/// What the model is told it is, and which forms of answer it has.
+fn system(can_rewrite: bool) -> String {
+    if can_rewrite { ROLE.into() } else { format!("{ROLE}{TOO_LONG_TO_REWRITE}") }
 }
 
-fn schema() -> Value {
+/// Whether a rewrite of `body` fits in `room` tokens of output: the whole note again, with some to spare
+/// for the reply, JSON escaping and a model that writes a little more than it was given.
+fn rewrite_fits(body: &str, room: usize, count: impl Fn(&str) -> usize) -> bool {
+    room >= count(body) * 6 / 5 + 120
+}
+
+/// A grammar for the forms of answer open to the model.
+fn grammar(can_rewrite: bool) -> String {
+    let root = if can_rewrite { "root ::= answer | rewrite" } else { "root ::= answer" };
+    format!(
+        r#"{root}
+answer ::= "{{" ws "\"action\"" ws ":" ws "\"answer\"" ws "," ws "\"reply\"" ws ":" ws string ws "}}"
+rewrite ::= "{{" ws "\"action\"" ws ":" ws "\"rewrite\"" ws "," ws "\"note\"" ws ":" ws string ws "," ws "\"reply\"" ws ":" ws string ws "}}"
+ws ::= [ \t\n]{{0,8}}
+string ::= "\"" ( [^"\\\x00-\x1f] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{{4}}) )* "\""
+"#
+    )
+}
+
+/// The same forms for a server. Strict structured output needs every field listed as required, so `note`
+/// is null in an answer rather than left out: otherwise a server may copy the whole note into every answer.
+fn schema(can_rewrite: bool) -> Value {
+    let actions: &[&str] = if can_rewrite { &["answer", "rewrite"] } else { &["answer"] };
     json!({
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["answer", "rewrite"]},
-            "note": {"type": "string"},
+            "action": {"type": "string", "enum": actions},
             "reply": {"type": "string"},
+            "note": {
+                "type": ["string", "null"],
+                "description": "null when action is \"answer\"; the complete new text of the note when action is \"rewrite\"",
+            },
         },
-        "required": ["action", "note", "reply"],
+        "required": ["action", "reply", "note"],
         "additionalProperties": false,
     })
 }
@@ -180,11 +204,14 @@ pub fn answer(id: &str, model: &mut dyn Model) -> Result<(), String> {
         let context = model.context();
         let user = prompt(&note, earlier, &said.text, context / 8, |t| model.count(t));
         // What the chat format itself takes, and a little to spare.
-        let used = model.count(ROLE) + model.count(&user) + 160;
+        let used = model.count(&system(false)) + model.count(&user) + 160;
         if used + 200 > context {
             return Err("This note is too long for the model to read in one go. Choose a model with more room in Settings, or try with a shorter note.".to_string());
         }
-        match parse(&model.complete(ROLE, &user, &grammar(), &schema(), context - used)?)? {
+        // A rewrite is the whole note again: offered only when that fits, so a long note gets an answer
+        // saying so instead of a rewrite cut off after the model has spent minutes on it.
+        let can_rewrite = rewrite_fits(&note.body, context - used, |t| model.count(t));
+        match parse(&model.complete(&system(can_rewrite), &user, &grammar(can_rewrite), &schema(can_rewrite), context - used)?)? {
             Reply::Answer(text) => Ok((text, None)),
             Reply::Rewrite { note: body, reply } => {
                 if body.trim() == note.body.trim() {
@@ -199,19 +226,23 @@ pub fn answer(id: &str, model: &mut dyn Model) -> Result<(), String> {
     let now = library::now();
     let reply = match outcome {
         Ok((text, version)) => Message { role: "assistant".into(), text, at: now, version, error: None },
-        // Stopped by the person: what they asked stays, with nothing under it.
-        Err(e) if e == "Cancelled." => Message { role: "assistant".into(), text: String::new(), at: now, version: None, error: Some("Stopped.".into()) },
-        Err(e) => Message { role: "assistant".into(), text: String::new(), at: now, version: None, error: Some(e) },
+        Err(e) => Message { role: "assistant".into(), text: String::new(), at: now, version: None, error: Some(shown(&e).into()) },
     };
     chat.messages.push(reply);
     save(id, &chat)
+}
+
+/// Why there's no answer, as the chat shows it. Stopped by the person: what they asked stays, with
+/// "Stopped." under it, whether the model was loading or writing.
+fn shown(why: &str) -> &str {
+    if why == CANCELLED { "Stopped." } else { why }
 }
 
 /// An answer that never came, as when the app was closed mid-way, is marked so the chat isn't left waiting.
 pub fn settle(id: &str, why: Option<&str>) -> Result<(), String> {
     let mut chat = load(id);
     if waiting(&chat) {
-        let why = why.unwrap_or("Stopped before it was answered.");
+        let why = why.map_or("Stopped before it was answered.", shown);
         chat.messages.push(Message { role: "assistant".into(), at: library::now(), error: Some(why.into()), ..Default::default() });
         save(id, &chat)?;
     }
@@ -231,8 +262,25 @@ mod tests {
         );
         // A server that fills every field: an empty note is an answer.
         assert_eq!(parse(r#"{"action":"answer","note":"","reply":"Yes."}"#), Ok(Reply::Answer("Yes.".into())));
+        assert_eq!(parse(r#"{"action":"answer","reply":"Yes.","note":null}"#), Ok(Reply::Answer("Yes.".into())));
         assert!(parse(r#"{"action":"rewrite","note":"Half a no"#).is_err());
         assert!(parse(r#"{"action":"answer","reply":""}"#).is_err());
+        // Stopped while loading or writing reads the same.
+        assert_eq!(shown(CANCELLED), "Stopped.");
+        assert_eq!(shown("The model file is missing."), "The model file is missing.");
+    }
+
+    #[test]
+    fn a_rewrite_is_offered_only_when_the_whole_note_fits() {
+        let words = |t: &str| t.split_whitespace().count();
+        let body = "word ".repeat(1000);
+        assert!(rewrite_fits(&body, 1400, words));
+        assert!(!rewrite_fits(&body, 1000, words));
+        // Without room, the model can only answer, and is told why.
+        assert!(grammar(true).starts_with("root ::= answer | rewrite\n"));
+        assert!(grammar(false).starts_with("root ::= answer\n"));
+        assert_eq!(schema(false)["properties"]["action"]["enum"], json!(["answer"]));
+        assert!(system(false).contains("too long for you to rewrite") && !system(true).contains("too long for you to rewrite"));
     }
 
     #[test]
