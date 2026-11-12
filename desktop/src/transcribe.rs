@@ -106,29 +106,57 @@ pub fn suggested_multilingual() -> &'static SpeechModel {
     if phone || device.gpu.is_none() || device.ram_gb < 6.0 { model("small").expect("listed") } else { model("turbo").expect("listed") }
 }
 
+/// The multilingual model in use: the chosen one when that file is downloaded, otherwise the first
+/// downloaded multilingual model in catalogue order.
+fn multilingual_in_use(preferred: &str, ready: impl Fn(&SpeechModel) -> bool) -> Option<&'static SpeechModel> {
+    model(preferred).filter(|m| m.multilingual && ready(m)).or_else(|| MODELS.iter().find(|m| m.multilingual && ready(m)))
+}
+
+/// Which speech model serves these languages, and whether its file is already downloaded.
+/// `best_ready_multilingual` is the id from `multilingual_in_use`. `prefer_turbo_for_english` is the
+/// existing Windows graphics-processor case and is asked only for English. `suggested` is the model
+/// this device would download, and is asked only when nothing multilingual is here yet.
+fn resolve_speech<'a>(
+    english_only: bool,
+    english_ready: bool,
+    best_ready_multilingual: Option<&'a str>,
+    prefer_turbo_for_english: impl FnOnce() -> bool,
+    suggested: impl FnOnce() -> &'a str,
+) -> (&'a str, bool) {
+    if english_only {
+        // The large model is the most accurate English too, and quick on a graphics processor: optimising
+        // chooses it there.
+        if prefer_turbo_for_english() {
+            return ("turbo", true);
+        }
+        return match (english_ready, best_ready_multilingual) {
+            (false, Some(id)) => (id, true),
+            _ => (ENGLISH, english_ready),
+        };
+    }
+    match best_ready_multilingual {
+        Some(id) => (id, true),
+        None => (suggested(), false),
+    }
+}
+
 /// The model that transcribes `languages`, and whether it's downloaded. English alone uses the English
 /// model, or a multilingual one when that's all there is. Anything else uses the multilingual model the
 /// person chose, else the best one downloaded, else the one this device suits (not yet downloaded).
 pub fn model_for(languages: &[String]) -> (&'static SpeechModel, bool) {
+    let prefs = crate::prefs::load();
+    let best = multilingual_in_use(&prefs.speech_model, is_ready);
+    // `chosen` is set only when the person's multilingual model is the one actually downloaded and in use.
+    let chosen = best.filter(|m| m.id == prefs.speech_model);
     let english = model(ENGLISH).expect("listed");
-    let chosen = model(&crate::prefs::load().speech_model).filter(|m| m.multilingual && is_ready(m));
-    let best = chosen.or_else(|| MODELS.iter().find(|m| m.multilingual && is_ready(m)));
-    if lang::english_only(languages) {
-        // The large model is the most accurate English too, and quick on a graphics processor: optimising
-        // chooses it there.
-        let p = crate::prefs::load();
-        if let Some(m) = chosen.filter(|m| m.id == "turbo" && p.use_gpu.unwrap_or(true) && cfg!(windows) && crate::llm::device().gpu.is_some()) {
-            return (m, true);
-        }
-        return match (is_ready(english), best) {
-            (false, Some(m)) => (m, true),
-            _ => (english, is_ready(english)),
-        };
-    }
-    match best {
-        Some(m) => (m, true),
-        None => (suggested_multilingual(), false),
-    }
+    let (id, ready) = resolve_speech(
+        lang::english_only(languages),
+        is_ready(english),
+        best.map(|m| m.id),
+        || chosen.is_some_and(|m| m.id == "turbo" && prefs.use_gpu.unwrap_or(true) && cfg!(windows) && crate::llm::device().gpu.is_some()),
+        || suggested_multilingual().id,
+    );
+    (model(id).expect("listed"), ready)
 }
 
 /// Runs only when the person asks. Uses a temporary name so a failed download is never loaded, and checks
@@ -549,6 +577,27 @@ fn looped(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_explicit_multilingual_model_wins_when_it_is_downloaded() {
+        let both = |m: &SpeechModel| m.id == "small" || m.id == "turbo";
+        assert_eq!(multilingual_in_use("small", both).unwrap().id, "small");
+        assert_eq!(multilingual_in_use("", both).unwrap().id, "turbo");
+        assert_eq!(multilingual_in_use("turbo", |m: &SpeechModel| m.id == "small").unwrap().id, "small");
+        assert!(multilingual_in_use("small", |_: &SpeechModel| false).is_none());
+        // The English-only model is not a choice for other languages.
+        assert_eq!(multilingual_in_use("base.en", |m| m.id == "small").unwrap().id, "small");
+    }
+
+    #[test]
+    fn english_uses_its_own_model_and_other_languages_use_the_multilingual_one() {
+        assert_eq!(resolve_speech(true, true, Some("turbo"), || false, || "small"), ("base.en", true));
+        assert_eq!(resolve_speech(true, true, Some("turbo"), || true, || "small"), ("turbo", true));
+        assert_eq!(resolve_speech(true, false, Some("small"), || false, || "turbo"), ("small", true));
+        assert_eq!(resolve_speech(true, false, None, || false, || "small"), ("base.en", false));
+        assert_eq!(resolve_speech(false, true, Some("small"), || true, || "turbo"), ("small", true));
+        assert_eq!(resolve_speech(false, false, None, || false, || "small"), ("small", false));
+    }
 
     #[test]
     fn downloads_always_trust_the_built_in_roots() {

@@ -3450,7 +3450,9 @@ async function showSettings() {
     installUpdate().finally(() => { getButton.disabled = false; });
   });
   const about = [el("h2", {}, "About"), el("div", { class: "group" },
-    el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult), whatsNew, checkButton, getButton))];
+    el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult,
+      el("small", {}, "Checking for an update sends Superteem the app version, operating system, models in use, configured languages, and whether the check was automatic, requested, or the start of an install. Not recordings or notes.")),
+      whatsNew, checkButton, getButton))];
 
   // Optimise: offered with a callout while it would change something; the pages it leads to always.
   const callout = await optimiseCallout().catch(() => null);
@@ -3597,7 +3599,9 @@ const TERMS = [
   ["Your voice stays on this device",
     "Voice by Superteem turns speech into text on this device. Your recordings, transcripts, notes and voice print (a "
     + "numeric description of how your voice sounds, not a recording of it) are stored only here and are never sent "
-    + "to us or anyone else. The one download is the speech model."],
+    + "to us or anyone else. Checking for an update sends Superteem the app version, the operating system and its "
+    + "version, the models in use, the configured languages, and whether the check was automatic, requested, or the "
+    + "start of an install. That check does not include recordings, transcripts, notes or the voice print."],
   ["You're in control",
     "Delete voice prints, notes and recordings in the app at any time. Uninstalling removes the app; your files stay "
     + "in the Superteem Voice folder until you delete it."],
@@ -4843,7 +4847,7 @@ async function doCommand(id) {
       return refreshAgentControls();
     }
     say("Checking for a new version.");
-    const found = await checkForUpdate();
+    const found = await checkForUpdate(false, "manual");
     if (!found) {
       say("I couldn't check for updates. Check this device is online, then try again.");
     } else if (!found.newer) {
@@ -4910,9 +4914,9 @@ function lastUpdateCheck() {
   try { return Number(localStorage.getItem("update-checked")) || 0; } catch { return 0; }
 }
 
-async function checkForUpdate(asked = false) {
+async function checkForUpdate(asked = false, reason = asked ? "manual" : "auto") {
   try {
-    update = await invoke("check_update");
+    update = await invoke("check_update", { reason });
   } catch {
     return null;
   }

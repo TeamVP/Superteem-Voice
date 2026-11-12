@@ -143,11 +143,16 @@ pub fn installed() -> Vec<Installed> {
     out
 }
 
+/// The installed file to run: the one chosen, when it is still here, otherwise the first installed.
+pub fn pick<'a>(preferred: &str, installed: &'a [Installed]) -> Option<&'a Installed> {
+    installed.iter().find(|i| i.file == preferred).or(installed.first())
+}
+
 /// The model to run: the one chosen, if it's still here, else the first installed.
 pub fn chosen(preferred: &str) -> Option<PathBuf> {
     let all = installed();
-    let pick = all.iter().find(|i| i.file == preferred).or(all.first())?;
-    Some(dir().join(&pick.file))
+    let file = pick(preferred, &all)?.file.clone();
+    Some(dir().join(file))
 }
 
 /// Downloads a catalogued model, carrying on from a partial download, and checks its fingerprint before
@@ -646,6 +651,18 @@ data: [DONE]
         assert!(is_loopback("http://[::1]:8080/v1"));
         assert!(!is_loopback("https://api.example.com/v1"));
         assert!(!is_loopback("http://192.168.1.5:11434/v1"));
+    }
+
+    #[test]
+    fn an_explicit_file_wins_and_an_empty_choice_uses_the_first_installed() {
+        let installed = [
+            Installed { file: "first.gguf".into(), size: 1, catalogued: Some("first") },
+            Installed { file: "second.gguf".into(), size: 2, catalogued: None },
+        ];
+        assert_eq!(pick("", &installed).unwrap().file, "first.gguf");
+        assert_eq!(pick("missing.gguf", &installed).unwrap().file, "first.gguf");
+        assert_eq!(pick("second.gguf", &installed).unwrap().file, "second.gguf");
+        assert!(pick("", &[]).is_none());
     }
 
     #[test]

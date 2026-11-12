@@ -51,6 +51,8 @@ jobs:
             if [ "$actual" != "$size" ]; then echo "::error::$name is $actual bytes, expected $size"; exit 1; fi
           done
           # What the page shows: the version, when it came out, and the files beside it.
+          # This is a static file. The app adds a query when it asks for the file; GitHub Pages does not store
+          # that query, and this repository gets no access log, so the parameters are not collected here.
           jq '{tag_name, published_at, html_url, assets: [.assets[] | {name, size}]}' latest.json > _site/download/release.json
           ls -l _site/download
       - uses: actions/configure-pages@v5

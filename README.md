@@ -14,7 +14,7 @@
   <a href="#license">Open source</a>
 </p>
 
-Voice by Superteem turns speech into text on your PC, Mac or phone. You can dictate notes, record meetings and give voice commands. Nothing is uploaded: there's no account and no server, and the app doesn't track you.
+Voice by Superteem turns speech into text on your PC, Mac or phone. You can dictate notes, record meetings and give voice commands. Recordings, transcripts and notes stay on the device, and there's no account. Checking for an update sends Superteem the app version, the operating system and its version, the models in use, the configured languages, and whether the check was automatic, requested, or the start of an install.
 
 ## Features
 

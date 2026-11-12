@@ -1451,15 +1451,16 @@ fn just_updated() -> Option<update::JustUpdated> {
 
 /// Whether a newer version has been released.
 #[tauri::command]
-async fn check_update() -> Result<update::Update, String> {
-    blocking(update::check).await?
+async fn check_update(reason: Option<String>) -> Result<update::Update, String> {
+    let reason = reason.unwrap_or_else(|| "unknown".into());
+    blocking(move || update::check(&reason)).await?
 }
 
 /// Gets the newer version. On Windows the installer starts and the app closes so it can be replaced; on the
 /// Mac the disk image opens and the app closes, so the new copy can be dragged over it.
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
-    let update = blocking(update::check).await??;
+    let update = blocking(|| update::check("install")).await??;
     if !update.newer {
         return Err(format!("Version {} is the latest.", update.current));
     }
