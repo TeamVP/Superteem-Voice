@@ -309,7 +309,7 @@ function leave() {
   stopPlayback();
   clearInterval(pollTimer);
   flushNote();
-  document.body.classList.remove("note-chat-open");
+  document.body.classList.remove("note-chat-open", "note-chat");
 }
 
 // ---------- Theme: follows Windows by default; a pick is remembered on this device ----------
@@ -562,8 +562,14 @@ document.getElementById("back").addEventListener("click", () => {
   else backToList();
 });
 window.addEventListener("popstate", () => {
-  if (matchMedia("(max-width: 720px)").matches && !document.body.classList.contains("show-list")
-    && !document.body.classList.contains("setup")) backToList();
+  if (!matchMedia("(max-width: 720px)").matches || document.body.classList.contains("show-list")
+    || document.body.classList.contains("setup")) return;
+  // Back while dictating stays on the note and asks first, as leaving by the sidebar does.
+  if (dictation && view.kind === "note") {
+    history.pushState({ page: true }, "");
+    return askBeforeLeavingDictation(() => history.back());
+  }
+  backToList();
 });
 
 // ---------- Home: one button, two modes ----------
@@ -835,14 +841,14 @@ function renderNote(data, dictate) {
       el("span", { class: "top-actions" },
         // The selection when there is one, else the whole note.
         readAloudButton(() => { const sel = getSelection().toString().trim(); return `${HEADING}${title.value}\n${sel || ed.text()}`; }, "Read the note aloud", { lang: noteLanguage }),
-        chat?.toggle, exporter, archive, remove)),
+        exporter, archive, remove)),
     exporter.status, langNotice,
-    // With the chat open, the note scrolls beside it; closed, the page is laid out as it always was.
+    // On a computer the note scrolls beside the chat, which folds to a thin bar on the right.
     el("div", { class: "note-split" },
       el("div", { class: "note-col" },
         ed.toolbar,
         el("div", { class: "note" }, title, stackSlot, chip, editorHolder),
-        el("div", { class: "toolbar" }, el("span", { class: "grow" }), talk, live)),
+        el("div", { class: "toolbar note-foot" }, el("span", { class: "grow" }), talk, live)),
       chat?.panel));
   note.syncStack();
   chat?.sync();
@@ -1098,11 +1104,69 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "Space" && e.ctrlKey) {
     e.preventDefault();
     if (!e.repeat) dictation ? stopDictation() : startDictation();
-  } else if (e.key === "Escape" && dictation) {
+  } else if (e.key === "Escape" && dictation && !document.querySelector("dialog[open]")) {
     e.preventDefault();
     cancelDictation();
   }
 });
+
+/// Going somewhere else while dictating asks first, rather than dropping what's being said: keep
+/// dictating, save what was said and go, or discard what isn't written in yet and go. `go` is the move,
+/// made once the dictation is dealt with.
+let leavingDictation = false;
+function askBeforeLeavingDictation(go) {
+  if (document.querySelector("dialog.leave-dictation")) return;
+  // Already stopped and only writing in its last words: those are waited for, then the move is made.
+  if (dictation.busy || dictation.finished) return void whenDictationDone().then(go);
+  const stay = el("button", { class: "pill", type: "button" }, "Keep dictating");
+  const discard = el("button", { class: "pill", type: "button" }, "Discard");
+  const save = el("button", { class: "primary pill", type: "button" }, "Save and leave");
+  const dialog = el("dialog", { class: "sheet leave-dictation", "aria-label": "You're dictating" },
+    el("h2", {}, "You're dictating"),
+    el("p", { class: "hint" }, "Leaving this note stops the dictation. Save writes in what you've said so far; Discard drops what isn't written in yet."),
+    el("div", { class: "actions" }, stay, discard, save));
+  const leaveWith = async (button, end) => {
+    for (const b of [stay, discard, save]) b.disabled = true;
+    button.textContent = button === save ? "Saving…" : "Stopping…";
+    await end();
+    await whenDictationDone();
+    dialog.close();
+    go();
+  };
+  stay.addEventListener("click", () => dialog.close());
+  discard.addEventListener("click", () => leaveWith(discard, cancelDictation));
+  save.addEventListener("click", () => leaveWith(save, stopDictation));
+  // Esc keeps dictating, unless it's already stopping.
+  dialog.addEventListener("cancel", (e) => { if (stay.disabled) e.preventDefault(); });
+  dialog.addEventListener("close", () => { dialog.remove(); document.getElementById("note-body")?.focus(); });
+  document.body.append(dialog);
+  dialog.showModal();
+  save.focus();
+}
+
+/// Resolves once the dictation has ended and its last words are in (finishDictation gives up after half a minute).
+function whenDictationDone() {
+  return new Promise((resolve) => {
+    const check = () => (dictation ? setTimeout(check, 150) : resolve());
+    check();
+  });
+}
+
+// Clicks in the sidebar and on "All notes" that would leave the note are held while dictating.
+for (const area of [document.querySelector(".sidebar"), document.getElementById("back")]) {
+  area.addEventListener("click", (e) => {
+    if (!dictation || leavingDictation || view.kind !== "note") return;
+    const target = e.target.closest("button");
+    if (!target || target.id === "listen-chip" || target.closest("#update-bar")) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    askBeforeLeavingDictation(() => {
+      leavingDictation = true;
+      try { target.click(); } finally { leavingDictation = false; }
+    });
+  }, true);
+}
+
 
 // ---------- Meetings: setup, live and processing ----------
 
@@ -3348,23 +3412,40 @@ async function showSettings() {
   const page = el("div", { class: "page" }, el("h1", {}, "Settings"));
   // Each section is made here, then added in the order the page shows them.
 
-  // About: the version, and checking for a newer one.
+  // About: the version, and checking for a newer one. Once a newer one is known, the button gets it instead.
   const version = el("span", { class: "value" }, update ? `Version ${update.current}` : "");
   if (!update) invoke("app_version").then((v) => (version.textContent = `Version ${v}`)).catch(() => {});
-  const checkButton = el("button", { class: "pill" }, "Check for updates");
   const checkResult = el("small", { role: "status" });
+  const checkButton = el("button", { class: "pill" }, "Check for updates");
+  const getButton = el("button", { class: "primary pill", hidden: true }, platform === "android" ? "Download" : "Update now");
+  const whatsNew = el("button", { class: "link", hidden: true, onclick: () => invoke("open_link", { url: update.notes }).catch(() => {}) }, "What's new");
+  const showNewer = () => {
+    const newer = !!update?.newer;
+    checkButton.hidden = newer;
+    getButton.hidden = whatsNew.hidden = !newer;
+    if (newer) checkResult.textContent = `Version ${update.latest} is available. You have ${update.current}.`;
+  };
+  showNewer();
   checkButton.addEventListener("click", async () => {
     checkButton.disabled = true;
     checkResult.textContent = "Checking…";
     const found = await checkForUpdate(true);
     checkButton.disabled = false;
     checkResult.textContent = !found ? "Couldn't check. Check this device is online."
-      : found.newer ? `Version ${found.latest} is available. Use the button in the sidebar to get it.`
-      : `This is the latest version.`;
+      : found.newer ? "" : `This is the latest version.`;
+    showNewer();
     if (found?.newer) speak(`Version ${found.latest} is available.`);
   });
+  // The download's progress shows in the sidebar's update bar, so a version put off with "Later" shows there again.
+  getButton.addEventListener("click", () => {
+    if (recording || dictation) return void (checkResult.textContent = "Finish the recording first, then update.");
+    remember("update-later", "");
+    getButton.disabled = true;
+    checkResult.textContent = platform === "android" ? "Opening the download in your browser…" : "Downloading… The progress shows in the sidebar.";
+    installUpdate().finally(() => { getButton.disabled = false; });
+  });
   const about = [el("h2", {}, "About"), el("div", { class: "group" },
-    el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult), checkButton))];
+    el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult), whatsNew, checkButton, getButton))];
 
   // Optimise: offered with a callout while it would change something; the pages it leads to always.
   const callout = await optimiseCallout().catch(() => null);

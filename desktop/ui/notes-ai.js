@@ -34,19 +34,64 @@ listen("analysed", (e) => {
   if (e.payload.template === "chat" && e.payload.kind === "note") noteChatAnswered(e.payload.id);
 });
 
-/// The chat beside a note: a button for the top bar and the panel. `status` is the note's "Saved" line.
+/// The chat's width when open, dragged by its left edge and remembered on this device.
+const CHAT_WIDTH = { min: 280, max: 720, default: 360 };
+function setChatWidth(px, remember = true) {
+  const width = Math.round(Math.min(CHAT_WIDTH.max, Math.max(CHAT_WIDTH.min, px)));
+  document.body.style.setProperty("--chat-width", `${width}px`);
+  if (remember) try { localStorage.setItem("chatWidth", String(width)); } catch {}
+}
+try {
+  const saved = Number(localStorage.getItem("chatWidth"));
+  if (saved) setChatWidth(saved, false);
+} catch {}
+
+/// The chat beside a note: a thin bar down the right side that opens into the panel. The bar shows when
+/// there's an answer not seen yet, or one being written. `status` is the note's "Saved" line.
 function noteChat(status) {
-  const toggle = el("button", { class: "pill chat-toggle", type: "button", title: "Ask about this note, or have it rewritten", "aria-pressed": "false" },
-    svg("chat", 16), el("span", { class: "label" }, "Chat"));
+  const dot = el("span", { class: "chat-dot", hidden: true });
+  const opener = el("button", { class: "icon-only chat-opener", type: "button", title: "Open the chat: ask about this note, or have it rewritten", "aria-label": "Open the chat" },
+    svg("chat", 18), dot);
+  const rail = el("div", { class: "chat-rail" }, opener);
+  // The whole bar opens it, not just its button.
+  rail.addEventListener("click", () => setOpen(true));
   const log = el("div", { class: "chat-log", role: "log", "aria-live": "polite" });
   const input = el("textarea", { class: "chat-input", rows: "1", placeholder: "Ask about this note, or ask for a rewrite", "aria-label": "Message" });
   const send = el("button", { class: "primary icon-only chat-send", type: "submit", title: "Send (Enter)", "aria-label": "Send" }, svg("send", 16));
   const form = el("form", { class: "chat-form" }, input, send);
   const clear = el("button", { class: "link", type: "button", hidden: true }, "Clear");
-  const close = el("button", { class: "icon-only", type: "button", title: "Close the chat", "aria-label": "Close the chat" }, svg("close", 16));
-  const panel = el("aside", { class: "note-chat", "aria-label": "Chat about this note", hidden: true },
+  const close = el("button", { class: "icon-only", type: "button", title: "Collapse the chat (Esc)", "aria-label": "Collapse the chat" }, svg("chevron", 16));
+  const edge = el("div", { class: "chat-splitter", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the chat", tabindex: "0",
+    title: "Drag to resize. Double-click to reset." });
+  const panel = el("aside", { class: "note-chat", "aria-label": "Chat about this note", hidden: true }, edge,
     el("div", { class: "chat-head" }, el("strong", {}, "Chat"), el("span", { class: "hint" }, "On this device"), el("span", { class: "grow" }), clear, close),
     log, form);
+  const side = el("div", { class: "chat-side" }, rail, panel);
+
+  edge.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    edge.setPointerCapture(e.pointerId);
+    const right = panel.getBoundingClientRect().right;
+    edge.classList.add("dragging");
+    document.body.classList.add("resizing");
+    const move = (m) => setChatWidth(right - m.clientX, false);
+    const up = (u) => {
+      edge.removeEventListener("pointermove", move);
+      edge.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      setChatWidth(right - u.clientX);
+    };
+    edge.addEventListener("pointermove", move);
+    edge.addEventListener("pointerup", up, { once: true });
+    edge.addEventListener("pointercancel", up, { once: true });
+  });
+  edge.addEventListener("dblclick", () => setChatWidth(CHAT_WIDTH.default));
+  edge.addEventListener("keydown", (e) => {
+    const step = e.key === "ArrowLeft" ? 16 : e.key === "ArrowRight" ? -16 : 0;
+    if (!step) return;
+    e.preventDefault();
+    setChatWidth(panel.getBoundingClientRect().width + step);
+  });
   const mine = note;
   const chat = { messages: [], ready: true, running: false, loaded: false, notices: new Map() };
   mine.chat = chat;
@@ -54,14 +99,25 @@ function noteChat(status) {
   const isOpen = () => !panel.hidden;
   const setOpen = (open, remember = true) => {
     panel.hidden = !open;
-    toggle.setAttribute("aria-pressed", String(open));
-    toggle.classList.toggle("on", open);
+    rail.hidden = open;
     document.body.classList.toggle("note-chat-open", open);
-    if (remember) localStorage.setItem("note-chat", open ? "1" : "");
+    if (remember) try { localStorage.setItem("note-chat", open ? "1" : ""); } catch {}
     if (open) { atEnd = true; load(); if (remember) input.focus(); }
+    else { markRail(); if (remember) opener.focus(); }
   };
-  toggle.addEventListener("click", () => setOpen(!isOpen()));
-  close.addEventListener("click", () => setOpen(false));
+  close.addEventListener("click", (e) => { e.stopPropagation(); setOpen(false); });
+
+  /// How many messages were on screen when the chat was last open, so the bar knows what's new.
+  const seenKey = () => `chat-seen:${mine.id}`;
+  const seen = () => { try { return Number(localStorage.getItem(seenKey())) || 0; } catch { return 0; } };
+  const markSeen = () => { if (mine.id) try { localStorage.setItem(seenKey(), String(chat.messages.length)); } catch {} };
+  const markRail = () => {
+    const unread = !!mine.id && chat.messages.slice(seen()).some((m) => m.role !== "user");
+    dot.hidden = !unread && !chat.running;
+    dot.classList.toggle("busy", !!chat.running && !unread);
+    opener.setAttribute("aria-label", unread ? "Open the chat: there's a new answer" : chat.running ? "Open the chat: an answer is being written" : "Open the chat");
+    rail.classList.toggle("unread", unread);
+  };
 
   const load = async () => {
     if (note !== mine) return;
@@ -178,7 +234,9 @@ function noteChat(status) {
   log.addEventListener("scroll", () => { atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 32; });
 
   const draw = () => {
-    if (note !== mine || !isOpen()) return;
+    if (note !== mine) return;
+    if (!isOpen()) return markRail();
+    if (chat.loaded) markSeen();
     const rows = [];
     if (!chat.ready) {
       rows.push(el("div", { class: "chat-empty" },
@@ -218,9 +276,16 @@ function noteChat(status) {
   chat.draw = draw;
   noteChatNow = { draw, id: () => mine.id };
 
-  /// Opens the panel if it was left open; called once the page is in place.
-  const sync = () => setOpen(localStorage.getItem("note-chat") === "1", false);
-  return { toggle, panel, sync };
+  /// Opens the panel if it was left open, else reads the chat so the bar can show a new answer; called once
+  /// the page is in place.
+  const sync = () => {
+    document.body.classList.add("note-chat");
+    let open = false;
+    try { open = localStorage.getItem("note-chat") === "1"; } catch {}
+    setOpen(open, false);
+    if (!open) load();
+  };
+  return { panel: side, sync };
 }
 
 /// An answer arrived for a note's chat. When it rewrote the note that's open, the new text goes in the

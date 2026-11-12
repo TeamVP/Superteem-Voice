@@ -264,6 +264,11 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .dictation-chip[hidden] { display: none; }
 .toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 24px 16px; border-top: 1px solid var(--line); background: var(--panel); position: sticky; bottom: 0; flex-wrap: wrap; }
 .toolbar .grow { flex: 1; }
+/* On a computer, Dictate and the dictation bar sit in the middle of the note's pane. */
+@media (min-width: 721px) {
+  .toolbar.note-foot { justify-content: center; }
+  .toolbar.note-foot .grow { display: none; }
+}
 .talk {
   display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 20px 0 16px; border-radius: 999px;
   border: none; background: var(--key); color: #fff; font-weight: 600; touch-action: none; user-select: none;
@@ -1055,22 +1060,35 @@ dialog.sheet .actions { display: flex; justify-content: flex-end; gap: 8px; marg
   font-size: 14px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); pointer-events: none; }
 
 /* ---------- A note's chat and versions ---------- */
-/* Closed, the note page is laid out as it always was; open, the note scrolls beside the chat. */
-.analyses-slot, .note-split, .note-col { display: contents; }
-body.note-chat-open #main-wrap { overflow: hidden; }
-body.note-chat-open .note-split { display: flex; flex: 1; min-height: 0; position: relative; }
-body.note-chat-open .note-col { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow-y: auto; }
-.chat-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; }
-.chat-toggle.on { background: var(--highlight); border-color: var(--key-light); color: var(--accent-text); }
-.note-chat { width: 360px; flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--panel); }
+/* Without a chat (on a phone) the note page is laid out as it always was; with one, the note scrolls beside it. */
+.analyses-slot, .note-split, .note-col, .chat-side { display: contents; }
+body.note-chat #main-wrap { overflow: hidden; }
+body.note-chat .note-split { display: flex; flex: 1; min-height: 0; position: relative; }
+body.note-chat .note-col { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow-y: auto; }
+/* Folded, the chat is a thin bar down the right; its button shows a dot for an answer not seen yet. */
+.chat-rail { flex: none; width: 48px; display: flex; flex-direction: column; align-items: center; padding-top: 10px; border-left: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+.chat-rail:hover { background: var(--raised); }
+.chat-rail[hidden] { display: none; }
+.chat-opener { position: relative; width: 36px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; color: var(--soft); }
+.chat-rail.unread .chat-opener { color: var(--text); }
+.chat-dot { position: absolute; top: 5px; right: 5px; width: 9px; height: 9px; border-radius: 50%; background: var(--key); box-shadow: 0 0 0 2px var(--panel); }
+.chat-dot[hidden] { display: none; }
+.chat-dot.busy { background: var(--muted); animation: pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .chat-dot.busy { animation: none; } }
+.note-chat { width: var(--chat-width, 360px); max-width: calc(100% - 320px); flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--panel); position: relative; }
 .note-chat[hidden] { display: none; }
+/* The open chat's left edge resizes it, as the sidebar's right edge does. */
+.chat-splitter { position: absolute; top: 0; bottom: 0; left: -4px; width: 7px; z-index: 3; cursor: col-resize; touch-action: none; }
+.chat-splitter::after { content: ""; position: absolute; inset: 0 2px; background: transparent; transition: background 0.15s; }
+.chat-splitter:hover::after, .chat-splitter:focus-visible::after, .chat-splitter.dragging::after { background: var(--key-light); }
+.chat-splitter:focus-visible { outline: none; }
 .chat-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--line); }
 .chat-head .grow { flex: 1; }
 .chat-head .link { font-size: 13px; }
 .chat-head .link[hidden] { display: none; }
 .chat-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 6px; }
 .chat-msg { max-width: 92%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.chat-msg.mine { align-self: flex-end; background: var(--key); color: #fff; border-bottom-right-radius: 4px; }
+.chat-msg.mine { align-self: flex-end; background: var(--key-2); color: #fff; border-bottom-right-radius: 4px; }
 .chat-msg.theirs { align-self: flex-start; background: var(--raised); border-bottom-left-radius: 4px; }
 .chat-msg.failed { color: var(--muted); font-size: 13px; background: none; border: 1px dashed var(--line); }
 .chat-msg.pending { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
@@ -1079,8 +1097,7 @@ body.note-chat-open .note-col { display: flex; flex-direction: column; flex: 1; 
 .chat-msg.writing .chat-text > :last-child::after { content: ""; display: inline-block; width: 0.5em; height: 1em; margin-left: 2px; vertical-align: -0.15em; background: var(--key); opacity: 0.6; animation: chat-caret 1s steps(2) infinite; }
 @keyframes chat-caret { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .chat-msg.writing .chat-text > :last-child::after { animation: none; } }
-.chat-msg.rewrote { border: 1px solid var(--key-light); background: var(--highlight); }
-.chat-made { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 650; color: var(--accent-text); margin-bottom: 4px; }
+.chat-made { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 650; color: var(--soft); margin-bottom: 4px; }
 .chat-actions { display: flex; gap: 14px; margin-top: 4px; }
 .chat-actions:empty { display: none; }
 .chat-actions .link { font-size: 12px; padding: 0; }
@@ -1107,7 +1124,7 @@ body.note-chat-open .note-col { display: flex; flex-direction: column; flex: 1; 
 .chat-send { width: 38px; height: 38px; border-radius: 50%; flex: none; }
 /* In a narrow window the chat lies over the note rather than squeezing it. */
 @media (max-width: 1020px) {
-  body.note-chat-open .note-chat { position: absolute; top: 0; right: 0; bottom: 0; width: min(360px, 100%); z-index: 15; box-shadow: -8px 0 28px rgba(0, 0, 0, 0.2); }
+  body.note-chat-open .note-chat { position: absolute; top: 0; right: 0; bottom: 0; width: min(var(--chat-width, 360px), 100%); max-width: none; z-index: 15; box-shadow: -8px 0 28px rgba(0, 0, 0, 0.2); }
 }
 
 dialog.versions { width: min(980px, calc(100% - 32px)); max-width: none; height: min(680px, calc(100% - 48px)); max-height: none; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); overflow: hidden; }
