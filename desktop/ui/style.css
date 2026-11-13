@@ -236,6 +236,42 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .big-mic:hover:not(:disabled) { background: var(--key-1); }
 .big-mic.held { transform: scale(0.96); background: var(--key-1); }
 .hint { color: var(--muted); font-size: 13px; }
+/* Phone: the list's one floating button opens Home, which offers four things to make. */
+.new-fab { display: none; }
+@media (max-width: 720px) {
+  .quick { display: none; }
+  .new-fab {
+    display: flex; align-items: center; justify-content: center; position: fixed; z-index: 5;
+    right: calc(18px + env(safe-area-inset-right, 0px)); top: 75%; transform: translateY(-50%);
+    width: 60px; height: 60px; padding: 0; border-radius: 30px; border: none; background: var(--key); color: #fff;
+    box-shadow: 0 8px 24px rgb(111 82 173 / 0.4), 0 2px 6px rgb(0 0 0 / 0.2);
+  }
+  .new-fab:hover:not(:disabled), .new-fab:active { background: var(--key-1); }
+  .new-fab:active { transform: translateY(-50%) scale(0.94); }
+  /* The last rows of the list can be scrolled clear of the button. */
+  .items > :last-child { margin-bottom: 96px; }
+  .phone-home { justify-content: flex-start; padding: 24px 16px 40px; gap: 16px; }
+  .phone-home h1 { font-size: 24px; margin: 8px 0 4px; }
+}
+.home-brand { cursor: default; margin: 12px 0 24px; gap: 10px; }
+.brand.home-brand .product { font-size: 32px; }
+.brand.home-brand .by { font-size: 25px; }
+.brand.home-brand img { height: 28px; }
+.new-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; max-width: 420px; }
+.new-tile {
+  position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 10px; text-align: left;
+  min-height: 112px; padding: 16px; border-radius: 18px; background: var(--panel);
+}
+.new-tile:active:not(.soon) { transform: scale(0.97); }
+.new-tile .tile-head { display: flex; align-items: center; gap: 10px; color: var(--accent-text); }
+.new-tile .tile-name { font-size: 23px; line-height: 1.2; font-weight: 600; color: var(--text); }
+.new-tile .tile-sub { font-size: 13px; line-height: 1.35; color: var(--muted); }
+.new-tile.soon { background: transparent; border-style: dashed; cursor: default; }
+.new-tile.soon:hover { background: transparent; }
+.new-tile.soon .tile-head, .new-tile.soon .tile-name { color: var(--muted); }
+.new-tile.soon .tile-name, .new-tile.soon .tile-sub { opacity: 0.75; }
+/* The badge sits on the tile's top edge, so a narrow phone has the whole line for the name. */
+.new-tile .tile-badge { position: absolute; top: -9px; right: 14px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 8px; border-radius: 999px; background: var(--raised); border: 1px solid var(--line); color: var(--muted); }
 
 /* Note: a text editor that listens. */
 .note { width: 100%; max-width: 780px; margin: 0 auto; padding: 36px 40px 40px; flex: 1; display: flex; flex-direction: column; gap: 8px; }

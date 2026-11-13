@@ -36,6 +36,8 @@ let homeMode = "note";
 const icon = {
   pen: '<path d="M4 20h4L19 9l-4-4L4 16z"></path>',
   wave: '<path d="M4 9v6M8 6v12M12 10v4M16 7v10M20 10v4"></path>',
+  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2z"></path>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"></rect><path d="M3.5 10h17M8 3v4M16 3v4"></path>',
   mic: '<rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0014 0M12 18v3"></path>',
   bookmark: '<path d="M6 3h12v18l-6-4-6 4z"></path>',
   // A clipboard with a tick: something to be done, written down.
@@ -523,6 +525,10 @@ document.getElementById("open-shortcuts").addEventListener("click", () => showSh
 const goHome = () => showHome();
 document.querySelector(".brand").addEventListener("click", goHome);
 document.getElementById("open-home").addEventListener("click", goHome);
+// On a phone the list has one floating button, which opens Home to choose what to make.
+document.getElementById("new-fab").addEventListener("click", goHome);
+const phoneWidth = matchMedia("(max-width: 720px)");
+phoneWidth.addEventListener("change", () => { if (view.kind === "home" && !document.body.classList.contains("show-list")) showHome(); });
 // Each example on the Listening page runs as if it had been said.
 document.getElementById("agent-say").addEventListener("click", (e) => {
   const link = e.target.closest("[data-say]");
@@ -594,6 +600,7 @@ function showHome() {
   view = { kind: "home" };
   showPage();
   refreshItems();
+  if (phoneWidth.matches) return showPhoneHome();
   const modes = el("div", { class: "segmented", role: "group", "aria-label": "What to capture" });
   for (const [mode, label] of [["note", "Note"], ["meeting", "Meeting"]]) {
     modes.append(el("button", { class: homeMode === mode ? "on" : "", "aria-pressed": String(homeMode === mode),
@@ -607,6 +614,38 @@ function showHome() {
     el("div", { class: "hint" }, homeMode === "note"
       ? (platform === "android" ? "Tap to write · or say “Hey Superteem, take a note”" : prefs.dictate_manually ? "Tap to start a note · type or press Dictate" : "Tap to start a note by voice · type as you go")
       : "Tap to set up · or say “Hey Superteem, start meeting”")));
+  homeExtras();
+}
+
+/// Home on a phone: four things to make, two of them not built yet.
+function showPhoneHome() {
+  const kinds = [
+    { name: "Note", sub: "Write or dictate a thought", icon: "pen", open: () => openNote(null) },
+    { name: "Meeting", sub: "Record and transcribe", icon: "wave", open: () => showMeeting() },
+    { name: "Call", sub: "Capture a phone call", icon: "phone" },
+    { name: "Event", sub: "Notes for a talk or session", icon: "calendar" },
+  ];
+  const tiles = kinds.map((k) => el("button", {
+    class: `new-tile${k.open ? "" : " soon"}`, "aria-disabled": k.open ? null : "true",
+    "aria-label": k.open ? `New ${k.name.toLowerCase()}` : `${k.name}, coming soon`,
+    onclick: k.open ?? (() => micToast(`${k.name}s are coming soon`)),
+  }, el("span", { class: "tile-head" }, svg(k.icon, 31), el("span", { class: "tile-name" }, k.name),
+      k.open ? null : el("span", { class: "tile-badge" }, "Soon")),
+    el("span", { class: "tile-sub" }, k.sub)));
+  main.replaceChildren(el("div", { class: "home phone-home" },
+    // The wordmark, as in the sidebar.
+    el("div", { class: "brand home-brand", role: "img", "aria-label": "Voice by Superteem" },
+      el("span", { class: "product" }, "Voice"), el("span", { class: "by" }, "by"),
+      el("img", { class: "logo-light-mode", src: "logo-light-mode.png", alt: "" }),
+      el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" })),
+    el("h1", {}, "Start something new"),
+    el("div", { class: "new-grid" }, tiles),
+    el("div", { class: "hint" }, platform === "android" ? "Or say “Hey Superteem, take a note”" : "Pick one to start")));
+  homeExtras();
+}
+
+/// Under Home's hint: news of an update, and a suggestion to optimise.
+function homeExtras() {
   // For a day after an update, which version this is and what changed.
   invoke("just_updated").then((u) => {
     if (!u || view.kind !== "home") return;
