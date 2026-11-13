@@ -253,7 +253,7 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
   /* While the list is filtered by a search, the bottom bar with Settings is hidden. */
   body.searching .sidebar-foot { display: none; }
   .phone-home { justify-content: flex-start; padding: 24px 16px 40px; gap: 16px; }
-  .phone-home h1 { font-size: 24px; margin: 8px 0 4px; }
+  .phone-home h1 { font-size: 24px; margin: 28px 0 4px; }
 }
 .home-brand { cursor: default; margin: 12px 0 24px; gap: 10px; }
 .brand.home-brand .product { font-size: 32px; }
@@ -462,6 +462,7 @@ kbd { font: 600 11px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; paddi
 .row .label small { display: block; color: var(--muted); font-size: 12px; }
 .row .value { color: var(--muted); font-size: 14px; }
 .check-stack { display: flex; flex-direction: column; align-items: center; flex: none; }
+.check-stack[hidden] { display: none; }
 .details-wrap { position: relative; margin-top: 2px; }
 .details-wrap[hidden] { display: none; }
 button.link.details { font-size: 12px; color: var(--muted); padding: 2px 4px; text-align: center; text-decoration: underline; }
@@ -1022,6 +1023,9 @@ body[data-platform="ios"] { box-sizing: border-box; padding: env(safe-area-inset
 .language-chip:hover { border-color: var(--muted); }
 /* The status, language and time on one line; the buttons beside them, or together on the next line. */
 .topbar .top-actions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+/* The ⋯ button keeps a little gap from the speaker button beside it. */
+.topbar .top-actions .top-more { margin-left: 8px; }
+.analysis-head .analysis-menu { margin-left: 8px; }
 .topbar .status { white-space: nowrap; }
 @media (max-width: 640px) {
   .topbar { gap: 6px 8px; padding: 8px 12px; }

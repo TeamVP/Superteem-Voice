@@ -194,15 +194,6 @@ function showSaved(status) {
   }, 30000);
 }
 
-/// A length in words: "45 seconds", "1 minute", "1 hour 5 minutes".
-function lengthText(seconds) {
-  if (seconds < 30) return `${Math.max(1, Math.round(seconds))} second${Math.round(seconds) === 1 ? "" : "s"}`;
-  const minutes = Math.round(seconds / 60);
-  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  if (minutes < 60) return plural(minutes, "minute");
-  return `${plural(Math.floor(minutes / 60), "hour")}${minutes % 60 ? ` ${plural(minutes % 60, "minute")}` : ""}`;
-}
-
 /// An Export button with a menu of `choices` ([format, label, detail]). `run(format)` writes the file and
 /// returns its path, which is then offered to show in File Explorer.
 function exportMenu(choices, run) {
@@ -642,7 +633,7 @@ function showPhoneHome() {
       el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" })),
     el("h1", {}, "Start something new"),
     el("div", { class: "new-grid" }, tiles),
-    el("div", { class: "hint" }, platform === "android" ? "Or say “Hey Superteem, take a note”" : "Pick one to start")));
+    el("div", { class: "hint" }, "Pick one to start")));
   homeExtras();
 }
 
@@ -2038,8 +2029,7 @@ function renderSession(session, processingError, suggestion) {
   const topBar = el("div", { class: "topbar meta meeting-top" },
     picker, languageChoice,
     // On a phone this drops to its own line under the status and the buttons.
-    el("span", { class: "top-info" }, el("span", { title: dateText(meta.created) }, agoText(meta.created)),
-      meta.duration_s ? el("span", { title: clock(meta.duration_s) }, el("span", { class: "wide-only" }, "Length: "), lengthText(meta.duration_s)) : null),
+    el("span", { class: "top-info" }, el("span", { title: dateText(meta.created) }, agoText(meta.created))),
     el("span", { class: "top-actions" },
     scriptLines.length ? readAloudButton(() => scriptLines.filter((l) => hasWords(l.text)).map((l) => (prefs.read_speakers ?? true ? `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? "Someone"}: ${l.text}` : l.text)).join("\n"), "Read the transcript aloud", { lang: meetingLanguage }) : null,
     session.segments.length ? exporter : null,
@@ -3581,7 +3571,9 @@ async function showSettings() {
   const checkResult = el("small", { role: "status" });
   const checkButton = el("button", { class: "pill" }, "Check for updates");
   const getButton = el("button", { class: "primary pill", hidden: true }, platform === "android" ? "Download" : "Update now");
-  const whatsNew = el("button", { class: "link", hidden: true, onclick: () => invoke("open_link", { url: update.notes }).catch(() => {}) }, "What's new");
+  // What's new sits centred under the download button, as Details does under the check button.
+  const whatsNew = el("button", { class: "link details", type: "button", hidden: true, onclick: () => invoke("open_link", { url: update.notes }).catch(() => {}) }, "What's new");
+  const updateStack = el("div", { class: "check-stack" }, getButton, whatsNew);
   // Details sits centred under the check button and opens a dialog saying what a check sends. It hides with the button.
   const details = el("button", { class: "link details", type: "button", "aria-haspopup": "dialog" }, "Details");
   details.addEventListener("click", () => showCheckDetails(details));
@@ -3591,6 +3583,7 @@ async function showSettings() {
     const newer = !!update?.newer;
     checkButton.hidden = newer;
     detailsWrap.hidden = newer;
+    updateStack.hidden = !newer;
     getButton.hidden = whatsNew.hidden = !newer;
     if (newer) checkResult.textContent = `Version ${update.latest} is available. You have ${update.current}.`;
   };
@@ -3615,7 +3608,7 @@ async function showSettings() {
   });
   const about = [el("h2", {}, "About"), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult),
-      whatsNew, checkStack, getButton))];
+      checkStack, updateStack))];
 
   // Optimise: offered with a callout while it would change something; the pages it leads to always.
   const callout = await optimiseCallout().catch(() => null);
