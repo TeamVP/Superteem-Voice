@@ -1512,17 +1512,24 @@ function soundSources(update) {
   const rows = new Map();
   const list = el("div", { class: "mic-list" });
   const empty = el("div", { class: "empty" }, "Looking for apps playing sound…");
-  const others = el("details", { class: "hidden-mics" }, el("summary", {}, "Everything on an output device"));
+  const summary = el("summary", {}, "Everything on an output device");
+  const others = el("details", { class: "hidden-mics" }, summary);
+  // Outputs ticked are always in sight, so nothing is recorded that the page doesn't show.
+  const showTicked = () => {
+    const n = [...ticked].filter((t) => t.startsWith("Everything playing on ")).length;
+    summary.textContent = n ? `Everything on an output device (${n} ticked)` : "Everything on an output device";
+    if (n) others.open = true;
+  };
   const othersList = el("div", { class: "mic-list" });
   others.append(othersList);
   const section = el("div", {},
     el("div", { class: "section-head" }, el("h2", {}, "Sound from other apps")),
-    el("div", { class: "legend" }, "Record what other people say in a call: tick Teams, Zoom or your browser and their sound is recorded as its own track, beside your microphone. Apps appear here as soon as they play sound. Use a headset, or the call is also picked up by your microphone. Let people know they're being recorded."),
+    el("div", { class: "legend" }, "Record what other people say in a call: tick Teams, Zoom or your browser and their sound is recorded as its own track, beside your microphone. Apps appear here as soon as they play sound. Tick the app rather than your headset as well, or the call is recorded twice. Use a headset, or the call is also picked up by your microphone. Let people know they're being recorded."),
     list, empty, others);
   const row = (s) => {
     const box = el("input", { type: "checkbox", "aria-label": s.label });
     box.checked = ticked.has(s.name);
-    box.addEventListener("change", () => { box.checked ? ticked.add(s.name) : ticked.delete(s.name); update(); });
+    box.addEventListener("change", () => { box.checked ? ticked.add(s.name) : ticked.delete(s.name); showTicked(); update(); });
     const meter = el("div", { style: "width:0%" });
     const state = el("span", { class: "mic-state" });
     const r = { box, meter, state, el: el("label", { class: "mic-row" }, box, el("span", { class: "mic-name" }, s.label, el("span", { class: "meter" }, meter)), state) };
@@ -1548,6 +1555,7 @@ function soundSources(update) {
     for (const [name, r] of rows) {
       if (!seen.has(name)) { r.el.className = "mic-row absent"; r.state.textContent = r.box.checked ? "Recorded once it plays" : "Not playing"; }
     }
+    showTicked();
     empty.hidden = list.children.length > 0;
     if (empty.textContent.startsWith("Looking")) empty.textContent = "No apps are playing sound. Start the call and it appears here.";
   };

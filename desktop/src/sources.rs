@@ -552,7 +552,7 @@ mod win {
                     match open_device(&device) {
                         Ok(f) => {
                             log(&format!("{program}: plays at {level:.2} but per-app capture hears nothing; recording {device}"));
-                            event(format!("Windows gave silence for {}'s sound, so recording everything on {device} instead", friendly(program)));
+                            event(format!("Windows gave only silence from {}, so recording everything on {device} instead", friendly(program)));
                             fallback = Some(f);
                         }
                         Err(e) => {

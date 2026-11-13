@@ -303,7 +303,9 @@ fn keep_track_records(dir: &std::path::Path, status: &recorder::Status) {
             "microphone"
         };
         let mut notes = s.notes.clone();
-        if s.frames > 0 && s.peak == 0.0 {
+        if s.frames == 0 {
+            notes.push("Nothing played, so there is no track".into());
+        } else if s.peak == 0.0 {
             notes.push("Silent: nothing but silence was recorded".into());
         }
         meta.tracks.insert(
