@@ -332,6 +332,41 @@ function searchPlugin(jump) {
   });
 }
 
+// ---------- The text as one string, for bookmarks and reading aloud
+
+/// The note's text, a line per paragraph, with where each run of it is in the document. A line break or
+/// inline picture counts as one character.
+function textIndex(doc) {
+  let text = "";
+  const segs = [];
+  let blocks = 0;
+  doc.descendants((node, pos) => {
+    if (node.isTextblock) { if (blocks++) text += "\n"; return true; }
+    if (node.isText) { segs.push({ at: text.length, pos, len: node.text.length }); text += node.text; return false; }
+    if (node.isInline && node.isLeaf) { segs.push({ at: text.length, pos, len: 1 }); text += node.type.name === "hardBreak" ? "\n" : LEAF; }
+    return true;
+  });
+  return { text, segs };
+}
+
+/// The document position of a place in the text.
+function posOfOffset({ segs }, at) {
+  if (!segs.length) return 1;
+  let lo = 0, hi = segs.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (segs[mid].at <= at) lo = mid; else hi = mid - 1; }
+  const s = segs[lo];
+  if (at < s.at) return s.pos;
+  return s.pos + Math.min(s.len, at - s.at);
+}
+
+/// The place in the text of a document position: in a run of text, or the start of the next one.
+function offsetOfPos({ segs, text }, pos) {
+  let lo = 0, hi = segs.length - 1, found = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (segs[mid].pos <= pos) { found = mid; lo = mid + 1; } else hi = mid - 1; }
+  if (found >= 0 && pos <= segs[found].pos + segs[found].len) return segs[found].at + (pos - segs[found].pos);
+  return found + 1 < segs.length ? segs[found + 1].at : text.length;
+}
+
 // ---------- The editor
 
 /// What a note can hold, and Markdown in and out. `files(file)` gives the address a kept file is shown from.
@@ -670,13 +705,80 @@ export function create({ element, host, placeholder = "" }) {
   /// Puts a note's text in the editor. Undo starts afresh: it never goes back to an earlier note, or
   /// to the empty editor the note was opened in.
   const setFrom = ({ doc, markdown, plain }) => {
-    if (doc) editor.commands.setContent(doc, { emitUpdate: false });
-    else if (markdown != null) editor.commands.setContent(markdown, { contentType: "markdown", emitUpdate: false });
-    else editor.commands.setContent(plainToDoc(plain), { emitUpdate: false });
+    replacing = true;
+    try {
+      if (doc) editor.commands.setContent(doc, { emitUpdate: false });
+      else if (markdown != null) editor.commands.setContent(markdown, { contentType: "markdown", emitUpdate: false });
+      else editor.commands.setContent(plainToDoc(plain), { emitUpdate: false });
+    } finally {
+      replacing = false;
+    }
     const { state } = editor;
     editor.view.updateState(EditorState.create({ doc: state.doc, selection: state.selection, plugins: state.plugins }));
     drawState();
     adoptWebImages();
+    index = textIndex(editor.state.doc);
+    for (const f of watch.reset) f();
+  };
+
+  // ----- The text as a surface for bookmarks (see ui/bookmarks.js)
+
+  let index = textIndex(editor.state.doc);
+  let replacing = false;
+  const watch = { change: [], reset: [], layout: [] };
+  editor.on("transaction", ({ transaction: tr }) => {
+    if (tr.docChanged) {
+      const old = index;
+      index = textIndex(tr.doc);
+      if (!replacing) {
+        const now = index;
+        const map = (at, assoc = 1) => offsetOfPos(now, tr.mapping.map(posOfOffset(old, at), assoc));
+        for (const f of watch.change) f(map);
+      }
+    }
+    for (const f of watch.layout) f();
+  });
+  const clampPos = (pos) => Math.max(0, Math.min(pos, editor.state.doc.content.size));
+  const surface = {
+    root: editor.view.dom,
+    readOnly: false,
+    text: () => index.text,
+    range(from, to) {
+      const view = editor.view;
+      const a = view.domAtPos(clampPos(posOfOffset(index, from)));
+      const b = view.domAtPos(clampPos(posOfOffset(index, Math.max(from, to))));
+      const r = document.createRange();
+      r.setStart(a.node, a.offset);
+      r.setEnd(b.node, b.offset);
+      return r;
+    },
+    caretRect(at) {
+      const c = editor.view.coordsAtPos(clampPos(posOfOffset(index, at)));
+      return new DOMRect(c.left, c.top, 0, c.bottom - c.top);
+    },
+    offsetAtPoint(x, y) {
+      const found = editor.view.posAtCoords({ left: x, top: y });
+      return found ? offsetOfPos(index, found.pos) : null;
+    },
+    selection() {
+      const { from, to } = editor.state.selection;
+      return { from: offsetOfPos(index, from), to: offsetOfPos(index, to) };
+    },
+    /// Selects a place, as a search found it, with the cursor in the middle of what can be seen.
+    reveal(from, to) {
+      editor.commands.focus(undefined, { scrollIntoView: false });
+      editor.commands.setTextSelection({ from: clampPos(posOfOffset(index, from)), to: clampPos(posOfOffset(index, to)) });
+      holdCursorCentred();
+    },
+    onChange: (f) => watch.change.push(f),
+    onReset: (f) => watch.reset.push(f),
+    onLayout: (f) => watch.layout.push(f),
+    paste(text) {
+      if (!text) return;
+      editor.commands.focus();
+      if (editor.view.pasteText) editor.view.pasteText(text);
+      else insertMarkdown(text);
+    },
   };
 
   // ----- Search, and keeping the cursor in view
@@ -783,6 +885,7 @@ export function create({ element, host, placeholder = "" }) {
     search,
     scroller,
     setFrom,
+    surface,
     json: () => editor.getJSON(),
     markdown: () => editor.getMarkdown(),
     text: () => editor.getText({ blockSeparator: "\n" }),

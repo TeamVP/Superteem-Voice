@@ -286,6 +286,83 @@ pub fn contents(id: &str) -> Result<Vec<ChapterHead>, String> {
         .collect())
 }
 
+/// A chapter holding the words searched for, with a few of the places they are.
+#[derive(Debug, Serialize)]
+pub struct SearchHit {
+    pub id: String,
+    pub title: String,
+    pub part: String,
+    pub label: String,
+    /// How many times the words are in it.
+    pub count: usize,
+    pub snippets: Vec<Snippet>,
+}
+
+/// The words found, as they are written, and some of the line either side.
+#[derive(Debug, Serialize)]
+pub struct Snippet {
+    pub before: String,
+    pub hit: String,
+    pub after: String,
+}
+
+/// The most places shown for each chapter.
+const SNIPPETS_PER_CHAPTER: usize = 3;
+
+/// Every chapter of the book holding `query`, whatever its case, in reading order.
+pub fn search(id: &str, query: &str) -> Result<Vec<SearchHit>, String> {
+    let lower = |c: char| c.to_lowercase().next().unwrap_or(c);
+    let want: Vec<char> = query.trim().chars().map(lower).collect();
+    if want.len() < 2 {
+        return Ok(Vec::new());
+    }
+    let book = load(id)?;
+    let mut hits = Vec::new();
+    for n in book.notes.iter().filter_map(|n| notes::load(n).ok()) {
+        let mut count = 0;
+        let mut snippets = Vec::new();
+        for raw in n.body.lines() {
+            let line = if n.format == "md" { notes::plain_line(raw) } else { raw.trim().to_string() };
+            let chars: Vec<char> = line.chars().collect();
+            if chars.len() < want.len() {
+                continue;
+            }
+            let folded: Vec<char> = chars.iter().map(|&c| lower(c)).collect();
+            let mut i = 0;
+            while i + want.len() <= folded.len() {
+                if folded[i..i + want.len()] != want[..] {
+                    i += 1;
+                    continue;
+                }
+                count += 1;
+                if snippets.len() < SNIPPETS_PER_CHAPTER {
+                    let end = i + want.len();
+                    // Some words either side, started and ended at a space where there is one near.
+                    let mut from = i.saturating_sub(48);
+                    if from > 0 {
+                        from = chars[from..i].iter().position(|c| c.is_whitespace()).map_or(from, |p| from + p + 1);
+                    }
+                    let mut to = (end + 72).min(chars.len());
+                    if to < chars.len() {
+                        to = chars[end..to].iter().rposition(|c| c.is_whitespace()).map_or(to, |p| end + p);
+                    }
+                    snippets.push(Snippet {
+                        before: format!("{}{}", if from > 0 { "…" } else { "" }, chars[from..i].iter().collect::<String>()),
+                        hit: chars[i..end].iter().collect(),
+                        after: format!("{}{}", chars[end..to].iter().collect::<String>(), if to < chars.len() { "…" } else { "" }),
+                    });
+                }
+                i += want.len();
+            }
+        }
+        if count > 0 {
+            let (part, label) = place(&book, &n.id);
+            hits.push(SearchHit { title: notes::display_title(&n), id: n.id, part, label, count, snippets });
+        }
+    }
+    Ok(hits)
+}
+
 /// Takes a deleted note out of every book it was in. A book kept for reading holds onto its chapters.
 pub fn forget_note(note: &str) {
     for mut book in all() {

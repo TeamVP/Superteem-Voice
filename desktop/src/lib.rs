@@ -1329,6 +1329,16 @@ fn save_note(id: Option<String>, title: String, body: String, keep_audio: Option
     notes::save(id, title, body, keep_audio.unwrap_or(false), rich)
 }
 
+#[tauri::command]
+fn note_bookmarks(id: String) -> Result<Vec<notes::Bookmark>, String> {
+    notes::bookmarks(&id)
+}
+
+#[tauri::command]
+fn save_note_bookmarks(id: String, bookmarks: Vec<notes::Bookmark>) -> Result<(), String> {
+    notes::save_bookmarks(&id, bookmarks)
+}
+
 /// Keeps a picture or file with a note. The file's bytes are the request's body; the note and the
 /// file's name come in its headers.
 #[tauri::command]
@@ -1409,6 +1419,12 @@ fn book_chapters(id: String) -> Result<Vec<books::Chapter>, String> {
 #[tauri::command]
 fn book_contents(id: String) -> Result<Vec<books::ChapterHead>, String> {
     books::contents(&id)
+}
+
+/// The chapters of a book holding the words searched for.
+#[tauri::command]
+async fn search_book(id: String, query: String) -> Result<Vec<books::SearchHit>, String> {
+    tauri::async_runtime::spawn_blocking(move || books::search(&id, &query)).await.map_err(|e| e.to_string())?
 }
 
 /// The reading book that holds this note, when the note can't be changed. Empty when it can.
@@ -3019,11 +3035,14 @@ pub fn run() {
             list_notes,
             get_note,
             save_note,
+            note_bookmarks,
+            save_note_bookmarks,
             delete_note,
             list_books,
             get_book,
             book_chapters,
             book_contents,
+            search_book,
             book_for_note,
             create_book,
             rename_book,

@@ -705,6 +705,7 @@ function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPie
   const button = label
     ? el("button", { class: "pill with-icon read-aloud", type: "button", title: what, "aria-pressed": "false" }, svg("play", 14), label)
     : el("button", { class: "icon-only read-aloud", type: "button", title: what, "aria-label": what, "aria-pressed": "false" }, svg("speak", 16));
+  button.dataset.what = what;
   // A labelled button says Stop while it reads.
   if (label) button.reading = (on) => button.replaceChildren(svg(on ? "pause" : "play", 14), on ? "Stop" : label);
   button.addEventListener("mousedown", (e) => e.preventDefault());
@@ -713,6 +714,11 @@ function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPie
     stopReading();
     readAloud(button, pieces ? null : text(), typeof lang === "function" ? lang() : lang, { pieces: pieces?.(), onPiece });
   });
+  /// Reads `text` now, in place of whatever is being read: "Read aloud from here".
+  button.readText = (words, language) => {
+    stopReading();
+    readAloud(button, words, language ?? (typeof lang === "function" ? lang() : lang));
+  };
   return button;
 }
 
@@ -769,7 +775,7 @@ async function readAloud(button, text, lang, { pieces: given, onPiece } = {}) {
   // The gap between two pieces: the longer of what the first wants after it and the next before it, shorter
   // when reading faster.
   const gap = (i) => (i + 1 < pieces.length ? Math.max(pieces[i].after, pieces[i + 1].before) : 0) / (prefs.read_speed ?? 1);
-  const mine = { button, cancelled: false, onPiece };
+  const mine = { button, cancelled: false, onPiece, what: button.dataset.what || "Read aloud" };
   reading = mine;
   button.classList.add("on");
   button.setAttribute("aria-pressed", "true");
@@ -804,10 +810,13 @@ async function readAloud(button, text, lang, { pieces: given, onPiece } = {}) {
   if (reading === mine) reading = null;
   // Unless reading started again from elsewhere in the same place, which now says where it is.
   if (reading?.onPiece !== onPiece) onPiece?.(null);
-  button.classList.remove("on");
-  button.setAttribute("aria-pressed", "false");
-  button.title = "Read aloud";
-  button.reading?.(false);
+  // The same button may already be reading again, from another place.
+  if (reading?.button !== button) {
+    button.classList.remove("on");
+    button.setAttribute("aria-pressed", "false");
+    button.title = mine.what;
+    button.reading?.(false);
+  }
   if (!reading) invoke("listen_mute", { muted: false }).catch(() => {});
 }
 

@@ -748,7 +748,7 @@ function noteScrollButtons(topEl, { floor = null, cover = null } = {}) {
 }
 
 /// A book kept for reading: a contents list, then one chapter at a time. Nothing in it can be changed.
-async function openReadingBook(book, chapterId) {
+async function openReadingBook(book, chapterId, find = null) {
   const mine = view;
   let contents = [];
   try {
@@ -786,21 +786,28 @@ async function openReadingBook(book, chapterId) {
       el("span", { class: "book-kicker" }, `${index + 1} of ${contents.length}`),
       el("button", { class: "pill", disabled: index === contents.length - 1, onclick: () => openBook(book.id, { chapter: contents[index + 1].id }) }, "Next"));
     const heading = el("h1", {}, note.title || chapter.title);
-    const speak = readAloudButton(() => {
-      const sel = getSelection().toString().trim();
-      if (sel) return sel;
-      return `${HEADING}${heading.textContent}\n${body.innerText}`;
-    }, "Read the note aloud", { lang: () => itemLanguages(note)[0] });
+    const bodyHolder = el("div", { class: "book-chapter-holder" }, body);
+    const lang = () => itemLanguages(note)[0];
+    let marks = null;
+    // What is selected, or from where the text was last clicked; otherwise the whole chapter.
+    const speak = readAloudButton(() => marks?.readingText() ?? `${HEADING}${heading.textContent}\n${body.innerText}`,
+      "Read the chapter aloud (from where you click, or what you select)", { lang });
+    const mark = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or where you clicked", "aria-label": "Bookmark" }, svg("bookmark", 16));
+    mark.addEventListener("mousedown", (e) => e.preventDefault());
+    mark.addEventListener("click", () => marks?.create());
     const page = el("div", { class: "page book book-read" },
       el("div", { class: "book-contents-bar" },
         el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"),
-        speak),
+        el("span", { class: "top-actions" }, mark, speak)),
       kicker ? el("p", { class: "book-kicker" }, kicker) : "",
       heading,
-      turn(), body, turn(),
+      turn(), bodyHolder, turn(),
       ...noteScrollButtons(heading));
     main.replaceChildren(page);
+    const surface = domSurface(body);
+    marks = attachBookmarks({ surface, holder: bodyHolder, noteId: () => note.id, onRead: (text) => speak.readText(text, lang()) });
     openAtTop(page);
+    revealSnippet(surface, find);
     return;
   }
   const rows = [];
@@ -815,17 +822,83 @@ async function openReadingBook(book, chapterId) {
       el("button", { class: "label link-label", onclick: () => openBook(book.id, { chapter: c.id }) }, c.title,
         el("small", {}, wordsText(c.words)))));
   });
+  const list = el("div", { class: "group book-notes" }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "This book has no chapters.")));
+  const search = bookSearch(book.id, list, (hit, snippet) => openBook(book.id, { chapter: hit.id, find: snippet }));
   const page = el("div", { class: "page book book-read" },
-    el("div", { class: "book-head" }, el("span", { class: "book-icon" }, svg("book", 22)), el("h1", { class: "book-locked-title" }, book.title || "Untitled book")),
-    el("p", { class: "hint" }, "For reading. The chapters stay as they are."),
-    el("div", { class: "group book-notes" }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "This book has no chapters."))));
+    el("div", { class: "book-head" }, el("span", { class: "book-icon" }, svg("book", 22)),
+      el("h1", { class: "book-locked-title" }, book.title || "Untitled book"),
+      el("span", { class: "reader-pill", title: "For reading: the chapters stay as they are" }, "Reader")),
+    search.bar, search.results, list);
   main.replaceChildren(page);
   openAtTop(page);
 }
 
+/// What was last searched for in each book, so going back to its contents shows the same results.
+const bookSearchQuery = new Map();
+
+/// A search through every note in a book, under its title. While it holds words, what it finds takes the
+/// place of `list`; `onPick(hit, snippet)` opens a chapter at a place found.
+function bookSearch(bookId, list, onPick) {
+  const input = el("input", { type: "search", placeholder: "Search this book", "aria-label": "Search this book", autocomplete: "off", enterkeyhint: "search" });
+  const count = el("span", { class: "hint", "aria-live": "polite" });
+  const clear = el("button", { class: "icon-only", type: "button", title: "Clear the search", "aria-label": "Clear the search", hidden: true }, svg("close", 16));
+  const bar = el("div", { class: "note-search book-search", role: "search" }, svg("search", 16), input, count, clear);
+  const results = el("div", { class: "book-results", hidden: true });
+  let timer = null;
+  let asked = 0;
+  const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  async function run() {
+    const q = input.value.trim();
+    bookSearchQuery.set(bookId, input.value);
+    clear.hidden = !input.value;
+    const mine = ++asked;
+    if (q.length < 2) {
+      results.hidden = true;
+      list.hidden = false;
+      count.textContent = q ? "Keep typing" : "";
+      return;
+    }
+    const hits = await invoke("search_book", { id: bookId, query: q }).catch(() => []);
+    if (mine !== asked) return;
+    const total = hits.reduce((n, h) => n + h.count, 0);
+    count.textContent = total ? `${total} in ${plural(hits.length, "chapter")}` : "Not found";
+    results.replaceChildren(...(hits.length ? hits.map((h) => el("div", { class: "group book-hit" },
+      el("button", { class: "book-hit-head", type: "button", onclick: () => onPick(h, h.snippets[0]) },
+        h.label ? el("span", { class: "book-num chapter" }, h.label) : null,
+        el("span", { class: "label" }, h.title, el("small", {}, [h.part, `${plural(h.count, "match", "matches")}`].filter(Boolean).join(" · ")))),
+      ...h.snippets.map((s) => el("button", { class: "book-snippet", type: "button", onclick: () => onPick(h, s) }, s.before, el("mark", {}, s.hit), s.after)),
+      h.count > h.snippets.length ? el("div", { class: "book-hit-more hint" }, `and ${plural(h.count - h.snippets.length, "more place")}`) : null))
+      : [el("p", { class: "hint" }, `No chapter has “${q}” in it.`)]));
+    results.hidden = false;
+    list.hidden = true;
+  }
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 220); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && input.value) { e.preventDefault(); input.value = ""; run(); }
+    else if (e.key === "Enter") { e.preventDefault(); clearTimeout(timer); run(); }
+  });
+  clear.addEventListener("click", () => { input.value = ""; run(); input.focus(); });
+  input.value = bookSearchQuery.get(bookId) ?? "";
+  if (input.value) run();
+  return { bar, results };
+}
+
+/// Shows a place found by a book's search in a chapter's text: highlighted, in the middle of the window.
+/// Waits for the page to finish opening at its top first.
+function revealSnippet(surface, snippet) {
+  if (!snippet) return;
+  setTimeout(() => {
+    if (!surface.root.isConnected) return;
+    const found = findBookmark(surface.text(), {
+      quote: snippet.hit, prefix: snippet.before.replace(/^…/, ""), suffix: snippet.after.replace(/…$/, ""), at: 0,
+    });
+    surface.reveal(found.from, found.to);
+  }, 320);
+}
+
 /// A book's page: its notes in order, to open, reorder, take out or add to; or all of them read as one.
 /// A book that isn't editable opens as a reading copy instead.
-async function openBook(id, { naming = false, reading = false, chapter = null } = {}) {
+async function openBook(id, { naming = false, reading = false, chapter = null, find = null } = {}) {
   leave();
   showPage();
   const mine = view = { kind: "book", id };
@@ -839,7 +912,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null } 
   }
   if (view !== mine) return;
   if (book.editable === false) {
-    await openReadingBook(book, chapter);
+    await openReadingBook(book, chapter, find);
     return;
   }
   const [chapters, allNotes] = await Promise.all([
@@ -877,6 +950,21 @@ async function openBook(id, { naming = false, reading = false, chapter = null } 
     // All the notes one after another, each under its title, which opens it.
     const fileBase = platform === "windows" || platform === "android" ? "http://stvnote.localhost/" : "stvnote://localhost/";
     if (!chapters.length) page.append(el("p", { class: "hint" }, "This book has no notes yet."));
+    // Read aloud reads the whole book; or what is selected, or from where it was last clicked to the end.
+    const attached = [];
+    let lastClicked = null;
+    const chapterText = (a) => `${HEADING}${a.heading}\n${a.surface.text()}`;
+    const speak = readAloudButton(() => {
+      const from = attached.find((a) => a.bodyEl.contains(getSelection()?.anchorNode)) ?? lastClicked;
+      const i = from ? attached.indexOf(from) : -1;
+      const start = from?.marks.readingText();
+      if (i < 0 || start == null) return attached.map(chapterText).join("\n\n");
+      // A selection is read on its own; from a place clicked, reading goes on into the chapters after it.
+      const sel = from.surface.selection();
+      if (sel && sel.from !== sel.to) return start;
+      return [start, ...attached.slice(i + 1).map(chapterText)].join("\n\n");
+    }, "Read the book aloud (from where you click, or what you select)");
+    if (chapters.length) modes.append(el("span", { class: "grow" }), speak);
     let part = "";
     for (const c of chapters) {
       if (c.part && c.part !== part) {
@@ -894,12 +982,22 @@ async function openBook(id, { naming = false, reading = false, chapter = null } 
         body.append(...c.body.split(/\n{2,}/).filter((p) => p.trim()).map((p) => el("p", {}, p)));
       }
       const heading = c.label ? `${c.label}. ${c.title}` : c.title;
+      const holder = el("div", { class: "book-chapter-holder" }, body);
       page.append(el("section", { class: "book-chapter" },
-        el("h2", {}, el("button", { class: "link", onclick: () => openNote(c.id) }, heading)), body));
+        el("h2", {}, el("button", { class: "link", onclick: () => openNote(c.id) }, heading)), holder));
+      attached.push({ c, heading, bodyEl: body, holder });
     }
     const top = page.querySelector("h1, h2") || page;
     page.append(...noteScrollButtons(top));
     main.replaceChildren(page);
+    for (const a of attached) {
+      a.surface = domSurface(a.bodyEl);
+      a.marks = attachBookmarks({ surface: a.surface, holder: a.holder, noteId: () => a.c.id, onRead: (text, { toEnd } = {}) => {
+        const i = attached.indexOf(a);
+        speak.readText(toEnd ? [text, ...attached.slice(i + 1).map(chapterText)].join("\n\n") : text);
+      } });
+      a.bodyEl.addEventListener("click", () => { lastClicked = a; });
+    }
     openAtTop(page);
     return;
   }
@@ -945,7 +1043,12 @@ async function openBook(id, { naming = false, reading = false, chapter = null } 
     await invoke("add_note_to_book", { id, note: picker.value }).catch((e) => micToast(String(e)));
     reopen();
   });
-  page.append(list, el("div", { class: "book-add" }, newNote, picker));
+  const search = bookSearch(id, list, async (hit, snippet) => {
+    await openNote(hit.id);
+    if (note?.id === hit.id && note.ed) revealSnippet(note.ed.surface, snippet);
+  });
+  modes.before(search.bar);
+  page.append(search.results, list, el("div", { class: "book-add" }, newNote, picker));
   main.replaceChildren(page);
   if (naming) title.focus();
 }
@@ -1248,6 +1351,13 @@ function renderNote(data, dictate) {
     if (!note.id) throw new Error("Write something in the note first.");
     return invoke("export_note", { id: note.id, format });
   });
+  // Reads what is selected, or from where the note was last clicked; otherwise the whole note, title first.
+  let marks = null;
+  const speakNote = readAloudButton(() => marks?.readingText() ?? `${HEADING}${title.value}\n${ed.text()}`,
+    "Read the note aloud (from where you click, or what you select)", { lang: noteLanguage });
+  const markButton = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or the cursor's place", "aria-label": "Bookmark" }, svg("bookmark", 16), menuText("Bookmark"));
+  markButton.addEventListener("mousedown", (e) => e.preventDefault());
+  markButton.addEventListener("click", () => marks?.create());
   // On a phone, Export, Archive and Delete sit behind one "more" button, so the top bar keeps to one line.
   const more = moreMenu([exporter, archive, remove]);
   foot.append(el("span", { class: "grow" }), talk, live);
@@ -1271,10 +1381,7 @@ function renderNote(data, dictate) {
       return true;
     }), status,
       // The buttons stay together: beside the status, or on the line under it when they don't fit.
-      el("span", { class: "top-actions" },
-        // The selection when there is one, else the whole note.
-        readAloudButton(() => { const sel = getSelection().toString().trim(); return `${HEADING}${title.value}\n${sel || ed.text()}`; }, "Read the note aloud", { lang: noteLanguage }),
-        more));
+      el("span", { class: "top-actions" }, markButton, speakNote, more));
   main.replaceChildren(el("div", { class: "note-split" }, el("div", { class: "note-main" },
     topBar, exporter.status, langNotice,
     // The note scrolls under the top bar; the chat folds to a thin bar on the right.
@@ -1283,6 +1390,8 @@ function renderNote(data, dictate) {
       el("div", { class: "note" }, title, stackSlot, searchBar, chip, editorHolder, noteEnd, ...jumps),
       foot)),
     chat?.panel));
+  marks = attachBookmarks({ surface: ed.surface, holder: editorHolder, noteId: () => mine.id, ensureNote: () => mine.save(),
+    onRead: (text) => speakNote.readText(text) });
   note.syncStack();
   chat?.sync();
   pinTopBar(topBar);

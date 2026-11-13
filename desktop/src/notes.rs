@@ -255,8 +255,67 @@ pub fn delete(id: &str) -> Result<(), String> {
     let file = path(id)?;
     let _ = std::fs::remove_file(file.with_extension("versions.json"));
     let _ = std::fs::remove_file(file.with_extension("chat.json"));
+    let _ = std::fs::remove_file(file.with_extension("bookmarks.json"));
     let _ = std::fs::remove_dir_all(file.with_extension("files"));
     std::fs::remove_file(file).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Bookmarks: places and passages marked in a note, kept beside it as `<id>.bookmarks.json`
+
+/// One bookmark. It finds its place again by the words it covers (`quote`) and those around it, so it
+/// holds through edits, and `at` (where it began in the note's text) chooses between repeats.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Bookmark {
+    pub id: String,
+    pub at: usize,
+    pub quote: String,
+    pub prefix: String,
+    pub suffix: String,
+    pub label: String,
+    /// "c01" to "c15", or empty for no colour.
+    pub color: String,
+    pub created: u64,
+}
+
+/// The most bookmarks a note keeps, and the longest a label or quote is kept.
+const MAX_BOOKMARKS: usize = 2000;
+const MAX_LABEL: usize = 120;
+const MAX_QUOTE: usize = 4000;
+
+pub fn bookmarks(id: &str) -> Result<Vec<Bookmark>, String> {
+    let file = path(id)?.with_extension("bookmarks.json");
+    Ok(library::read_json(&file).unwrap_or_default())
+}
+
+/// Bookmarks can be kept on a note in a reading book too: marking a place doesn't change it.
+pub fn save_bookmarks(id: &str, mut marks: Vec<Bookmark>) -> Result<(), String> {
+    let file = path(id)?;
+    if !file.exists() {
+        return Err("That note no longer exists.".into());
+    }
+    marks.truncate(MAX_BOOKMARKS);
+    let clip = |s: &mut String, n: usize| {
+        if let Some((i, _)) = s.char_indices().nth(n) {
+            s.truncate(i);
+        }
+    };
+    for m in &mut marks {
+        clip(&mut m.label, MAX_LABEL);
+        clip(&mut m.quote, MAX_QUOTE);
+        clip(&mut m.prefix, 64);
+        clip(&mut m.suffix, 64);
+        if !(m.color.len() == 3 && m.color.starts_with('c') && matches!(m.color[1..].parse::<u8>(), Ok(1..=15))) {
+            m.color.clear();
+        }
+    }
+    let file = file.with_extension("bookmarks.json");
+    if marks.is_empty() {
+        let _ = std::fs::remove_file(file);
+        return Ok(());
+    }
+    library::write_json(&file, &marks)
 }
 
 // ---------------------------------------------------------------------------------------------------------
