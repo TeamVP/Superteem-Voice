@@ -250,6 +250,8 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
   .new-fab:active { transform: translateY(-50%) scale(0.94); }
   /* The last rows of the list can be scrolled clear of the button. */
   .items > :last-child { margin-bottom: 96px; }
+  /* While the list is filtered by a search, the bottom bar with Settings is hidden. */
+  body.searching .sidebar-foot { display: none; }
   .phone-home { justify-content: flex-start; padding: 24px 16px 40px; gap: 16px; }
   .phone-home h1 { font-size: 24px; margin: 8px 0 4px; }
 }

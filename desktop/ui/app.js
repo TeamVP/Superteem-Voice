@@ -508,6 +508,8 @@ async function showArchive() {
 }
 
 search.addEventListener("input", () => {
+  // On a phone, the bottom bar (Settings) steps aside while the list is filtered.
+  document.body.classList.toggle("searching", !!search.value.trim());
   clearTimeout(searchTimer);
   searchTimer = setTimeout(refreshItems, 200);
 });
