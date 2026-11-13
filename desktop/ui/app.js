@@ -31,7 +31,6 @@ let progress = null;
 let queue = { current: null, waiting: [] };
 const queued = (id) => queue.current === id || queue.waiting.includes(id);
 let prefs = { wake: false, quiet: false, onboarded: true, terms_accepted: 1, inputs: [], pins: false, mics: {}, scripts: [] };
-let homeMode = "note";
 
 const icon = {
   pen: '<path d="M4 20h4L19 9l-4-4L4 16z"></path>',
@@ -44,6 +43,7 @@ const icon = {
   action: '<path d="M9 4H6.5A1.5 1.5 0 005 5.5v14A1.5 1.5 0 006.5 21h11a1.5 1.5 0 001.5-1.5v-14A1.5 1.5 0 0017.5 4H15"></path><rect x="9" y="2.5" width="6" height="3.5" rx="1"></rect><path d="M8.5 13.5l2.5 2.5 4.5-5"></path>',
   save: '<path d="M5 3h11.5L20 6.5V19a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 011-2z"></path><path d="M8 3v5h7V3"></path><rect x="7.5" y="13" width="9" height="8"></rect>',
   export: '<path d="M12 15V3M7.5 7.5L12 3l4.5 4.5"></path><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"></path>',
+  import: '<path d="M12 3v12M7.5 10.5L12 15l4.5-4.5"></path><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"></path>',
   keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"></path>',
   play: '<path d="M7 4l13 8-13 8z" fill="currentColor" stroke="none"></path>',
   "skip-back": '<path d="M18 5l-10 7 10 7z" fill="currentColor" stroke="none"></path><path d="M6 5v14"></path>',
@@ -305,7 +305,7 @@ function backToList() {
   refreshItems();
 }
 
-/// On a phone, a note's or meeting's top bar stays in place under "Back to Feed" while the page scrolls
+/// A meeting's top bar (and on a phone, a note's) stays in place, under "Back to Feed" on a phone, while the page scrolls
 /// beneath it. Its height is kept in --pin-top, so the formatting bar can stay just under it.
 let pinWatch = null;
 function pinTopBar(bar) {
@@ -542,24 +542,13 @@ search.addEventListener("input", () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(refreshItems, 200);
 });
-document.getElementById("new-note").addEventListener("click", () => openNote(null));
-// The sidebar button for the mode in use is purple: New note in a note, Meeting in a meeting.
-new MutationObserver(() => {
-  document.getElementById("new-note").classList.toggle("primary", view.kind === "note");
-  document.getElementById("new-meeting").classList.toggle("primary", view.kind === "recorder");
-  document.getElementById("open-home").classList.toggle("on", view.kind === "home");
-}).observe(main, { childList: true });
-document.getElementById("new-meeting").addEventListener("click", () => showMeeting());
 document.getElementById("open-settings").addEventListener("click", () => showSettings());
 document.getElementById("open-shortcuts").addEventListener("click", () => showShortcuts());
 // The wordmark is the Home button too.
 const goHome = () => showHome();
 document.querySelector(".brand").addEventListener("click", goHome);
-document.getElementById("open-home").addEventListener("click", goHome);
-// On a phone the list has one floating button, which opens Home to choose what to make.
+// The list has one floating button, which opens Home to choose what to make.
 document.getElementById("new-fab").addEventListener("click", goHome);
-const phoneWidth = matchMedia("(max-width: 720px)");
-phoneWidth.addEventListener("change", () => { if (view.kind === "home" && !document.body.classList.contains("show-list")) showHome(); });
 // Each example on the Listening page runs as if it had been said.
 document.getElementById("agent-say").addEventListener("click", (e) => {
   const link = e.target.closest("[data-say]");
@@ -629,32 +618,18 @@ window.addEventListener("popstate", () => {
   backToList();
 });
 
-// ---------- Home: one button, two modes ----------
+// ---------- Home: four things to make ----------
 
 function showHome() {
   leave();
   view = { kind: "home" };
   showPage();
   refreshItems();
-  if (phoneWidth.matches) return showPhoneHome();
-  const modes = el("div", { class: "segmented", role: "group", "aria-label": "What to capture" });
-  for (const [mode, label] of [["note", "Note"], ["meeting", "Meeting"]]) {
-    modes.append(el("button", { class: homeMode === mode ? "on" : "", "aria-pressed": String(homeMode === mode),
-      onclick: () => { homeMode = mode; showHome(); } }, label));
-  }
-  const mic = el("button", { class: "big-mic", "aria-label": homeMode === "note" ? "New note" : "Record a meeting",
-    onclick: () => (homeMode === "note" ? openNote(null) : showMeeting()) }, svg("mic", 36));
-  main.replaceChildren(el("div", { class: "home" },
-    el("h1", {}, homeMode === "note" ? "Capture a thought" : "Capture a meeting"),
-    modes, mic,
-    el("div", { class: "hint" }, homeMode === "note"
-      ? (platform === "android" ? "Tap to write · or say “Hey Superteem, take a note”" : prefs.dictate_manually ? "Tap to start a note · type or press Dictate" : "Tap to start a note by voice · type as you go")
-      : "Tap to set up · or say “Hey Superteem, start meeting”")));
-  homeExtras();
+  showNewHome();
 }
 
-/// Home on a phone: four things to make, two of them not built yet.
-function showPhoneHome() {
+/// Four things to make, two of them not built yet.
+function showNewHome() {
   const kinds = [
     { name: "Note", sub: "Write or dictate a thought", icon: "pen", open: () => openNote(null) },
     { name: "Meeting", sub: "Record and transcribe", icon: "wave", open: () => showMeeting() },
@@ -998,19 +973,7 @@ function renderNote(data, dictate) {
     return invoke("export_note", { id: note.id, format });
   });
   // On a phone, Export, Archive and Delete sit behind one "more" button, so the top bar keeps to one line.
-  const moreButton = el("button", { class: "icon-only top-more-button", type: "button", title: "More", "aria-label": "More actions", "aria-haspopup": "menu", "aria-expanded": "false" }, svg("more", 18));
-  const moreItems = el("span", { class: "top-more-items" }, exporter, archive, remove);
-  const more = el("span", { class: "top-more" }, moreButton, moreItems);
-  const closeMore = () => { more.classList.remove("open"); moreButton.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outsideMore, true); };
-  const outsideMore = (e) => { if (!more.contains(e.target)) closeMore(); };
-  moreButton.addEventListener("click", () => {
-    if (more.classList.contains("open")) return closeMore();
-    more.classList.add("open");
-    moreButton.setAttribute("aria-expanded", "true");
-    document.addEventListener("click", outsideMore, true);
-  });
-  // Choosing a kind of export is the end of it; Delete stays, to be pressed again.
-  moreItems.addEventListener("click", (e) => { if (e.target.closest(".export-menu .menu")) closeMore(); });
+  const more = moreMenu([exporter, archive, remove]);
   foot.append(el("span", { class: "grow" }), talk, live);
   // On a computer the chat runs the full height of the page, and the top bar and the note sit beside it.
   const topBar = el("div", { class: "topbar" }, picker, languagePicker(note.languages, async (list) => {
@@ -1917,10 +1880,29 @@ function sizeText(bytes) {
 }
 
 /// The bin button's menu: [choice, label, detail, disabled] each.
+/// A "more" (three dots) button and the actions it opens. `always` keeps them behind the button at every
+/// width; otherwise they sit side by side on a computer and go behind it only on a phone.
+function moreMenu(items, { always = false } = {}) {
+  const button = el("button", { class: "icon-only top-more-button", type: "button", title: "More", "aria-label": "More actions", "aria-haspopup": "menu", "aria-expanded": "false" }, svg("more", 18));
+  const list = el("span", { class: "top-more-items" }, items.filter(Boolean));
+  const more = el("span", { class: "top-more" + (always ? " always" : "") }, button, list);
+  const close = () => { more.classList.remove("open"); button.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outside, true); };
+  const outside = (e) => { if (!more.contains(e.target)) close(); };
+  button.addEventListener("click", () => {
+    if (more.classList.contains("open")) return close();
+    more.classList.add("open");
+    button.setAttribute("aria-expanded", "true");
+    document.addEventListener("click", outside, true);
+  });
+  // Choosing from a submenu, or a plain action, is the end of it; a note's Delete stays, to be pressed again.
+  list.addEventListener("click", (e) => { if (e.target.closest(".export-menu .menu, .more-action")) close(); });
+  return more;
+}
+
 function deleteMenu(choices, run) {
   const wrap = el("span", { class: "export-menu delete-menu" });
   const button = el("button", { class: "icon-only danger", type: "button", "aria-haspopup": "menu", "aria-expanded": "false",
-    title: "Delete this meeting or its audio", "aria-label": "Delete this meeting or its audio" }, svg("trash", 18));
+    title: "Delete this meeting or its audio", "aria-label": "Delete this meeting or its audio" }, svg("trash", 18), el("span", { class: "menu-text" }, "Delete"));
   const menu = el("div", { class: "menu", role: "menu", hidden: true });
   const close = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outside, true); };
   const outside = (e) => { if (!wrap.contains(e.target)) close(); };
@@ -2054,8 +2036,8 @@ function renderSession(session, processingError, suggestion) {
     }
   });
   const edits = session.segments.filter((s) => s.edited).length;
-  const reprocess = el("button", { class: "link with-icon", title: "Transcribe again: run speaker detection and transcription again", "aria-label": "Transcribe again" },
-    svg("refresh", 16), el("span", { class: "label" }, "Transcribe"));
+  const reprocess = el("button", { class: "icon-only more-action", type: "button", title: "Transcribe again: run speaker detection and transcription again", "aria-label": "Transcribe again" },
+    svg("refresh", 18), el("span", { class: "menu-text" }, "Transcribe again"));
   reprocess.addEventListener("click", () => processAgain(id));
   const used = new Set(scriptLines.map((s) => s.speaker));
   const streams = Object.keys(session.audio).sort();
@@ -2087,11 +2069,10 @@ function renderSession(session, processingError, suggestion) {
     el("span", { class: "top-info" }, el("span", { title: dateText(meta.created) }, agoText(meta.created))),
     el("span", { class: "top-actions" },
     scriptLines.length ? readAloudButton(() => scriptLines.filter((l) => hasWords(l.text)).map((l) => (prefs.read_speakers ?? true ? `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? "Someone"}: ${l.text}` : l.text)).join("\n"), "Read the transcript aloud", { lang: meetingLanguage }) : null,
-    session.segments.length ? exporter : null,
     isDesktop() ? el("button", { class: "icon-only", title: meta.compacted ? "Open this meeting's folder, with its transcript and exports" : "Open this meeting's folder, with its audio, transcript and exports",
       "aria-label": "Open this meeting's folder", onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
-    session.model_ready && !session.needs_processing && !meta.compacted ? reprocess : null,
-    remove));
+    // Export, Transcribe again and Delete sit behind one "more" button.
+    moreMenu([session.segments.length ? exporter : null, session.model_ready && !session.needs_processing && !meta.compacted ? reprocess : null, remove], { always: true })));
   page.append(exporter.status, confirmBox, langNotice, title);
 
   const processNow = el("button", { class: "primary" }, "Process now");
@@ -2603,7 +2584,7 @@ function renderSession(session, processingError, suggestion) {
       el("button", { class: "pill", "aria-label": "Forward 5 seconds", title: "Forward 5 seconds (Alt + →)", onclick: () => player?.seek(player.t + 5) }, "+5"),
       el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item (→)", onclick: nextClip }, svg("skip-forward", 16)),
       timeLabel, el("span", { class: "grow" }), mixLabel,
-      meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id, meta.created), "aria-label": "Import a recording" }, svg("export", 14), el("span", { class: "wide-only" }, "Import")), fold));
+      meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id, meta.created), "aria-label": "Import a recording" }, svg("import", 14), el("span", { class: "wide-only" }, "Import")), fold));
     player.prevClip = prevClip;
     player.nextClip = nextClip;
     requestAnimationFrame(() => player?.seek(keepTime));
@@ -3871,7 +3852,9 @@ function showCheckDetails(opener) {
   const dialog = el("dialog", { class: "check-details", "aria-label": "Telemetry" },
     el("div", { class: "body" },
       el("h2", {}, "Telemetry"),
-      el("p", {}, "Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted."),
+      el("p", {}, "Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted. "
+        + "Voice by Superteem is built to help you secure your data on your devices and give you a better alternative to AI cloud providers that store everything about you for their own benefit. ",
+        el("button", { class: "link inline", onclick: () => { dialog.close(); showTerms(); } }, "Read our privacy policy"), "."),
       el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => dialog.close() }, "Close"))));
   dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
   dialog.addEventListener("close", () => { dialog.remove(); opener?.focus(); });

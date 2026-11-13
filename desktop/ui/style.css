@@ -131,14 +131,9 @@ button.pill:has(> span[aria-hidden="true"]:only-child) { min-height: calc(1.55em
 .listen-chip { padding: 0; width: 30px; justify-content: center; flex: none; }
 .listen-chip .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .listen-chip.on { background: var(--key-2); border-color: var(--key-2); color: #fff; }
-.quick { display: flex; gap: 6px; }
-.quick button { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 8px; white-space: nowrap; }
-.quick .home-btn { flex: none; width: 40px; padding: 0; color: var(--muted); }
-.quick .home-btn.on, .quick .home-btn.on:hover:not(:disabled) { background: var(--key); border-color: var(--key); color: #fff; }
 /* A narrow sidebar keeps the icons: the buttons drop their words, and the name gets a little smaller so
    the Listening button stays inside the column. */
 @container (max-width: 262px) {
-  .quick .label { display: none; }
   .sidebar .brand .product { font-size: 16px; }
   .sidebar .brand .by { font-size: 13px; }
   .sidebar .brand img { height: 14px; }
@@ -191,6 +186,11 @@ body.resizing { cursor: col-resize; user-select: none; }
 .topbar { display: flex; align-items: center; gap: 10px; padding: 12px 24px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .topbar .status { flex: 1; font-size: 13px; color: var(--muted); }
 .topbar.meeting-top { font-size: 13px; color: var(--muted); }
+/* A meeting's top bar (and a note's, where it has no chat beside it) stays put, solid, and the page scrolls
+   under it. #main grows with the page, so the bar stays stuck all the way down. */
+body.pin-top:not(.note-chat-page) #main { flex: 1 0 auto; }
+body.pin-top:not(.note-chat-page) .topbar { position: sticky; top: 0; z-index: 13; flex: none; background: var(--bg); }
+body.pin-top:not(.note-chat-page) .note-toolbar { top: var(--pin-top, 0px); }
 h1 { font-size: 32px; line-height: 1.2; margin: 0 0 6px; outline: none; letter-spacing: -0.02em; }
 h1:empty::before { content: "Untitled"; color: var(--muted); }
 h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
@@ -225,35 +225,30 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .home h1 { font-size: 28px; }
 .just-updated { display: inline-flex; align-items: center; gap: 6px; margin: 14px 0 0; font-size: 14px; color: var(--ok); }
 .just-updated .link { color: var(--ok); text-decoration: underline; }
-.segmented { display: inline-flex; background: var(--raised); border-radius: 999px; padding: 4px; }
-.segmented button { border: none; background: transparent; border-radius: 999px; padding: 6px 22px; color: var(--muted); }
-.segmented button.on { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
-.big-mic {
-  width: 96px; height: 96px; border-radius: 48px; border: none; background: var(--key); color: #fff;
-  display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 24px rgb(111 82 173 / 0.35);
-  touch-action: none; user-select: none;
-}
-.big-mic:hover:not(:disabled) { background: var(--key-1); }
-.big-mic.held { transform: scale(0.96); background: var(--key-1); }
 .hint { color: var(--muted); font-size: 13px; }
-/* Phone: the list's one floating button opens Home, which offers four things to make. */
-.new-fab { display: none; }
+/* The list's one floating button opens Home, which offers four things to make. On a computer it sits at the
+   bottom right of the sidebar, above Settings; on a phone, three quarters of the way down the screen. */
+.sidebar { position: relative; }
+.new-fab {
+  display: flex; align-items: center; justify-content: center; position: absolute; z-index: 5; right: 18px; bottom: 64px;
+  width: 56px; height: 56px; padding: 0; border-radius: 28px; border: none; background: var(--key); color: #fff;
+  box-shadow: 0 8px 24px rgb(111 82 173 / 0.4), 0 2px 6px rgb(0 0 0 / 0.2);
+}
+.new-fab:hover:not(:disabled), .new-fab:active { background: var(--key-1); }
+.new-fab:active { transform: scale(0.94); }
+.items > :last-child { margin-bottom: 80px; }
+.phone-home { justify-content: flex-start; padding: 24px 16px 40px; gap: 16px; }
+.phone-home h1 { font-size: 24px; margin: 28px 0 4px; }
 @media (max-width: 720px) {
-  .quick { display: none; }
   .new-fab {
-    display: flex; align-items: center; justify-content: center; position: fixed; z-index: 5;
-    right: calc(18px + env(safe-area-inset-right, 0px)); top: 75%; transform: translateY(-50%);
-    width: 60px; height: 60px; padding: 0; border-radius: 30px; border: none; background: var(--key); color: #fff;
-    box-shadow: 0 8px 24px rgb(111 82 173 / 0.4), 0 2px 6px rgb(0 0 0 / 0.2);
+    position: fixed; right: calc(18px + env(safe-area-inset-right, 0px)); bottom: auto; top: 75%; transform: translateY(-50%);
+    width: 60px; height: 60px; border-radius: 30px;
   }
-  .new-fab:hover:not(:disabled), .new-fab:active { background: var(--key-1); }
   .new-fab:active { transform: translateY(-50%) scale(0.94); }
   /* The last rows of the list can be scrolled clear of the button. */
   .items > :last-child { margin-bottom: 96px; }
   /* While the list is filtered by a search, the bottom bar with Settings is hidden. */
   body.searching .sidebar-foot { display: none; }
-  .phone-home { justify-content: flex-start; padding: 24px 16px 40px; gap: 16px; }
-  .phone-home h1 { font-size: 24px; margin: 28px 0 4px; }
 }
 .home-brand { cursor: default; margin: 12px 0 24px; gap: 10px; }
 .brand.home-brand .product { font-size: 32px; }
@@ -555,10 +550,8 @@ body:is([data-platform="android"], [data-platform="ios"]) .windows-only { displa
   button.link.back { display: flex; align-items: center; align-self: flex-start; min-height: 36px; padding: 4px 16px; font-size: 15px; }
   /* A note's or meeting's top: "Back to Feed" and the status bar stay put, solid, and the page scrolls under
      them. Beside a chat (a narrow window on a computer) the note scrolls in its own column instead. */
-  body.pin-top:not(.note-chat-page) #main { flex: 1 0 auto; }
   body.pin-top:not(.note-chat-page) button.link.back { position: sticky; top: 0; z-index: 13; align-self: stretch; flex: none; height: 36px; background: var(--bg); }
-  body.pin-top:not(.note-chat-page) .topbar { position: sticky; top: 36px; z-index: 13; flex: none; padding-top: 6px; background: var(--bg); }
-  body.pin-top:not(.note-chat-page) .note-toolbar { top: var(--pin-top, 0px); }
+  body.pin-top:not(.note-chat-page) .topbar { top: 36px; padding-top: 6px; }
   .page, .note, .live { padding: 12px 16px 80px; }
   .toolbar, .tracks { padding-left: 12px; padding-right: 12px; }
   h1, .note-title { font-size: 26px; }
@@ -1333,7 +1326,20 @@ dialog.note-shortcuts h3 { font-size: 13px; margin: 16px 0 8px; color: var(--mut
   .top-more-items .wide-only, .top-more-items .menu-text { display: inline; }
   .top-more-items > .icon-only.danger { color: var(--danger); }
   .top-more-items > .icon-only.armed, .top-more-items > .icon-only.armed:hover { color: #fff; font-weight: 600; }
+  .top-more-items .delete-menu > .icon-only { width: 100%; height: auto; display: flex; align-items: center; justify-content: flex-start; gap: 12px; padding: 10px; border-radius: 8px; color: var(--danger); font-size: 15px; font-weight: 400; white-space: nowrap; }
+  .top-more-items > .delete-menu { display: flex; }
 }
+/* A meeting's Export, Transcribe again and Delete are behind the button at every width. */
+.top-more.always { display: inline-flex; position: relative; }
+.top-more.always .top-more-button { display: inline-grid; }
+.top-more.always .top-more-items { display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; min-width: 210px; flex-direction: column; align-items: stretch; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25); }
+.top-more.always.open .top-more-items { display: flex; }
+.top-more.always .top-more-items > .export-menu { display: flex; }
+.top-more.always .top-more-items .export-button, .top-more.always .top-more-items > .icon-only { width: 100%; height: auto; display: flex; align-items: center; justify-content: flex-start; gap: 12px; padding: 10px; border-radius: 8px; color: var(--text); font-size: 15px; font-weight: 400; text-decoration: none; white-space: nowrap; }
+.top-more.always .top-more-items .wide-only, .top-more.always .top-more-items .menu-text { display: inline; }
+.top-more.always .top-more-items > .icon-only.danger { color: var(--danger); }
+.top-more.always .top-more-items .delete-menu > .icon-only { width: 100%; height: auto; display: flex; align-items: center; justify-content: flex-start; gap: 12px; padding: 10px; border-radius: 8px; color: var(--danger); font-size: 15px; font-weight: 400; white-space: nowrap; }
+.top-more.always .top-more-items > .delete-menu { display: flex; }
 
 /* A bookmark or action item in the transcript: its note, and for an action item with none, a way to have one suggested. */
 .marker-row { display: flex; align-items: center; gap: 8px; min-width: 0; }

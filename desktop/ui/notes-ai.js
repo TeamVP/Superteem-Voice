@@ -350,7 +350,6 @@ async function undoRewrite(version, status) {
 // ---------- Versions
 
 const versionWho = (v) => (v.by === "ai" ? "Rewritten by the assistant" : v.by === "restore" ? v.label || "An earlier version brought back" : "Your writing");
-const wordCount = (text) => (text.trim() ? text.trim().split(/\s+/).length : 0);
 const searchWords = (query) => query.toLowerCase().split(/\s+/).filter(Boolean);
 
 /// Text with each search word marked.
