@@ -139,6 +139,18 @@ fn name_with_prints(meta: &mut Meta, segments: &[Segment], line_voices: &BTreeMa
     }
 }
 
+/// A track moved `shift_s` later on the timeline (earlier when negative): silence before it, or its start cut.
+pub fn shifted(pcm: &[i16], shift_s: f64) -> Vec<i16> {
+    let n = (shift_s.abs() * RATE as f64).round() as usize;
+    if shift_s >= 0.0 {
+        let mut out = vec![0i16; n];
+        out.extend_from_slice(pcm);
+        out
+    } else {
+        pcm.get(n..).map(<[i16]>::to_vec).unwrap_or_default()
+    }
+}
+
 /// Returns a short summary for the screen. `progress` gets a stage name and the fraction done.
 pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<String, String> {
     // Processing a session whose audio is gone would replace its transcript with an empty one.
@@ -163,10 +175,21 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
 
     progress("Aligning and finding speakers", 0.05);
     pipeline::align_sources(&mut sources, RATE);
+    // Recorded tracks moved by hand, as for a call app's delay.
+    let settings = library::load_meta(dir);
+    let mut audio_offsets = BTreeMap::new();
+    for (name, source) in names.iter().zip(sources.iter_mut()) {
+        let shift_s = settings.track_offsets.get(name).copied().unwrap_or(0.0);
+        if shift_s != 0.0 {
+            source.pcm = shifted(&source.pcm, shift_s);
+        }
+        audio_offsets.insert(name.clone(), shift_s);
+    }
     // Tracks added afterwards, placed where they start on the meeting's timeline.
     for import in crate::imports::load(dir) {
         let pcm = crate::imports::placed(dir, &import)?;
         if !pcm.is_empty() {
+            audio_offsets.insert(import.name.clone(), import.offset_s);
             names.push(import.name.clone());
             sources.push(pipeline::SourceTrack { pcm, clock: None, frames: 0, lost_frames: 0, duplicate_frames: 0, had_bad_tail: false });
         }
@@ -321,6 +344,12 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
             voice_of.insert(i, v);
         }
     }
+    // A track locked to its speaker: everything it heard is them.
+    for (i, c) in clips.iter().enumerate() {
+        if echoes[i].is_none() && settings.locked.contains(&c.segment.stream) {
+            speaker_of[i] = c.segment.stream.clone();
+        }
+    }
     // A doubled-up copy belongs to whoever said the line it copies.
     for (i, echo) in echoes.iter().enumerate() {
         if let Some(t) = echo {
@@ -376,6 +405,8 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     let duration = sources.iter().map(|s| s.pcm.len()).max().unwrap_or(0) as f64 / RATE as f64;
     let mut meta = library::new_meta(dir, duration);
     meta.tracks_removed.clear();
+    meta.tracks_changed.clear();
+    meta.audio_offsets = audio_offsets;
     if first_time && meta.langs().is_empty() {
         meta.set_langs(item_languages);
     }
@@ -411,6 +442,15 @@ mod tests {
             overlap: false,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_track_moves_later_or_earlier() {
+        let pcm: Vec<i16> = (1..=32_000).map(|i| i as i16).collect();
+        assert_eq!(shifted(&pcm, 0.5).len(), 40_000);
+        assert_eq!(shifted(&pcm, 0.5)[8_000], 1);
+        assert_eq!(shifted(&pcm, -0.5)[0], 8_001);
+        assert!(shifted(&pcm, -3.0).is_empty());
     }
 
     #[test]

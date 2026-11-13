@@ -2338,28 +2338,49 @@ function stopPlayback() {
   }
 }
 
+/// Plays every track together. A track moved since the meeting was transcribed plays `shift` seconds later
+/// than its file has it (earlier when negative), so a move is heard at once.
 function makePlayer(session, duration, onTick) {
   const audios = new Map();
+  const shifts = new Map(Object.entries(session.pending_offsets ?? {}));
   for (const [stream, path] of Object.entries(session.audio)) {
     const audio = new Audio(convertFileSrc(path));
     audio.preload = "auto";
     audios.set(stream, audio);
   }
-  const p = { audios, t: 0, playing: false, timer: null, duration };
-  const master = () => [...audios.values()][0];
+  const p = { audios, shifts, t: 0, playing: false, timer: null, duration };
+  // The clock: an unmoved track while it plays, else the time since play was pressed.
+  const steady = [...audios.entries()].filter(([s]) => !shifts.get(s)).map(([, a]) => a);
+  let started = null;
+  const place = (stream, a, resync) => {
+    const own = p.t - (shifts.get(stream) ?? 0);
+    if (own < 0 || (a.duration && own >= a.duration)) {
+      // Before it starts or after it ends here: silent until the playhead reaches it.
+      if (!a.paused) a.pause();
+      if (own < 0 && a.currentTime) a.currentTime = 0;
+      return;
+    }
+    if (resync || Math.abs(a.currentTime - own) > 0.25) a.currentTime = own;
+    if (p.playing && a.paused) a.play().catch(() => {});
+  };
   p.seek = (t) => {
     p.t = Math.max(0, Math.min(duration, t));
-    for (const a of audios.values()) a.currentTime = p.t;
+    started = { t: p.t, at: performance.now() };
+    for (const [s, a] of audios) place(s, a, true);
     onTick(p.t, p.playing);
   };
   p.play = () => {
     if (!audios.size) return;
-    for (const a of audios.values()) { a.currentTime = p.t; a.play().catch(() => {}); }
     p.playing = true;
+    started = { t: p.t, at: performance.now() };
+    for (const [s, a] of audios) place(s, a, true);
     clearInterval(p.timer);
     p.timer = setInterval(() => {
-      p.t = master().currentTime;
-      if (master().ended || p.t >= duration) p.pause();
+      const clock = steady.find((a) => !a.paused && !a.ended);
+      p.t = clock ? clock.currentTime : started.t + (performance.now() - started.at) / 1000;
+      if (clock) started = { t: p.t, at: performance.now() };
+      if (p.t >= duration) return p.pause();
+      for (const [s, a] of audios) if (a !== clock) place(s, a, false);
       onTick(p.t, p.playing);
     }, 100);
     onTick(p.t, true);
@@ -2541,6 +2562,101 @@ function renderSession(session, processingError, suggestion) {
   const reprocess = el("button", { class: "icon-only more-action", type: "button", title: "Transcribe again: run speaker detection and transcription again", "aria-label": "Transcribe again" },
     svg("refresh", 18), el("span", { class: "menu-text" }, "Transcribe again"));
   reprocess.addEventListener("click", () => processAgain(id));
+  // A track's own settings, opened from its name: who is on it, whether everything on it is them, and
+  // where it starts. A move takes effect when the meeting is transcribed again.
+  const trackDialog = (stream, name) => {
+    const speaker = session.speakers.find((s) => s.key === stream);
+    const imported = session.imports?.find((i) => i.name === stream);
+    const group = imported?.from_session ? session.imports.filter((i) => i.from_session === imported.from_session) : [];
+    const offset = imported ? imported.offset_s : meta.track_offsets?.[stream] ?? 0;
+    const locked = (meta.locked ?? []).includes(stream);
+    const nameInput = el("input", { type: "text", value: speaker?.name ?? name, maxlength: "60", "aria-label": "Name" });
+    const print = el("select", { "aria-label": "Voice print" },
+      el("option", { value: "" }, "None"),
+      ...(session.voiceprints ?? []).map((p) => el("option", { value: p.id, selected: speaker?.print?.id === p.id }, p.name)));
+    // A recognised print is linked to the person's own print id, which may not be the one listed for them.
+    if (speaker?.print && ![...print.options].some((o) => o.value === speaker.print.id)) {
+      print.append(el("option", { value: speaker.print.id, selected: true }, speaker.print.name));
+    }
+    const original = print.value;
+    print.addEventListener("change", () => {
+      const chosen = print.selectedOptions[0];
+      if (print.value) nameInput.value = chosen.textContent;
+    });
+    const lock = el("input", { type: "checkbox", checked: locked });
+    const start = el("input", { type: "text", class: "mono", size: "9", value: signedClock(offset).replace("−", "-"), "aria-label": "Starts at" });
+    const status = el("div", { class: "hint", role: "status" });
+    const fail = (e) => status.replaceChildren(el("span", { class: "danger" }, String(e?.message ?? e)));
+    // Bookmarks made in an imported session line it up with the same moment marked here.
+    let lineUp = null;
+    let lined = false;
+    const theirs = imported?.markers ?? [];
+    const mine = allMarkers.filter((m) => !m.removed);
+    if (theirs.length && mine.length) {
+      const label = (m, at) => `${markerLabel(m)}${markerNote(m) ? ` “${markerNote(m)}”` : ""} · ${clock(at)}`;
+      const theirSelect = el("select", { "aria-label": "Their bookmark" }, theirs.map((m, k) => el("option", { value: k }, label(m, m.at_s))));
+      const mineSelect = el("select", { "aria-label": "Your bookmark" }, mine.map((m, k) => el("option", { value: k }, label(m, m.at_s))));
+      // The same note in both, such as "Sync", is the likely pair.
+      const same = (a, b) => (markerNote(a) || "").trim().toLowerCase() === (markerNote(b) || "").trim().toLowerCase();
+      const pair = theirs.findIndex((t) => markerNote(t) && mine.some((m) => same(t, m)));
+      if (pair >= 0) {
+        theirSelect.value = String(pair);
+        mineSelect.value = String(mine.findIndex((m) => same(theirs[pair], m)));
+      }
+      const go = el("button", { class: "pill", type: "button" }, "Line up");
+      go.addEventListener("click", async () => {
+        go.disabled = true;
+        try {
+          const moved = await invoke("line_up_track", { id, name: stream, ownS: theirs[theirSelect.value].at_s, meetingS: mine[mineSelect.value].at_s });
+          start.value = signedClock(moved.offset_s).replace("−", "-");
+          status.replaceChildren(`Lined up: it now starts ${signedClock(moved.offset_s)} into the meeting. Close this to hear it there; its lines in the transcript follow when you transcribe again.`);
+          lined = true;
+        } catch (e) { fail(e); }
+        go.disabled = false;
+      });
+      lineUp = el("div", { class: "field" }, el("span", {}, "Line up by a bookmark",
+        el("small", {}, "Their bookmark is the same moment as yours, such as one everyone made at once.")),
+        el("div", { class: "row-pick" }, theirSelect, el("span", { class: "hint" }, "is"), mineSelect, go));
+    }
+    const whose = group.length > 1 ? ` Moves all ${group.length} tracks recorded with it.` : "";
+    const saveButton = el("button", { class: "primary pill", type: "button" }, "Save");
+    const dialog = el("dialog", { class: "sheet track-dialog", "aria-label": `Track ${name}` },
+      el("h2", {}, name),
+      el("p", { class: "hint source" }, imported ? `Imported · ${placedText(imported, meta.created)}` : trackDetails(name, meta.tracks?.[stream]).split("\n").slice(0, 2).join(" · ")),
+      el("label", { class: "field" }, el("span", {}, "Name", el("small", {}, "Who is on this track, or what it recorded.")), nameInput),
+      el("label", { class: "field" }, el("span", {}, "Voice print", el("small", {}, "Links the person, so the voice print names them.")), print),
+      el("label", { class: "field check" }, lock, el("span", {}, "Everything on this track is this person",
+        el("small", {}, "For when each person has their own microphone or call track. Lines you moved by hand stay put."))),
+      el("label", { class: "field" }, el("span", {}, "Starts at",
+        el("small", {}, `minutes:seconds into the meeting; − if it starts before. You hear a move straight away; its lines in the transcript follow when you transcribe again.${whose}`)), start),
+      lineUp, status,
+      el("div", { class: "actions" }, el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"), saveButton));
+    saveButton.addEventListener("click", async () => {
+      const at = parseStart(start.value);
+      if (at == null) return fail("Type where it starts as minutes:seconds, such as 0:01.5 or -0:00.4.");
+      saveButton.disabled = true;
+      try {
+        if (print.value !== original) await invoke("link_speaker", { id, key: stream, print: print.value || null, learn: false });
+        const typed = nameInput.value.trim();
+        const printName = print.value ? print.selectedOptions[0].textContent : null;
+        if (typed && typed !== (speaker?.name ?? name) && typed !== printName) await invoke("rename_speaker", { id, key: stream, name: typed });
+        const moved = Math.abs(at - offset) > 0.004 && !lined;
+        if (moved || lock.checked !== locked) {
+          await invoke("set_track", { id, name: stream, offsetS: moved ? at : null, lock: lock.checked !== locked ? lock.checked : null });
+        }
+        lined = false;
+        dialog.close();
+        reload();
+      } catch (e) {
+        saveButton.disabled = false;
+        fail(e);
+      }
+    });
+    dialog.addEventListener("close", () => { dialog.remove(); if (lined) reload(); });
+    document.body.append(dialog);
+    dialog.showModal();
+    nameInput.focus();
+  };
   const recordedTrackMenu = (stream, name) => {
     const heard = scriptLines.filter((s) => s.stream === stream).length;
     const edited = session.segments.filter((s) => s.stream === stream && s.edited).length;
@@ -2985,12 +3101,17 @@ function renderSession(session, processingError, suggestion) {
   const tracks = el("div", { class: "tracks" });
   // Removing tracks leaves the transcript as it was until it's transcribed again, so several can go first.
   const removed = meta.tracks_removed ?? [];
-  if (removed.length && !meta.compacted) {
-    const names = removed.length === 1 ? removed[0] : `${removed.slice(0, -1).join(", ")} and ${removed.at(-1)}`;
+  const changed = (meta.tracks_changed ?? []).filter((n) => !removed.includes(n));
+  if ((removed.length || changed.length) && !meta.compacted) {
+    const list = (names) => names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
     const again = el("button", { class: "primary pill", type: "button", disabled: session.busy || !session.model_ready }, "Transcribe again");
     again.addEventListener("click", () => processAgain(id));
-    tracks.append(el("div", { class: "inline-form track-removed", role: "status" },
-      el("p", {}, `Removed ${names}. The transcript still has what ${removed.length === 1 ? "it" : "they"} heard until you transcribe the meeting again.`), again));
+    const said = [
+      removed.length ? `Removed ${list(removed)}.` : "",
+      changed.length ? `Changed ${list(changed)}: moves play where you put them now.` : "",
+      "The transcript catches up when you transcribe the meeting again.",
+    ].filter(Boolean).join(" ");
+    tracks.append(el("div", { class: "inline-form track-removed", role: "status" }, el("p", {}, said), again));
   }
   if (streams.length) {
     const head = el("span", { class: "playhead" });
@@ -3007,7 +3128,12 @@ function renderSession(session, processingError, suggestion) {
       used: scriptLines.filter((s) => s.stream === stream).flatMap(clipSpans),
     }]));
     const within = (spans, t) => spans.some(([a, b]) => t >= a && t < b);
-    const quietAt = (stream, t) => within(quietIn.get(stream).greyed, t) && !within(quietIn.get(stream).used, t);
+    // A track moved since it was transcribed: its clips are that much later until it's transcribed again.
+    const shiftOf = (stream) => session.pending_offsets?.[stream] ?? 0;
+    const quietAt = (stream, t) => {
+      const own = t - shiftOf(stream);
+      return within(quietIn.get(stream).greyed, own) && !within(quietIn.get(stream).used, own);
+    };
     const muteButtons = new Map();
     const manualMuted = new Set();
     const applyMix = (t) => {
@@ -3039,6 +3165,7 @@ function renderSession(session, processingError, suggestion) {
       const mute = el("button", { class: "mute", "aria-pressed": "false", title: `Mute ${name}. In the transcript mix it lights up while the track is muted; pressing it switches to Manual.` }, "M");
       mute.addEventListener("click", (e) => {
         e.stopPropagation();
+        if (e.detail) mute.blur();
         // Taking over from the transcript mix starts from every track playing.
         if (playMix === "transcript") { playMix = "manual"; manualMuted.clear(); drawMix(); }
         manualMuted.has(stream) ? manualMuted.delete(stream) : manualMuted.add(stream);
@@ -3063,38 +3190,171 @@ function renderSession(session, processingError, suggestion) {
       const used = scriptLines.filter((s) => s.stream === stream).flatMap((s) => spans(s).map(([a, b]) => clip(a, b,
         `background:${strong.get(s.speaker) ?? "var(--key-light)"}`,
         `${session.speakers.find((sp) => sp.key === s.speaker)?.name ?? ""} · ${clock(s.start_s)}`)));
-      const bar = el("span", { class: "bar" }, greyed, used,
+      const imported = session.imports?.find((i) => i.name === stream);
+      const theirTicks = (imported?.markers ?? []).filter((m) => !m.removed).map((m) => {
+        // Drawn in the strip, which is already moved by any move not yet transcribed.
+        const at = imported.offset_s - shiftOf(stream) + m.at_s * (imported.rate || 1);
+        const note = markerNote(m);
+        const tick = el("i", { class: `theirs${isAction(m) ? " action" : ""}`, style: `left:${(100 * at) / duration}%`,
+          title: `${markerLabel(m)} made in this recording · ${clock(at)}${note ? ` · ${note}` : ""} · click to go there` });
+        tick.addEventListener("click", (e) => { e.stopPropagation(); player?.seek(at + shiftOf(stream)); });
+        return tick;
+      });
+      const bar = el("span", { class: "bar" }, el("span", { class: "bar-inner", style: `--shift:${shiftOf(stream) / duration}` }, greyed, used, imported ? theirTicks :
         allMarkers.map((m) => {
           const note = markerNote(m);
-          const tick = el("i", { class: isAction(m) ? "action" : "", style: `left:${(100 * m.at_s) / duration}%`, title: `${markerLabel(m)} · ${clock(m.at_s)}${note ? ` · ${note}` : ""} · click to change or delete` });
+          // The meeting's own marks stay put when a track's strip is moved.
+          const tick = el("i", { class: isAction(m) ? "action" : "", style: `left:${(100 * (m.at_s - shiftOf(stream))) / duration}%`, title: `${markerLabel(m)} · ${clock(m.at_s)}${note ? ` · ${note}` : ""} · click to change or delete` });
           tick.addEventListener("click", (e) => {
             e.stopPropagation();
             player?.seek(m.at_s);
             markerEditors.get(m)?.();
           });
           return tick;
-        }));
-      // An imported track has a menu: sync it, say where it starts, or take it out.
-      const imported = session.imports?.find((i) => i.name === stream);
-      const nameEl = el("span", { class: "name", style: `color:${strong.get(stream) ?? "inherit"}`,
-        title: imported ? `${name} · imported · ${placedText(imported, meta.created)}` : trackDetails(name, meta.tracks?.[stream]) }, name);
+        })));
+      // The name opens the track's settings; an imported track also has a menu to sync it or take it out.
+      const details = imported ? `${name} · imported · ${placedText(imported, meta.created)}` : trackDetails(name, meta.tracks?.[stream]);
+      const flags = [(meta.locked ?? []).includes(stream) ? "everything on it is them" : "", meta.track_offsets?.[stream] ? `moved ${signedClock(meta.track_offsets[stream])}` : ""].filter(Boolean);
+      const nameEl = el("span", { class: "name", role: "button", tabindex: "0", style: `color:${strong.get(stream) ?? "inherit"}`,
+        title: `${details}${flags.length ? `
+${flags.join(" · ")}` : ""}
+Click for who is on it and where it starts` }, name);
+      const openSettings = (e) => { e.stopPropagation(); if (!meta.compacted) trackDialog(stream, name); };
+      nameEl.addEventListener("click", openSettings);
+      nameEl.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSettings(e); } });
       // A recorded track can be taken out too, as one that heard nothing or doubles another.
       const menu = imported ? importMenu(id, imported, name, page, meta.created)
         : streams.length > 1 && !meta.compacted && !session.busy ? recordedTrackMenu(stream, name) : null;
       lanes.append(el("div", { class: "track" }, menu ? el("span", { class: "name-wrap" }, nameEl, menu) : nameEl, mute, bar));
     }
     lanes.append(head);
+    // Zoom: the part of the meeting the bars show, from `pan` (a fraction of it) at `zoom` times. The wheel
+    // zooms around the pointer (Shift or a sideways scroll moves along); two fingers pinch, one drags.
+    if (trackView.id !== id) trackView = { id, zoom: 1, pan: 0 };
+    const maxZoom = Math.max(1, duration / 4);
+    const fitButton = el("button", { class: "pill zoom-fit", type: "button", title: "Show the whole meeting again (zoom with the mouse wheel; pinch on a touch screen)" });
+    const barRect = () => lanes.querySelector(".bar").getBoundingClientRect();
+    const setView = (zoom, pan) => {
+      zoom = Math.min(maxZoom, Math.max(1, zoom));
+      pan = Math.min(1 - 1 / zoom, Math.max(0, pan));
+      const same = Math.abs(zoom - trackView.zoom) < 1e-6 && Math.abs(pan - trackView.pan) < 1e-9;
+      trackView.zoom = zoom;
+      trackView.pan = pan;
+      lanes.style.setProperty("--zoom", zoom);
+      lanes.style.setProperty("--pan", pan);
+      lanes.classList.toggle("zoomed", zoom > 1.001);
+      fitButton.hidden = zoom <= 1.001;
+      fitButton.textContent = `${zoom < 10 ? zoom.toFixed(1) : Math.round(zoom)}× · Fit`;
+      if (player) onTick(player.t, player.playing);
+      return !same;
+    };
+    // The meeting's time at a point across the bars, as they're zoomed.
+    const timeAt = (clientX) => {
+      const rect = barRect();
+      return (trackView.pan + (clientX - rect.left) / rect.width / trackView.zoom) * duration;
+    };
+    const zoomAround = (clientX, zoom) => {
+      const rect = barRect();
+      const fx = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      const at = trackView.pan + fx / trackView.zoom;
+      const next = Math.min(maxZoom, Math.max(1, zoom));
+      return setView(next, at - fx / next);
+    };
+    fitButton.addEventListener("click", () => setView(1, 0));
+    let dragged = false;
     lanes.addEventListener("click", (e) => {
-      const bar = lanes.querySelector(".bar").getBoundingClientRect();
-      const fraction = (e.clientX - bar.left) / bar.width;
-      if (fraction >= 0 && fraction <= 1) player?.seek(fraction * duration);
+      if (dragged) { dragged = false; return; }
+      const rect = barRect();
+      if (e.clientX >= rect.left && e.clientX <= rect.right) player?.seek(timeAt(e.clientX));
+    });
+    lanes.addEventListener("wheel", (e) => {
+      const rect = barRect();
+      if (e.clientX < rect.left || e.clientX > rect.right) return;
+      const sideways = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
+      const delta = (sideways ? (e.deltaX || e.deltaY) : e.deltaY) * (e.deltaMode === 1 ? 33 : 1);
+      const changed = sideways
+        ? setView(trackView.zoom, trackView.pan + delta / rect.width / trackView.zoom)
+        : zoomAround(e.clientX, trackView.zoom * Math.exp(-delta * 0.002));
+      if (changed) e.preventDefault();
+    }, { passive: false });
+    // Holding the mouse down and dragging moves along a zoomed timeline; a click without moving still seeks.
+    let mouse = null;
+    lanes.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "mouse" || e.button !== 0 || trackView.zoom <= 1.001 || e.target.closest("button, [role=button], i")) return;
+      mouse = { x: e.clientX, pan: trackView.pan, moved: false, id: e.pointerId };
+    });
+    lanes.addEventListener("pointermove", (e) => {
+      if (!mouse || e.pointerId !== mouse.id) return;
+      const dx = e.clientX - mouse.x;
+      if (!mouse.moved && Math.abs(dx) > 4) {
+        mouse.moved = true;
+        lanes.setPointerCapture(e.pointerId);
+        lanes.classList.add("dragging");
+      }
+      if (mouse.moved) setView(trackView.zoom, mouse.pan - dx / barRect().width / trackView.zoom);
+    });
+    const endDrag = () => {
+      if (mouse?.moved) {
+        dragged = true;
+        setTimeout(() => { dragged = false; }, 0);
+      }
+      mouse = null;
+      lanes.classList.remove("dragging");
+    };
+    lanes.addEventListener("pointerup", endDrag);
+    lanes.addEventListener("pointercancel", endDrag);
+    let touch = null;
+    const spread = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
+    const middle = (ts) => (ts[0].clientX + ts[1].clientX) / 2;
+    lanes.addEventListener("touchstart", (e) => {
+      const ts = e.touches;
+      if (ts.length === 2) {
+        const rect = barRect();
+        const fx = (middle(ts) - rect.left) / rect.width;
+        touch = { pinch: true, spread: spread(ts), zoom: trackView.zoom, at: trackView.pan + fx / trackView.zoom };
+      } else if (ts.length === 1) {
+        touch = { pinch: false, x: ts[0].clientX, pan: trackView.pan, moved: false };
+      }
+    }, { passive: true });
+    lanes.addEventListener("touchmove", (e) => {
+      if (!touch) return;
+      const ts = e.touches;
+      const rect = barRect();
+      if (touch.pinch && ts.length === 2) {
+        e.preventDefault();
+        const zoom = Math.min(maxZoom, Math.max(1, touch.zoom * spread(ts) / Math.max(1, touch.spread)));
+        setView(zoom, touch.at - (middle(ts) - rect.left) / rect.width / zoom);
+      } else if (!touch.pinch && ts.length === 1 && trackView.zoom > 1.001) {
+        const dx = ts[0].clientX - touch.x;
+        if (Math.abs(dx) > 8) touch.moved = true;
+        if (touch.moved) {
+          e.preventDefault();
+          setView(trackView.zoom, touch.pan - dx / rect.width / trackView.zoom);
+        }
+      }
+    }, { passive: false });
+    lanes.addEventListener("touchend", (e) => {
+      if (touch?.moved || touch?.pinch) {
+        dragged = true;
+        setTimeout(() => { dragged = false; }, 400);
+      }
+      if (!e.touches.length) touch = null;
     });
     const onTick = (t, playing) => {
       const bar = lanes.querySelector(".bar");
       if (bar) {
+        // While playing, the view follows the playhead.
+        const { zoom, pan } = trackView;
+        const at = t / duration;
+        if (playing && zoom > 1.001 && (at < pan || at > pan + 1 / zoom)) {
+          trackView.pan = Math.min(1 - 1 / zoom, Math.max(0, at - 0.1 / zoom));
+          lanes.style.setProperty("--pan", trackView.pan);
+        }
         const lanesRect = lanes.getBoundingClientRect();
         const rect = bar.getBoundingClientRect();
-        head.style.left = `${rect.left - lanesRect.left + (rect.width * t) / duration}px`;
+        const fx = (at - trackView.pan) * trackView.zoom;
+        head.hidden = fx < 0 || fx > 1;
+        head.style.left = `${rect.left - lanesRect.left + rect.width * fx}px`;
       }
       timeLabel.textContent = `${clock(t)} / ${clock(duration)}`;
       if (meta.created) timeLabel.title = `${dayClock(meta.created + t)} by the time of day`;
@@ -3143,10 +3403,11 @@ function renderSession(session, processingError, suggestion) {
       playButton, mini,
       el("button", { class: "pill", "aria-label": "Forward 5 seconds", title: "Forward 5 seconds (Alt + →)", onclick: () => player?.seek(player.t + 5) }, "+5"),
       el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item (→)", onclick: nextClip }, svg("skip-forward", 16)),
-      timeLabel, el("span", { class: "grow" }), mixLabel,
+      timeLabel, fitButton, el("span", { class: "grow" }), mixLabel,
       meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id, meta.created), "aria-label": "Import a recording" }, svg("import", 14), el("span", { class: "wide-only" }, "Import")), fold));
     player.prevClip = prevClip;
     player.nextClip = nextClip;
+    setView(trackView.zoom, trackView.pan);
     requestAnimationFrame(() => player?.seek(keepTime));
   }
   // At the end of the transcript, as at the end of a note: copies it all, and says how many words that is.
@@ -3439,6 +3700,8 @@ function markerNote(m) {
 const labelling = new Set();
 /// The meeting page's tracks are folded to a play button on a phone until something is played: the meeting they're open for.
 let tracksOpenFor = null;
+/// How far the tracks are zoomed in, kept while a meeting is redrawn.
+let trackView = { id: null, zoom: 1, pan: 0 };
 
 // A suggested label for an action item has been written, or couldn't be.
 listen("analysed", async (e) => {
@@ -3514,7 +3777,8 @@ window.addEventListener("keydown", (e) => {
   // Playing back a meeting.
   if (view.kind !== "session" || !player || typingIn(t)) return;
   if (e.code === "Space" && !e.ctrlKey && !e.altKey) {
-    if (t.tagName === "BUTTON" || t.getAttribute?.("role") === "button") return;
+    // A track's mute button keeps Space for playing and pausing; other buttons press as usual.
+    if ((t.tagName === "BUTTON" || t.getAttribute?.("role") === "button") && !t.classList?.contains("mute")) return;
     e.preventDefault();
     player.toggle();
   } else if (key === "ArrowLeft" || key === "ArrowRight") {

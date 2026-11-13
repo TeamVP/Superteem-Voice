@@ -466,6 +466,8 @@ struct SessionView {
     busy: bool,
     /// Tracks added after recording, with where each starts.
     imports: Vec<imports::Import>,
+    /// Seconds later each moved track plays than its audio file has it, until it's transcribed again.
+    pending_offsets: BTreeMap<String, f64>,
 }
 
 #[derive(Serialize)]
@@ -543,6 +545,7 @@ fn get_session(state: State<AppState>, id: String) -> Result<SessionView, String
         keyphrases: keyphrases::load_session(&dir),
         audio_bytes: library::audio_bytes(&dir),
         imports: imports::load(&dir),
+        pending_offsets: pending_offsets(&dir, &meta),
         busy,
         id,
         meta,
@@ -835,7 +838,9 @@ fn link_speaker(state: State<AppState>, id: String, key: String, print: Option<S
         // are no longer offered for anyone else.
         let person = found.person().to_string();
         let theirs = |l: &PrintLink| prints.iter().find(|p| p.id == l.id).is_some_and(|p| p.person() == person);
-        meta.prints.retain(|k, l| k == &key || !theirs(l));
+        // Someone heard on several tracks, as on their microphone and a call app, can be linked on each;
+        // only a guess that it was them elsewhere goes.
+        meta.prints.retain(|k, l| k == &key || !theirs(l) || l.score.is_none());
         for list in meta.suggested.values_mut() {
             list.retain(|l| !theirs(l));
         }
@@ -2819,6 +2824,94 @@ fn set_track_offset(state: State<AppState>, id: String, name: String, offset_s: 
     imports::set_offset(&library::session_dir(&id)?, &name, offset_s)
 }
 
+/// A track's settings from its dialog: where it starts (`offset_s` into the meeting), and whether everything
+/// on it is its own speaker (`lock`). Locking takes effect at once; a move when the meeting is transcribed
+/// again, which the page offers.
+#[tauri::command]
+fn set_track(state: State<AppState>, id: String, name: String, offset_s: Option<f64>, lock: Option<bool>) -> Result<(), String> {
+    let _guard = state.edit.lock().unwrap();
+    let dir = library::session_dir(&id)?;
+    let mut meta = library::load_meta(&dir);
+    let mut segments = library::load_segments(&dir);
+    let shown = |meta: &Meta| {
+        let n = meta.name(&name);
+        if n == name { meta.track_name(&name).unwrap_or(n) } else { n }
+    };
+    let mut changed = false;
+    if let Some(offset_s) = offset_s {
+        let offset_s = (offset_s * 100.0).round() / 100.0;
+        let group = imports::group_offsets(&dir, &name);
+        if !group.is_empty() {
+            remember_audio_offsets(&mut meta, &group);
+            imports::move_to(&dir, &name, offset_s)?;
+        } else {
+            let now = meta.track_offsets.get(&name).copied().unwrap_or(0.0);
+            remember_audio_offsets(&mut meta, &[(name.clone(), now)]);
+            if offset_s == 0.0 {
+                meta.track_offsets.remove(&name);
+            } else {
+                meta.track_offsets.insert(name.clone(), offset_s);
+            }
+        }
+        changed = true;
+    }
+    if let Some(lock) = lock {
+        meta.locked.retain(|k| k != &name);
+        if lock {
+            meta.locked.push(name.clone());
+            // What the person corrected by hand stays theirs.
+            for s in segments.iter_mut().filter(|s| s.stream == name && !s.edited) {
+                s.speaker = name.clone();
+            }
+        }
+        changed = true;
+    }
+    let label = shown(&meta);
+    if changed && !meta.tracks_changed.contains(&label) {
+        meta.tracks_changed.push(label);
+    }
+    library::save(&dir, &meta, &segments)
+}
+
+/// Lines an imported track, and the tracks recorded with it, up by a moment marked in both recordings.
+#[tauri::command]
+fn line_up_track(state: State<AppState>, id: String, name: String, own_s: f64, meeting_s: f64) -> Result<imports::Import, String> {
+    let _guard = state.edit.lock().unwrap();
+    let dir = library::session_dir(&id)?;
+    let mut meta = library::load_meta(&dir);
+    remember_audio_offsets(&mut meta, &imports::group_offsets(&dir, &name));
+    let found = imports::line_up(&dir, &name, own_s, meeting_s)?;
+    let label = meta.name(&name);
+    if !meta.tracks_changed.contains(&label) {
+        meta.tracks_changed.push(label);
+    }
+    library::write_json(&dir.join(library::META), &meta)?;
+    Ok(found)
+}
+
+/// Before a track first moves, notes where its audio file has it, for meetings transcribed before this
+/// was kept.
+fn remember_audio_offsets(meta: &mut Meta, tracks: &[(String, f64)]) {
+    for (name, now) in tracks {
+        meta.audio_offsets.entry(name.clone()).or_insert(*now);
+    }
+}
+
+/// How much later each track plays than its audio file has it, after moves not yet transcribed.
+fn pending_offsets(dir: &Path, meta: &Meta) -> BTreeMap<String, f64> {
+    let mut now: BTreeMap<String, f64> = imports::load(dir).into_iter().map(|i| (i.name, i.offset_s)).collect();
+    for (name, _) in &meta.audio_offsets {
+        if !now.contains_key(name) {
+            now.insert(name.clone(), meta.track_offsets.get(name).copied().unwrap_or(0.0));
+        }
+    }
+    meta.audio_offsets
+        .iter()
+        .filter_map(|(name, was)| now.get(name).map(|n| (name.clone(), n - was)))
+        .filter(|(_, d)| d.abs() > 0.001)
+        .collect()
+}
+
 /// Adds another person's recording of this meeting from their session folder or a zip of it.
 #[tauri::command]
 async fn import_session<R: Runtime>(app: AppHandle<R>, id: String, path: String, owner: String) -> Result<imports::SessionImport, String> {
@@ -3139,6 +3232,8 @@ pub fn run() {
             save_voice_settings,
             import_track,
             import_session,
+            set_track,
+            line_up_track,
             sync_track,
             set_track_start,
             set_track_offset,

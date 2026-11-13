@@ -55,6 +55,39 @@ pub struct Import {
     /// The other person's session it came from ("session-1794553387"), when a whole session was imported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_session: Option<String>,
+    /// The bookmarks and action items made in that session, on its own timeline (seconds into it).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<library::Marker>,
+}
+
+impl Import {
+    /// Where a moment of its own recording falls in the meeting.
+    pub fn meeting_time(&self, own_s: f64) -> f64 {
+        self.offset_s + own_s * self.rate
+    }
+}
+
+/// The tracks recorded with `name`: all of one imported session's, which move together, or just itself.
+fn group_of(imports: &[Import], name: &str) -> Vec<usize> {
+    let from = imports.iter().find(|i| i.name == name).and_then(|i| i.from_session.clone());
+    (0..imports.len())
+        .filter(|&k| imports[k].name == name || (from.is_some() && imports[k].from_session == from))
+        .collect()
+}
+
+/// Applies a new placing to `name` and the tracks recorded with it.
+fn place_group(dir: &Path, name: &str, change: impl Fn(&mut Import)) -> Result<Import, String> {
+    let mut imports = load(dir);
+    let group = group_of(&imports, name);
+    if group.is_empty() {
+        return Err("That track no longer exists.".into());
+    }
+    for &k in &group {
+        change(&mut imports[k]);
+    }
+    let found = imports.iter().find(|i| i.name == name).cloned().expect("in its group");
+    save(dir, &imports)?;
+    Ok(found)
 }
 
 /// How to place a track being added.
@@ -166,8 +199,22 @@ fn reference(dir: &Path, except: &str) -> Result<Vec<i16>, String> {
 /// is now, as placed by the time of day; otherwise anywhere in the meeting. When nothing matches clearly it
 /// stays where it was, and the error says so.
 pub fn sync(dir: &Path, name: &str, near: bool) -> Result<Import, String> {
-    let mut imports = load(dir);
-    let import = imports.iter_mut().find(|i| i.name == name).ok_or("That track no longer exists.")?;
+    let fit = fit_of(dir, name, near)?;
+    place_group(dir, name, |i| apply_fit(i, &fit))
+}
+
+fn apply_fit(import: &mut Import, fit: &stv_core::sync::Fit) {
+    import.offset_s = fit.offset_s;
+    import.rate = fit.rate;
+    import.confidence = Some(fit.confidence);
+    import.matched = Some([fit.matched, fit.tried]);
+    import.placed_by = "sound".into();
+}
+
+/// Where an import's sound fits against the recorded tracks, without moving it.
+fn fit_of(dir: &Path, name: &str, near: bool) -> Result<stv_core::sync::Fit, String> {
+    let imports = load(dir);
+    let import = imports.iter().find(|i| i.name == name).ok_or("That track no longer exists.")?;
     let reference = reference(dir, name)?;
     let pcm = read_pcm(&source_path(dir, name))?;
     let fit = if near {
@@ -180,14 +227,7 @@ pub fn sync(dir: &Path, name: &str, near: bool) -> Result<Import, String> {
         stv_core::sync::fit(&reference, &pcm, RATE, around, 3.0)
             .ok_or("Its sound didn't clearly match the other tracks anywhere, so it stays where it was.")?
     };
-    import.offset_s = fit.offset_s;
-    import.rate = fit.rate;
-    import.confidence = Some(fit.confidence);
-    import.matched = Some([fit.matched, fit.tried]);
-    import.placed_by = "sound".into();
-    let found = import.clone();
-    save(dir, &imports)?;
-    Ok(found)
+    Ok(fit)
 }
 
 /// Adds a track: `pcm` is 16 kHz mono. It's named by `label`, the name shown for it, and placed as `place`
@@ -216,6 +256,7 @@ pub fn add(dir: &Path, label: &str, pcm: &[i16], place: Place) -> Result<Import,
         matched: None,
         seconds: pcm.len() as f64 / RATE as f64,
         from_session: None,
+        markers: Vec::new(),
     });
     save(dir, &imports)?;
     let mut meta: Meta = library::load_meta(dir);
@@ -237,31 +278,65 @@ pub fn add(dir: &Path, label: &str, pcm: &[i16], place: Place) -> Result<Import,
 }
 
 /// Places a track by hand: it starts `offset_s` into the meeting, at the meeting's own speed.
+/// The tracks recorded with it move too.
 pub fn set_offset(dir: &Path, name: &str, offset_s: f64) -> Result<(), String> {
     let start = meeting_start(dir);
-    let mut imports = load(dir);
-    let import = imports.iter_mut().find(|i| i.name == name).ok_or("That track no longer exists.")?;
-    import.offset_s = offset_s;
-    import.started_at = Some(start + offset_s);
-    import.rate = 1.0;
-    import.confidence = None;
-    import.matched = None;
-    import.placed_by = "hand".into();
-    save(dir, &imports)
+    place_group(dir, name, |import| {
+        import.offset_s = offset_s;
+        import.started_at = Some(start + offset_s);
+        import.rate = 1.0;
+        import.confidence = None;
+        import.matched = None;
+        import.placed_by = "hand".into();
+    })
+    .map(|_| ())
+}
+
+/// The tracks recorded with `name`, with where each starts now.
+pub fn group_offsets(dir: &Path, name: &str) -> Vec<(String, f64)> {
+    let imports = load(dir);
+    group_of(&imports, name).into_iter().map(|k| (imports[k].name.clone(), imports[k].offset_s)).collect()
+}
+
+/// Moves a track by hand to start `offset_s` into the meeting, keeping the speed matching found; the
+/// tracks recorded with it move too.
+pub fn move_to(dir: &Path, name: &str, offset_s: f64) -> Result<Import, String> {
+    let start = meeting_start(dir);
+    place_group(dir, name, |import| {
+        import.offset_s = offset_s;
+        import.started_at = Some(start + offset_s);
+        import.confidence = None;
+        import.matched = None;
+        import.placed_by = "hand".into();
+    })
+}
+
+/// Lines a track up by a moment marked in both recordings, such as a bookmark everyone made at once:
+/// `own_s` into its own recording is `meeting_s` into the meeting. The tracks recorded with it move too, and
+/// keep the speed matching their sound found.
+pub fn line_up(dir: &Path, name: &str, own_s: f64, meeting_s: f64) -> Result<Import, String> {
+    let start = meeting_start(dir);
+    place_group(dir, name, |import| {
+        import.offset_s = meeting_s - own_s * import.rate;
+        import.started_at = Some(start + import.offset_s);
+        import.confidence = None;
+        import.matched = None;
+        import.placed_by = "bookmark".into();
+    })
 }
 
 /// Places a track by the time of day it started (Unix seconds).
 pub fn set_start_time(dir: &Path, name: &str, started_at: f64) -> Result<(), String> {
     let start = meeting_start(dir);
-    let mut imports = load(dir);
-    let import = imports.iter_mut().find(|i| i.name == name).ok_or("That track no longer exists.")?;
-    import.offset_s = started_at - start;
-    import.started_at = Some(started_at);
-    import.rate = 1.0;
-    import.confidence = None;
-    import.matched = None;
-    import.placed_by = "time".into();
-    save(dir, &imports)
+    place_group(dir, name, |import| {
+        import.offset_s = started_at - start;
+        import.started_at = Some(started_at);
+        import.rate = 1.0;
+        import.confidence = None;
+        import.matched = None;
+        import.placed_by = "time".into();
+    })
+    .map(|_| ())
 }
 
 /// Louder than this somewhere, or the track heard nothing worth adding (about -56 dB).
@@ -414,22 +489,15 @@ fn add_session_from(dir: &Path, path: &Path, owner: &str, temp: &Path) -> Result
         added.push(add(dir, &label, pcm, Place::Time { started_at: start as f64, refine: false })?.name);
     }
     // The track whose sound matches most surely places them all.
-    let best = added
-        .iter()
-        .filter_map(|name| sync(dir, name, true).ok())
-        .max_by(|a, b| a.confidence.unwrap_or(0.0).total_cmp(&b.confidence.unwrap_or(0.0)));
+    let best = added.iter().filter_map(|name| fit_of(dir, name, true).ok()).max_by(|a, b| a.confidence.total_cmp(&b.confidence));
+    let markers: Vec<library::Marker> = theirs.markers.iter().filter(|m| !m.removed).cloned().collect();
     let by_time = start as f64 - meeting_start(dir);
     let mut imports = load(dir);
     for import in imports.iter_mut().filter(|i| added.contains(&i.name)) {
         import.from_session = Some(from.clone());
+        import.markers = markers.clone();
         match &best {
-            Some(b) => {
-                import.offset_s = b.offset_s;
-                import.rate = b.rate;
-                import.confidence = b.confidence;
-                import.matched = b.matched;
-                import.placed_by = "sound".into();
-            }
+            Some(b) => apply_fit(import, b),
             None => {
                 import.offset_s = by_time;
                 import.rate = 1.0;
@@ -528,6 +596,7 @@ mod tests {
         std::fs::create_dir_all(&theirs).unwrap();
         let mut meta = Meta { created: 1_000_003, ..Default::default() };
         meta.names.insert("input1".into(), "Lin".into());
+        meta.markers.push(library::Marker { at_s: 10.0, text: "Sync".into(), kind: String::new(), removed: false });
         library::write_json(&theirs.join("meta.json"), &meta).unwrap();
         export::write_wav(&theirs.join("input1.wav"), &meeting[(4.2 * RATE as f64) as usize..], RATE).unwrap();
         export::write_wav(&theirs.join("input2.wav"), &vec![3i16; 60 * RATE as usize], RATE).unwrap();
@@ -540,6 +609,11 @@ mod tests {
         assert_eq!(import.from_session.as_deref(), Some("session-1000003"));
         assert_eq!(library::load_meta(&mine).names[&import.name], "Lin");
         assert!(add_session(&mine, &theirs, "").unwrap_err().contains("already"));
+        // Their bookmarks come too, and can line them up: their "Sync" at 10 s is 14 s into the meeting.
+        assert_eq!(import.markers.len(), 1);
+        assert!((import.meeting_time(10.0) - 14.2).abs() < 0.06);
+        let moved = line_up(&mine, &import.name, 10.0, 14.0).unwrap();
+        assert!((moved.meeting_time(10.0) - 14.0).abs() < 1e-9 && moved.placed_by == "bookmark");
 
         // The same as a zip, named by its owner when it only names a device.
         remove(&mine, &import.name).unwrap();

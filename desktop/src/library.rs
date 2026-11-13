@@ -189,6 +189,22 @@ pub struct Meta {
     /// their lines until it is transcribed again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracks_removed: Vec<String>,
+    /// Tracks moved or locked to a speaker since it was last transcribed, by their names then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracks_changed: Vec<String>,
+    /// Recorded tracks moved on the timeline by hand: seconds later (or earlier, when negative) than they
+    /// were recorded, as for a call app's delay.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub track_offsets: BTreeMap<String, f64>,
+    /// Tracks where everything heard is the track's own speaker, as when each person has their own
+    /// microphone or call track.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locked: Vec<String>,
+    /// Where each track's audio file was put on the timeline when it was last transcribed: a recorded
+    /// track's move, or an import's start. A track moved since plays that much later until it's
+    /// transcribed again, so a move can be heard at once.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub audio_offsets: BTreeMap<String, f64>,
 }
 
 /// Workflow states a note or meeting can be in. Empty is the default: no status yet.
@@ -500,6 +516,8 @@ pub fn delete_track(dir: &Path, stream: &str) -> Result<(), String> {
     meta.names.remove(stream);
     meta.prints.remove(stream);
     meta.suggested.remove(stream);
+    meta.track_offsets.remove(stream);
+    meta.locked.retain(|k| k != stream);
     // A meeting not yet processed has no details or transcript to change.
     if has_meta(dir) {
         write_json(&dir.join(META), &meta)?;

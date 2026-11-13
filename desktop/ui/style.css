@@ -397,6 +397,24 @@ kbd { font: 600 11px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; paddi
 .track .bar i:hover { background: var(--text); width: 4px; }
 .track .bar i.action { background: var(--ok); }
 .playhead { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); pointer-events: none; }
+.playhead[hidden] { display: none; }
+/* Zoomed, each bar shows part of the meeting: the inner strip is the whole of it, moved along. */
+.track-lanes { --zoom: 1; --pan: 0; touch-action: pan-y; }
+.track .bar span.bar-inner { left: calc((var(--shift, 0) - var(--pan)) * var(--zoom) * 100%); width: calc(var(--zoom) * 100%); border-radius: 0; }
+.track-lanes.zoomed { cursor: grab; }
+.track-lanes.dragging { cursor: grabbing; user-select: none; }
+.track-lanes.zoomed .bar { border-radius: 0; }
+.track .bar i.theirs { background: var(--key-light); }
+.zoom-fit[hidden] { display: none; }
+.track .name[role="button"] { cursor: pointer; }
+.track .name[role="button"]:hover { text-decoration: underline; }
+dialog.track-dialog { max-width: 480px; max-height: calc(100% - 48px); overflow-y: auto; }
+dialog.track-dialog .source { margin: -6px 0 14px; font-size: 12px; }
+dialog.track-dialog input[type="text"] { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 15px; }
+dialog.track-dialog .field.check { flex-direction: row; align-items: flex-start; gap: 10px; }
+dialog.track-dialog .field.check input { margin-top: 3px; }
+dialog.track-dialog .row-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+dialog.track-dialog .row-pick select { flex: 1 1 140px; min-width: 0; font-size: 13px; }
 .transport { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .transport .play { width: 44px; height: 44px; border-radius: 22px; border: none; background: var(--key); color: #fff; padding: 0; display: flex; align-items: center; justify-content: center; }
 .transport .play:hover { background: var(--key-1); }
