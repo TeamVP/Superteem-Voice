@@ -115,8 +115,8 @@ pub struct Prefs {
     /// Which set of example vocabulary has been added (see `vocabulary::add_examples`), so each is added once
     /// and one the person deletes stays deleted.
     pub vocab_examples: u32,
-    /// Which example book has been copied in (see `books::install_example`). 1 is Plutarch's Lives. A book
-    /// the person deletes is not copied again.
+    /// Which example book has been copied in (see `books::install_example`). 2 is Plutarch's Lives, locked
+    /// for reading. A later set is copied again; once this set is in, deleting the book leaves it gone.
     pub example_books: u32,
     /// The suggestion to optimise for this device was dismissed.
     pub optimise_dismissed: bool,

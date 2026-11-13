@@ -89,6 +89,7 @@ def main() -> None:
         "updated": STAMP,
         "notes": notes,
         "parts": book_parts,
+        "editable": False,
     }
     (OUT / "plutarch-lives.json").write_text(json.dumps(book, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {len(notes)} notes in {len(book_parts)} parts")

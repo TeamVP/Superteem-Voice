@@ -1,6 +1,6 @@
 [package]
 name = "superteem-voice"
-version = "0.8.22"
+version = "0.8.23"
 edition = "2021"
 license = "GPL-3.0-only"
 
@@ -14,6 +14,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 stv-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The example book is compiled in, so a phone has it too. On Android the resource folder is a
+# URL (`asset://localhost/`), not a directory the app can copy from.
+include_dir = "0.7"
 tauri = { version = "2", features = ["protocol-asset", "custom-protocol"] }
 # Downloads trust Mozilla's roots built into the app plus the system's own store, which company proxies
 # add their certificates to. The system store alone left Android trusting nothing.

@@ -183,6 +183,9 @@ pub struct Rich {
 /// Saves the note, creating it when `id` is None, and returns its id. `rich` is given by the formatting
 /// editor, whose `body` is Markdown; without it the body is taken as it is and the note's format kept.
 pub fn save(id: Option<String>, title: String, body: String, keep_audio: bool, rich: Option<Rich>) -> Result<String, String> {
+    if let Some(id) = &id {
+        crate::books::protect(id)?;
+    }
     std::fs::create_dir_all(dir()).map_err(|e| e.to_string())?;
     let now = library::now();
     let mut note = match &id {
@@ -223,6 +226,7 @@ pub fn save(id: Option<String>, title: String, body: String, keep_audio: bool, r
 
 /// Archiving doesn't count as an edit, so the note keeps its place by date.
 pub fn set_archived(id: &str, archived: bool) -> Result<(), String> {
+    crate::books::protect(id)?;
     let mut note = load(id)?;
     note.archived = archived;
     library::write_json(&path(id)?, &note)
@@ -230,6 +234,7 @@ pub fn set_archived(id: &str, archived: bool) -> Result<(), String> {
 
 /// Like archiving, a status change keeps the note's place by date.
 pub fn set_status(id: &str, status: &str) -> Result<(), String> {
+    crate::books::protect(id)?;
     let mut note = load(id)?;
     note.status = library::check_status(status)?;
     library::write_json(&path(id)?, &note)
@@ -237,6 +242,7 @@ pub fn set_status(id: &str, status: &str) -> Result<(), String> {
 
 /// Like a status, languages don't count as an edit.
 pub fn set_languages(id: &str, languages: Vec<String>) -> Result<(), String> {
+    crate::books::protect(id)?;
     let mut note = load(id)?;
     note.languages = languages;
     note.language.clear();
@@ -244,6 +250,7 @@ pub fn set_languages(id: &str, languages: Vec<String>) -> Result<(), String> {
 }
 
 pub fn delete(id: &str) -> Result<(), String> {
+    crate::books::protect(id)?;
     remove_audio(Some(id));
     let file = path(id)?;
     let _ = std::fs::remove_file(file.with_extension("versions.json"));
@@ -325,6 +332,7 @@ pub fn file_path(id: &str, file: &str) -> Result<PathBuf, String> {
 
 /// Keeps a file with a note.
 pub fn add_file(id: &str, name: &str, bytes: &[u8]) -> Result<Kept, String> {
+    crate::books::protect(id)?;
     load(id)?;
     if bytes.is_empty() {
         return Err("That file is empty.".into());
@@ -353,6 +361,7 @@ pub fn add_file(id: &str, name: &str, bytes: &[u8]) -> Result<Kept, String> {
 
 /// Fetches a picture from the web, once, and keeps it with the note.
 pub fn import_image(id: &str, url: &str) -> Result<Kept, String> {
+    crate::books::protect(id)?;
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("A picture's address starts with https://.".into());
     }
@@ -467,6 +476,7 @@ fn save_versions(id: &str, all: &Versions) -> Result<(), String> {
 
 /// The note's versions, oldest first. The note as it is now is always the last of them.
 pub fn versions(id: &str) -> Result<Vec<Version>, String> {
+    crate::books::protect(id)?;
     let note = load(id)?;
     let mut all = load_versions(id);
     if all.keep(&note, "you", "", note.updated).1 {
@@ -484,6 +494,7 @@ pub fn current_version(id: &str) -> Result<Option<u32>, String> {
 /// Replaces the note's text with the assistant's, as a new version. The text before it is kept as a
 /// version too. Gives the new version's number.
 pub fn rewrite(id: &str, body: String, label: &str) -> Result<u32, String> {
+    crate::books::protect(id)?;
     let mut note = load(id)?;
     let mut all = load_versions(id);
     all.keep(&note, "you", "", note.updated);
@@ -502,6 +513,7 @@ pub fn rewrite(id: &str, body: String, label: &str) -> Result<u32, String> {
 /// Puts dictated words on the end of the note, as their own paragraph: for a dictation that went on
 /// after its page was left, so nothing said is lost.
 pub fn append_dictation(id: &str, words: &str) -> Result<(), String> {
+    crate::books::protect(id)?;
     let words = words.trim();
     if words.is_empty() {
         return Ok(());
@@ -519,6 +531,7 @@ pub fn append_dictation(id: &str, words: &str) -> Result<(), String> {
 
 /// Makes an earlier version the note again, as a new version, so nothing in between is lost.
 pub fn restore(id: &str, n: u32) -> Result<Note, String> {
+    crate::books::protect(id)?;
     let mut note = load(id)?;
     let mut all = load_versions(id);
     all.keep(&note, "you", "", note.updated);

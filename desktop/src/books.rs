@@ -4,8 +4,17 @@
 //! still a flat list.
 
 use crate::{library, notes};
+use include_dir::{include_dir, Dir};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// The example book, compiled into the app. Android's resource path is `asset://localhost/`, which is
+/// not a folder, so a copy from `resource_dir` never ran there and the book never appeared.
+static EXAMPLE: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/resources/example-books");
+
+fn editable_by_default() -> bool {
+    true
+}
 
 /// One life inside a part: the note, and the label the filename's second number became ("Chapter 2").
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -36,6 +45,10 @@ pub struct Book {
     /// Book and chapter labels. Empty for a book that is only a list of notes.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<BookPart>,
+    /// False for a book that is only read: its chapters stay put, and nothing writes to its notes.
+    /// Missing in a book saved before this meant it can be edited.
+    #[serde(default = "editable_by_default")]
+    pub editable: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,6 +58,7 @@ pub struct BookSummary {
     pub created: u64,
     pub updated: u64,
     pub notes: Vec<String>,
+    pub editable: bool,
 }
 
 /// One note of a book as it is read: the note, or a gap where it was deleted from elsewhere.
@@ -60,6 +74,16 @@ pub struct Chapter {
     pub part: String,
     /// "Chapter 2" within that part; empty when the note has no chapter number.
     pub label: String,
+}
+
+/// A chapter as the contents list shows it, without the text.
+#[derive(Debug, Serialize)]
+pub struct ChapterHead {
+    pub id: String,
+    pub title: String,
+    pub part: String,
+    pub label: String,
+    pub words: usize,
 }
 
 fn dir() -> PathBuf {
@@ -135,13 +159,32 @@ fn write(book: &mut Book, touch: bool) -> Result<(), String> {
 
 pub fn create(title: String) -> Result<String, String> {
     let now = library::now();
-    let mut book = Book { id: format!("b{}-{}", now, std::process::id() ^ (now as u32).rotate_left(7)), title, created: now, updated: now, notes: vec![], parts: vec![] };
+    let mut book = Book { id: format!("b{}-{}", now, std::process::id() ^ (now as u32).rotate_left(7)), title, created: now, updated: now, notes: vec![], parts: vec![], editable: true };
     write(&mut book, false)?;
     Ok(book.id)
 }
 
+fn reading_only(book: &Book) -> Result<(), String> {
+    if book.editable { Ok(()) } else { Err("This book is for reading.".into()) }
+}
+
+/// Refuses a change to a note that belongs to a book kept for reading.
+pub fn protect(note: &str) -> Result<(), String> {
+    if all().iter().any(|b| !b.editable && b.notes.iter().any(|n| n == note)) {
+        Err("This book is for reading.".into())
+    } else {
+        Ok(())
+    }
+}
+
+/// The reading book a note belongs to, when one is keeping it from being changed.
+pub fn book_for_note(note: &str) -> Option<String> {
+    all().into_iter().find(|b| !b.editable && b.notes.iter().any(|n| n == note)).map(|b| b.id)
+}
+
 pub fn rename(id: &str, title: String) -> Result<(), String> {
     let mut book = load(id)?;
+    reading_only(&book)?;
     book.title = title;
     write(&mut book, true)
 }
@@ -150,6 +193,7 @@ pub fn rename(id: &str, title: String) -> Result<(), String> {
 pub fn add_note(id: &str, note: &str) -> Result<(), String> {
     notes::load(note)?;
     let mut book = load(id)?;
+    reading_only(&book)?;
     if !book.notes.iter().any(|n| n == note) {
         book.notes.push(note.to_string());
     }
@@ -158,6 +202,7 @@ pub fn add_note(id: &str, note: &str) -> Result<(), String> {
 
 pub fn remove_note(id: &str, note: &str) -> Result<(), String> {
     let mut book = load(id)?;
+    reading_only(&book)?;
     drop_note(&mut book, note);
     write(&mut book, true)
 }
@@ -166,6 +211,7 @@ pub fn remove_note(id: &str, note: &str) -> Result<(), String> {
 /// so a reorder can't drop a note.
 pub fn reorder(id: &str, order: Vec<String>) -> Result<(), String> {
     let mut book = load(id)?;
+    reading_only(&book)?;
     let mut next: Vec<String> = Vec::new();
     for n in order.into_iter().chain(book.notes.clone()) {
         if book.notes.contains(&n) && !next.contains(&n) {
@@ -185,6 +231,8 @@ pub fn reorder(id: &str, order: Vec<String>) -> Result<(), String> {
 
 /// Deletes the book only; its notes stay.
 pub fn delete(id: &str) -> Result<(), String> {
+    let book = load(id)?;
+    reading_only(&book)?;
     std::fs::remove_file(path(id)?).map_err(|e| e.to_string())
 }
 
@@ -209,7 +257,7 @@ pub fn list(query: &str) -> Vec<BookSummary> {
     let query = query.trim().to_lowercase();
     let mut books: Vec<Book> = all().into_iter().filter(|b| query.is_empty() || b.title.to_lowercase().contains(&query)).collect();
     books.sort_by(|a, b| b.updated.cmp(&a.updated));
-    books.into_iter().map(|b| BookSummary { title: title_of(&b), id: b.id, created: b.created, updated: b.updated, notes: b.notes }).collect()
+    books.into_iter().map(|b| BookSummary { title: title_of(&b), id: b.id, created: b.created, updated: b.updated, notes: b.notes, editable: b.editable }).collect()
 }
 
 /// The book's notes in order, as they read. Notes deleted since are left out.
@@ -225,53 +273,74 @@ pub fn chapters(id: &str) -> Result<Vec<Chapter>, String> {
         .collect())
 }
 
-/// Takes a deleted note out of every book it was in.
+/// The book's notes in order, without their text, for the contents list.
+pub fn contents(id: &str) -> Result<Vec<ChapterHead>, String> {
+    let book = load(id)?;
+    let loaded: Vec<_> = book.notes.iter().filter_map(|n| notes::load(n).ok()).collect();
+    Ok(loaded
+        .into_iter()
+        .map(|n| {
+            let (part, label) = place(&book, &n.id);
+            ChapterHead { words: n.body.split_whitespace().count(), title: notes::display_title(&n), id: n.id, part, label }
+        })
+        .collect())
+}
+
+/// Takes a deleted note out of every book it was in. A book kept for reading holds onto its chapters.
 pub fn forget_note(note: &str) {
     for mut book in all() {
-        if book.notes.iter().any(|n| n == note) {
+        if book.editable && book.notes.iter().any(|n| n == note) {
             drop_note(&mut book, note);
             let _ = write(&mut book, false);
         }
     }
 }
 
-/// Copies the bundled example book into this device's library, once. `resource_dir` is the app's
-/// resource folder; a development build also finds the files beside the crate.
-pub fn install_example(resource_dir: Option<&std::path::Path>) {
+/// Copies the example book into this device's library, and stamps it with now so it shows as just
+/// added. `resource_dir` is unused: the book is compiled in, which is the only place Android can read it.
+pub fn install_example(_resource_dir: Option<&std::path::Path>) {
     if crate::prefs::load().example_books >= EXAMPLE_BOOK {
         return;
     }
-    let Some(src) = example_dir(resource_dir) else { return };
-    let book_file = library::data_dir().join("books").join(format!("{EXAMPLE_ID}.json"));
-    if book_file.is_file() {
-        let _ = crate::prefs::update(|p| p.example_books = EXAMPLE_BOOK);
-        return;
-    }
-    let notes_src = src.join("notes");
-    let notes_dst = library::data_dir().join("notes");
-    if let Err(e) = (|| -> Result<(), String> {
-        std::fs::create_dir_all(&notes_dst).map_err(|e| e.to_string())?;
-        std::fs::create_dir_all(book_file.parent().unwrap()).map_err(|e| e.to_string())?;
-        for entry in std::fs::read_dir(&notes_src).map_err(|e| e.to_string())?.flatten() {
-            let name = entry.file_name();
-            if !name.to_string_lossy().ends_with(".json") {
-                continue;
-            }
-            let dest = notes_dst.join(&name);
-            if !dest.is_file() {
-                std::fs::copy(entry.path(), &dest).map_err(|e| e.to_string())?;
-            }
-        }
-        std::fs::copy(src.join(format!("{EXAMPLE_ID}.json")), &book_file).map_err(|e| e.to_string())?;
-        Ok(())
-    })() {
+    if let Err(e) = install_bundled(library::now()) {
         eprintln!("The example book wasn't added: {e}");
         return;
     }
     let _ = crate::prefs::update(|p| p.example_books = EXAMPLE_BOOK);
 }
 
-const EXAMPLE_BOOK: u32 = 1;
+fn install_bundled(now: u64) -> Result<(), String> {
+    let file = EXAMPLE.get_file("plutarch-lives.json").ok_or("The example book is missing.")?;
+    let mut book: Book = serde_json::from_slice(file.contents()).map_err(|e| e.to_string())?;
+    book.id = EXAMPLE_ID.into();
+    book.editable = false;
+    book.created = now;
+    book.updated = now;
+    let notes_dir = EXAMPLE.get_dir("notes").ok_or("The example book is missing.")?;
+    let notes_dst = library::data_dir().join("notes");
+    std::fs::create_dir_all(&notes_dst).map_err(|e| e.to_string())?;
+    for file in notes_dir.files() {
+        let Some(name) = file.path().file_name().and_then(|n| n.to_str()) else { continue };
+        if !name.ends_with(".json") {
+            continue;
+        }
+        let dest = notes_dst.join(name);
+        if dest.is_file() {
+            continue;
+        }
+        let mut note: serde_json::Value = serde_json::from_slice(file.contents()).map_err(|e| e.to_string())?;
+        if let Some(obj) = note.as_object_mut() {
+            obj.insert("created".into(), serde_json::json!(now));
+            obj.insert("updated".into(), serde_json::json!(now));
+        }
+        library::write_json(&dest, &note)?;
+    }
+    let book_file = library::data_dir().join("books").join(format!("{EXAMPLE_ID}.json"));
+    std::fs::create_dir_all(book_file.parent().unwrap()).map_err(|e| e.to_string())?;
+    library::write_json(&book_file, &book)
+}
+
+const EXAMPLE_BOOK: u32 = 2;
 const EXAMPLE_ID: &str = "plutarch-lives";
 
 fn example_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf> {
@@ -283,6 +352,14 @@ fn example_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_book_saved_before_the_flag_can_still_be_edited() {
+        let book: Book = serde_json::from_str(r#"{"title":"Mine"}"#).unwrap();
+        assert!(book.editable);
+        let locked: Book = serde_json::from_str(r#"{"editable":false}"#).unwrap();
+        assert!(!locked.editable);
+    }
 
     #[test]
     fn parts_set_the_reading_order_and_the_labels() {
@@ -327,5 +404,6 @@ mod tests {
         assert!(book.parts.iter().all(|p| p.title != "Book 23"));
         assert_eq!(book.parts.iter().find(|p| p.title == "Book 17").unwrap().chapters.len(), 2);
         assert!(book.parts.iter().any(|p| p.title == "Book 24"));
+        assert!(!book.editable);
     }
 }

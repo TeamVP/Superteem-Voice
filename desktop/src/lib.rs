@@ -1343,6 +1343,17 @@ fn book_chapters(id: String) -> Result<Vec<books::Chapter>, String> {
 }
 
 #[tauri::command]
+fn book_contents(id: String) -> Result<Vec<books::ChapterHead>, String> {
+    books::contents(&id)
+}
+
+/// The reading book that holds this note, when the note can't be changed. Empty when it can.
+#[tauri::command]
+fn book_for_note(id: String) -> Option<String> {
+    books::book_for_note(&id)
+}
+
+#[tauri::command]
 fn create_book(title: String) -> Result<String, String> {
     books::create(title)
 }
@@ -2946,6 +2957,8 @@ pub fn run() {
             list_books,
             get_book,
             book_chapters,
+            book_contents,
+            book_for_note,
             create_book,
             rename_book,
             add_note_to_book,

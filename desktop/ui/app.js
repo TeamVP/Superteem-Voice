@@ -684,8 +684,76 @@ async function newBook() {
   }
 }
 
+/// A book kept for reading: a contents list, then one chapter at a time. Nothing in it can be changed.
+async function openReadingBook(book, chapterId) {
+  const mine = view;
+  let contents = [];
+  try {
+    contents = await invoke("book_contents", { id: book.id });
+  } catch (e) {
+    main.replaceChildren(el("div", { class: "page" }, el("div", { class: "error" }, String(e))));
+    return;
+  }
+  if (view !== mine) return;
+  const index = chapterId ? contents.findIndex((c) => c.id === chapterId) : -1;
+  if (index >= 0) {
+    let note;
+    try {
+      note = await invoke("get_note", { id: chapterId });
+    } catch (e) {
+      main.replaceChildren(el("div", { class: "page" }, el("div", { class: "error" }, String(e))));
+      return;
+    }
+    if (view !== mine) return;
+    const chapter = contents[index];
+    const kicker = [chapter.part, chapter.label].filter(Boolean).join(" · ");
+    const body = el("div", { class: "book-chapter-body" });
+    const fileBase = platform === "windows" || platform === "android" ? "http://stvnote.localhost/" : "stvnote://localhost/";
+    if (note.format === "md") {
+      try {
+        body.innerHTML = NoteEditor.toHTML(note.body, (file) => `${fileBase}${note.id}/${encodeURIComponent(file)}`);
+      } catch {
+        body.textContent = note.body;
+      }
+    } else {
+      body.append(...note.body.split(/\n{2,}/).filter((p) => p.trim()).map((p) => el("p", {}, p)));
+    }
+    const turn = () => el("div", { class: "book-turn" },
+      el("button", { class: "pill", disabled: index === 0, onclick: () => openBook(book.id, { chapter: contents[index - 1].id }) }, "Previous"),
+      el("span", { class: "book-kicker" }, `${index + 1} of ${contents.length}`),
+      el("button", { class: "pill", disabled: index === contents.length - 1, onclick: () => openBook(book.id, { chapter: contents[index + 1].id }) }, "Next"));
+    const page = el("div", { class: "page book book-read" },
+      el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"),
+      kicker ? el("p", { class: "book-kicker" }, kicker) : "",
+      el("h1", {}, note.title || chapter.title),
+      turn(), body, turn());
+    main.replaceChildren(page);
+    main.scrollTop = 0;
+    return;
+  }
+  const rows = [];
+  let part = "";
+  contents.forEach((c, i) => {
+    if (c.part && c.part !== part) {
+      part = c.part;
+      rows.push(el("div", { class: "group-label" }, c.part));
+    }
+    rows.push(el("div", { class: "row" },
+      el("span", { class: "book-num" + (c.label ? " chapter" : "") }, c.label || String(i + 1)),
+      el("button", { class: "label link-label", onclick: () => openBook(book.id, { chapter: c.id }) }, c.title,
+        el("small", {}, wordsText(c.words)))));
+  });
+  const page = el("div", { class: "page book book-read" },
+    el("div", { class: "book-head" }, el("span", { class: "book-icon" }, svg("book", 22)), el("h1", { class: "book-locked-title" }, book.title || "Untitled book")),
+    el("p", { class: "hint" }, "For reading. The chapters stay as they are."),
+    el("div", { class: "group book-notes" }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "This book has no chapters."))));
+  main.replaceChildren(page);
+  main.scrollTop = 0;
+}
+
 /// A book's page: its notes in order, to open, reorder, take out or add to; or all of them read as one.
-async function openBook(id, { naming = false, reading = false } = {}) {
+/// A book that isn't editable opens as a reading copy instead.
+async function openBook(id, { naming = false, reading = false, chapter = null } = {}) {
   leave();
   showPage();
   const mine = view = { kind: "book", id };
@@ -695,6 +763,11 @@ async function openBook(id, { naming = false, reading = false } = {}) {
     book = await invoke("get_book", { id });
   } catch (e) {
     main.replaceChildren(el("div", { class: "page" }, el("div", { class: "error" }, String(e))));
+    return;
+  }
+  if (view !== mine) return;
+  if (book.editable === false) {
+    await openReadingBook(book, chapter);
     return;
   }
   const [chapters, allNotes] = await Promise.all([
@@ -810,6 +883,11 @@ let noteTimer = null;
 /// `dictate` starts with the cursor in the body and dictation running; left out, only a new note does,
 /// unless Settings says to wait for Dictate.
 async function openNote(id, { dictate } = {}) {
+  const reading = id && await invoke("book_for_note", { id }).catch(() => null);
+  if (reading) {
+    openBook(reading, { chapter: id });
+    return;
+  }
   leave();
   showPage();
   let data = { id: null, title: "", body: "" };
