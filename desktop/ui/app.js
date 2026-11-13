@@ -3999,7 +3999,7 @@ async function showSettings() {
     detailsWrap.hidden = newer;
     updateStack.hidden = !newer;
     getButton.hidden = whatsNew.hidden = !newer;
-    if (newer) checkResult.textContent = `Version ${update.latest} is available. You have ${update.current}.`;
+    if (newer) checkResult.textContent = `Version ${update.latest} is available.`;
   };
   showNewer();
   checkButton.addEventListener("click", async () => {
@@ -5523,7 +5523,7 @@ function showUpdateBar(message) {
   if (!show) return;
   const get = el("button", { class: "primary pill", onclick: () => installUpdate() }, platform === "android" ? "Download" : "Update now");
   updateBar.replaceChildren(
-    el("span", { class: "label" }, `Version ${update.latest} is available`, el("small", {}, message ?? `You have ${update.current}.`)),
+    el("span", { class: "label" }, `Version ${update.latest} is available`, message ? el("small", {}, message) : null),
     get,
     el("button", { class: "link", onclick: () => invoke("open_link", { url: update.notes }).catch(() => {}) }, "What's new"),
     el("button", { class: "link", onclick: () => { remember("update-later", update.latest); showUpdateBar(); } }, "Later"));
