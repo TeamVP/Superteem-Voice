@@ -59,6 +59,46 @@ static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 /// Held while a piece is taken and written down, so stopping waits for it and the words stay in order.
 static WORK: Mutex<()> = Mutex::new(());
 static NEXT: AtomicU64 = AtomicU64::new(1);
+/// Dictations whose page was left while they ran, and the note each one's words now go into.
+static DETACHED: Mutex<Vec<(u64, String)>> = Mutex::new(Vec::new());
+
+/// The note a left dictation writes into, when `session` is one.
+fn detached_note(session: u64) -> Option<String> {
+    DETACHED.lock().unwrap().iter().find(|(s, _)| *s == session).map(|(_, n)| n.clone())
+}
+
+/// Whether words from a dictation that was left are still being written into note `id`.
+pub fn writing_into(id: &str) -> bool {
+    DETACHED.lock().unwrap().iter().any(|(_, n)| n == id)
+}
+
+/// The page dictation `id` was on has gone (the person went somewhere else in the app): recording stops,
+/// and what was said, including clips still being written down, goes onto the end of note `note` here
+/// rather than being lost. `on_written` is told once all of it is in.
+pub fn detach(id: u64, note: String, on_written: impl FnOnce(String) + Send + 'static) {
+    DETACHED.lock().unwrap().push((id, note.clone()));
+    std::thread::spawn(move || {
+        // Waits for a clip being written down, whose words go in through `deliver`, then takes the rest.
+        let rest = stop(id).unwrap_or_default();
+        if !rest.trim().is_empty() {
+            let _ = notes::append_dictation(&note, &rest);
+        }
+        DETACHED.lock().unwrap().retain(|(s, _)| *s != id);
+        on_written(note);
+    });
+}
+
+/// A clip's words: to the page, or onto the note when its page was left.
+fn deliver(words: Words, on_words: &impl Fn(Words)) {
+    match detached_note(words.session) {
+        Some(note) => {
+            if !words.text.trim().is_empty() {
+                let _ = notes::append_dictation(&note, &words.text);
+            }
+        }
+        None => on_words(words),
+    }
+}
 
 /// The words in a piece, or nothing for silence or Whisper's markers for it.
 fn words(pcm: &[i16], languages: &[String]) -> Result<String, String> {
@@ -128,12 +168,12 @@ pub fn start(
                 let mut guard = SESSION.lock().unwrap();
                 let Some(session) = guard.as_mut().filter(|s| s.id == id) else {
                     // Stopped while this clip was written down: its words still go in.
-                    on_words(Words { session: id, clip, text });
+                    deliver(Words { session: id, clip, text }, &on_words);
                     return;
                 };
                 session.last_empty = text.is_empty();
                 session.heard |= !text.is_empty();
-                on_words(Words { session: id, clip, text });
+                deliver(Words { session: id, clip, text }, &on_words);
                 continue;
             }
             let quiet = chunk::trailing_silence_s(&pending, noise);
@@ -141,7 +181,10 @@ pub fn start(
             if session.last_empty && patient && quiet >= END_AFTER_SILENCE_S {
                 drop(guard);
                 let text = finish(id).unwrap_or_default();
-                on_end(Ended { session: id, text, reason: "silence" });
+                match detached_note(id) {
+                    Some(note) => drop(notes::append_dictation(&note, &text)),
+                    None => on_end(Ended { session: id, text, reason: "silence" }),
+                }
                 return;
             }
         }

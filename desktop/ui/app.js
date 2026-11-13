@@ -352,7 +352,7 @@ function leave() {
   document.body.classList.remove("setup");
   stopProbe();
   cancelOnboardReading();
-  cancelDictation();
+  handOffDictation();
   stopPlayback();
   clearInterval(pollTimer);
   clearInterval(sourceTimer);
@@ -613,11 +613,6 @@ window.addEventListener("popstate", () => {
     history.pushState({ page: true }, "");
     return noteChatNow?.close();
   }
-  // Back while dictating stays on the note and asks first, as leaving by the sidebar does.
-  if (dictation && view.kind === "note") {
-    history.pushState({ page: true }, "");
-    return askBeforeLeavingDictation(() => history.back());
-  }
   backToList();
 });
 
@@ -683,6 +678,18 @@ async function openNote(id, { dictate } = {}) {
   showPage();
   let data = { id: null, title: "", body: "" };
   if (id) {
+    // A dictation left on this note may still be writing its words in: those come first, so nothing typed
+    // meanwhile is saved over them.
+    await dictationHandoff;
+    if (await invoke("dictation_writing", { id }).catch(() => false)) {
+      main.replaceChildren(el("div", { class: "page" }, el("p", { class: "hint" }, "Writing in your dictation…")));
+      const mine = view = { kind: "note", id };
+      await new Promise((resolve) => {
+        const check = async () => ((await invoke("dictation_writing", { id }).catch(() => false)) ? setTimeout(check, 400) : resolve());
+        check();
+      });
+      if (view !== mine) return;
+    }
     try {
       data = await invoke("get_note", { id });
     } catch (e) {
@@ -1157,16 +1164,19 @@ async function startDictation() {
   dictation.anchor = placeDictationSlot();
   const started = Date.now();
   dictation.clockTimer = setInterval(() => { elapsed.textContent = clock((Date.now() - started) / 1000); }, 500);
+  const d = dictation;
   try {
-    dictation.session = await invoke("dictate_start", { continuous: true, note: keep ? note.id : null, languages: note?.languages ?? null });
+    d.session = await invoke("dictate_start", { continuous: true, note: keep ? note.id : null, languages: note?.languages ?? null });
   } catch (e) {
+    d.failed = true;
+    if (dictation !== d) return;
     removeDictationSlot(dictation.anchor);
     endDictationUi();
     dictation = null;
     showDictationError(e);
     return;
   }
-  if (!dictation) return;
+  if (!dictation || dictation.handedOff) return;
   syncWake().catch(() => {});
   const bars = [...wave.children];
   let ticks = 0;
@@ -1246,6 +1256,36 @@ function withoutStopCommand(words) {
   return words.replace(/[\s,.!]*\b(stop|end|finish)\b[\w\s']*\b(record\w*|note|dictat\w*)\W*$/i, "").trim();
 }
 
+/// The note was left while dictating (any way out of it): recording stops and what was said, clips still
+/// being written down included, goes onto the end of the note in the background, so it's there on return.
+let dictationHandoff = Promise.resolve();
+function handOffDictation() {
+  if (!dictation || !note) return;
+  const d = dictation;
+  dictation = null;
+  d.handedOff = true;
+  clearInterval(d.levelTimer);
+  clearInterval(d.clockTimer);
+  for (const slot of d.slots.values()) slot.remove();
+  if (d.wrote) d.anchor?.remove();
+  else removeDictationSlot(d.anchor);
+  syncWake().catch(() => {});
+  // Saved now, with the words already written in, before the next page takes `note`'s place.
+  const args = noteArgs(note.id);
+  const save = note.id && !note.dirty ? Promise.resolve(note.id) : invoke("save_note", args);
+  note.dirty = false;
+  clearTimeout(noteTimer);
+  dictationHandoff = (async () => {
+    // Started but not yet given its number: waits for it.
+    while (!d.session && !d.failed) await new Promise((r) => setTimeout(r, 50));
+    if (!d.session) return;
+    const id = await save.catch(() => null);
+    if (id) await invoke("dictate_detach", { session: d.session, note: id }).catch(() => {});
+    else await invoke("dictate_cancel", { session: d.session }).catch(() => {});
+    refreshItems();
+  })();
+}
+
 /// Stops dictating and drops what isn't written in yet; words already written stay, to edit or undo.
 async function cancelDictation() {
   if (!dictation || dictation.busy) return;
@@ -1279,64 +1319,6 @@ window.addEventListener("keydown", (e) => {
     cancelDictation();
   }
 });
-
-/// Going somewhere else while dictating asks first, rather than dropping what's being said: keep
-/// dictating, save what was said and go, or discard what isn't written in yet and go. `go` is the move,
-/// made once the dictation is dealt with.
-let leavingDictation = false;
-function askBeforeLeavingDictation(go) {
-  if (document.querySelector("dialog.leave-dictation")) return;
-  // Already stopped and only writing in its last words: those are waited for, then the move is made.
-  if (dictation.busy || dictation.finished) return void whenDictationDone().then(go);
-  const stay = el("button", { class: "pill", type: "button" }, "Keep dictating");
-  const discard = el("button", { class: "pill", type: "button" }, "Discard");
-  const save = el("button", { class: "primary pill", type: "button" }, "Save and leave");
-  const dialog = el("dialog", { class: "sheet leave-dictation", "aria-label": "You're dictating" },
-    el("h2", {}, "You're dictating"),
-    el("p", { class: "hint" }, "Leaving this note stops the dictation. Save writes in what you've said so far; Discard drops what isn't written in yet."),
-    el("div", { class: "actions" }, stay, discard, save));
-  const leaveWith = async (button, end) => {
-    for (const b of [stay, discard, save]) b.disabled = true;
-    button.textContent = button === save ? "Saving…" : "Stopping…";
-    await end();
-    await whenDictationDone();
-    dialog.close();
-    go();
-  };
-  stay.addEventListener("click", () => dialog.close());
-  discard.addEventListener("click", () => leaveWith(discard, cancelDictation));
-  save.addEventListener("click", () => leaveWith(save, stopDictation));
-  // Esc keeps dictating, unless it's already stopping.
-  dialog.addEventListener("cancel", (e) => { if (stay.disabled) e.preventDefault(); });
-  dialog.addEventListener("close", () => { dialog.remove(); document.getElementById("note-body")?.focus(); });
-  document.body.append(dialog);
-  dialog.showModal();
-  save.focus();
-}
-
-/// Resolves once the dictation has ended and its last words are in (finishDictation gives up after half a minute).
-function whenDictationDone() {
-  return new Promise((resolve) => {
-    const check = () => (dictation ? setTimeout(check, 150) : resolve());
-    check();
-  });
-}
-
-// Clicks in the sidebar and on "All notes" that would leave the note are held while dictating.
-for (const area of [document.querySelector(".sidebar"), document.getElementById("back")]) {
-  area.addEventListener("click", (e) => {
-    if (!dictation || leavingDictation || view.kind !== "note") return;
-    const target = e.target.closest("button");
-    if (!target || target.id === "listen-chip" || target.closest("#update-bar")) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    askBeforeLeavingDictation(() => {
-      leavingDictation = true;
-      try { target.click(); } finally { leavingDictation = false; }
-    });
-  }, true);
-}
-
 
 // ---------- Meetings: setup, live and processing ----------
 

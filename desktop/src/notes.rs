@@ -499,6 +499,24 @@ pub fn rewrite(id: &str, body: String, label: &str) -> Result<u32, String> {
     Ok(n)
 }
 
+/// Puts dictated words on the end of the note, as their own paragraph: for a dictation that went on
+/// after its page was left, so nothing said is lost.
+pub fn append_dictation(id: &str, words: &str) -> Result<(), String> {
+    let words = words.trim();
+    if words.is_empty() {
+        return Ok(());
+    }
+    let mut note = load(id)?;
+    let body = note.body.trim_end();
+    note.body = if body.is_empty() { words.to_string() } else { format!("{body}
+
+{words}") };
+    // The editor's document doesn't have these words; it reads the body back in.
+    note.doc = None;
+    note.updated = library::now();
+    library::write_json(&path(id)?, &note)
+}
+
 /// Makes an earlier version the note again, as a new version, so nothing in between is lost.
 pub fn restore(id: &str, n: u32) -> Result<Note, String> {
     let mut note = load(id)?;

@@ -101,8 +101,8 @@ notes, and not the app's screen. Write in the language the person writes to you 
 Answer with JSON, in one of two forms.\n\
 To answer a question, summarise, explain or suggest: {\"action\":\"answer\",\"reply\":\"your answer\"}\n\
 When the person asks you to change the note itself (rewrite, shorten, expand, fix, tidy, restructure, change its tone, \
-translate it, add or remove something): {\"action\":\"rewrite\",\"note\":\"the complete new text of the note\",\"reply\":\"one short sentence saying what you changed\"}\n\
-When it isn't clear which they want, answer, and offer to make the change.\n\
+translate it, add or remove something), or to write something into it (draft, compose or write a poem, a letter, a list, a plan; this includes an empty note, where your rewrite is the whole of what you write): {\"action\":\"rewrite\",\"note\":\"the complete new text of the note\",\"reply\":\"one short sentence saying what you changed\"}\n\
+When it isn't clear which they want, answer, and offer to make the change. Write each thing once: never repeat yourself, and stop when it is done.\n\
 In a rewrite, \"note\" holds the whole note from first line to last, ready to replace the old one, with no commentary \
 and nothing left out that wasn't asked to go. Keep the person's meaning, details and way of writing: change what they \
 asked to have changed, and add no facts of your own. You may put right a word that dictation plainly misheard when the \
@@ -125,6 +125,12 @@ fn system(can_rewrite: bool) -> String {
 /// for the reply, JSON escaping and a model that writes a little more than it was given.
 fn rewrite_fits(body: &str, room: usize, count: impl Fn(&str) -> usize) -> bool {
     room >= count(body) * 6 / 5 + 120
+}
+
+/// The most an answer may run to: room to rewrite the note half as long again, or to write a fresh
+/// piece of a few pages. A model that falls into repeating itself stops here rather than running on.
+fn most_to_write(body: &str, count: impl Fn(&str) -> usize) -> usize {
+    (count(body) * 3 / 2 + 1200).max(2000)
 }
 
 /// A grammar for the forms of answer open to the model.
@@ -304,7 +310,8 @@ pub fn answer(id: &str, model: &mut dyn Model, on_partial: &mut dyn FnMut(Partia
                 on_partial(p);
             }
         };
-        let written = model.stream(&system(can_rewrite), &user, &grammar(can_rewrite), &schema(can_rewrite), context - used, &mut on_text)?;
+        let limit = (context - used).min(most_to_write(&note.body, |t| model.count(t)));
+        let written = model.stream(&system(can_rewrite), &user, &grammar(can_rewrite), &schema(can_rewrite), limit, &mut on_text)?;
         match parse(&written)? {
             Reply::Answer(text) => Ok((text, None)),
             Reply::Rewrite { note: body, reply } => {

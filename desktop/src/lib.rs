@@ -1447,6 +1447,19 @@ async fn vocab_test_stop() -> Result<String, String> {
     blocking(listen::dictate_stop_plain).await?
 }
 
+/// The note page was left mid-dictation: recording stops and its words are written onto note `note`
+/// in the background. "note-dictated" says when they're all in.
+#[tauri::command]
+fn dictate_detach<R: Runtime>(app: AppHandle<R>, session: u64, note: String) {
+    dictation::detach(session, note, move |id| drop(app.emit("note-dictated", id)));
+}
+
+/// Whether a left dictation is still writing into note `id`.
+#[tauri::command]
+fn dictation_writing(id: String) -> bool {
+    dictation::writing_into(&id)
+}
+
 #[tauri::command]
 async fn dictate_cancel(session: Option<u64>) -> Result<(), String> {
     if let Some(id) = session.filter(|&s| s > 0) {
@@ -2886,6 +2899,8 @@ pub fn run() {
             dictate_start,
             dictate_stop,
             dictate_cancel,
+            dictate_detach,
+            dictation_writing,
             list_vocabulary,
             save_vocab_term,
             delete_vocab_term,
