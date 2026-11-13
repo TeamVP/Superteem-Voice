@@ -3580,29 +3580,15 @@ async function showSettings() {
   const checkButton = el("button", { class: "pill" }, "Check for updates");
   const getButton = el("button", { class: "primary pill", hidden: true }, platform === "android" ? "Download" : "Update now");
   const whatsNew = el("button", { class: "link", hidden: true, onclick: () => invoke("open_link", { url: update.notes }).catch(() => {}) }, "What's new");
-  // Details sits centred under the check button, and shows (on hover, focus or click) what a check sends. It hides with the button.
-  const tipId = "about-details-tip";
-  const tip = el("div", { class: "details-tip", id: tipId, role: "tooltip", hidden: true },
-    "Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted.");
-  const details = el("button", { class: "link details", type: "button", "aria-describedby": tipId, "aria-expanded": "false" }, "Details");
-  const detailsWrap = el("div", { class: "details-wrap" }, details, tip);
-  let pinned = false;
-  const showTip = (on) => { tip.hidden = !on; };
-  detailsWrap.addEventListener("mouseenter", () => showTip(true));
-  detailsWrap.addEventListener("mouseleave", () => { if (!pinned) showTip(false); });
-  details.addEventListener("focus", () => showTip(true));
-  details.addEventListener("blur", () => { if (!pinned) showTip(false); });
-  details.addEventListener("click", () => {
-    pinned = !pinned;
-    details.setAttribute("aria-expanded", String(pinned));
-    showTip(pinned);
-  });
+  // Details sits centred under the check button and opens a dialog saying what a check sends. It hides with the button.
+  const details = el("button", { class: "link details", type: "button", "aria-haspopup": "dialog" }, "Details");
+  details.addEventListener("click", () => showCheckDetails(details));
+  const detailsWrap = el("div", { class: "details-wrap" }, details);
   const checkStack = el("div", { class: "check-stack" }, checkButton, detailsWrap);
   const showNewer = () => {
     const newer = !!update?.newer;
     checkButton.hidden = newer;
     detailsWrap.hidden = newer;
-    if (newer) { pinned = false; showTip(false); }
     getButton.hidden = whatsNew.hidden = !newer;
     if (newer) checkResult.textContent = `Version ${update.latest} is available. You have ${update.current}.`;
   };
@@ -3794,6 +3780,20 @@ const TERMS = [
   ["Governing law",
     "These terms are governed by the laws of Victoria, Australia. If they change, Voice will ask you again."],
 ];
+
+// What a check for an update sends. A dialog rather than a hover tip, so it opens by tap on a phone too.
+// Closes with Close, Escape, or a tap outside it.
+function showCheckDetails(opener) {
+  const dialog = el("dialog", { class: "check-details", "aria-label": "What a check sends" },
+    el("div", { class: "body" },
+      el("h2", {}, "What a check sends"),
+      el("p", {}, "Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted."),
+      el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => dialog.close() }, "Close"))));
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+  dialog.addEventListener("close", () => { dialog.remove(); opener?.focus(); });
+  document.body.append(dialog);
+  dialog.showModal();
+}
 
 function showTerms() {
   const dialog = el("dialog", { class: "terms", "aria-label": "Terms of use and privacy" },
