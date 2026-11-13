@@ -2819,10 +2819,37 @@ fn set_track_offset(state: State<AppState>, id: String, name: String, offset_s: 
     imports::set_offset(&library::session_dir(&id)?, &name, offset_s)
 }
 
+/// Adds another person's recording of this meeting from their session folder or a zip of it.
+#[tauri::command]
+async fn import_session<R: Runtime>(app: AppHandle<R>, id: String, path: String, owner: String) -> Result<imports::SessionImport, String> {
+    let dir = library::session_dir(&id)?;
+    if library::load_meta(&dir).compacted {
+        return Err(process::COMPACTED.into());
+    }
+    blocking(move || {
+        let state = app.state::<AppState>();
+        let _guard = state.edit.lock().unwrap();
+        imports::add_session(&dir, Path::new(&path), &owner)
+    })
+    .await?
+}
+
+/// Takes a track out of a meeting: an imported one, or one it recorded, such as a silent or doubled-up input.
+/// The page then transcribes the meeting again without it.
 #[tauri::command]
 fn remove_track(state: State<AppState>, id: String, name: String) -> Result<(), String> {
     let _guard = state.edit.lock().unwrap();
-    imports::remove(&library::session_dir(&id)?, &name)
+    let dir = library::session_dir(&id)?;
+    if imports::load(&dir).iter().any(|i| i.name == name) {
+        return imports::remove(&dir, &name);
+    }
+    if state.recording.lock().unwrap().as_ref().is_some_and(|r| r.dir() == dir) {
+        return Err("This meeting is being recorded.".into());
+    }
+    if is_queued(&state, &id) {
+        return Err("This meeting is being processed. Remove the track once it's done.".into());
+    }
+    library::delete_track(&dir, &name)
 }
 
 fn open_dir(dir: &Path) -> Result<(), String> {
@@ -3111,6 +3138,7 @@ pub fn run() {
             natural_speak,
             save_voice_settings,
             import_track,
+            import_session,
             sync_track,
             set_track_start,
             set_track_offset,

@@ -2541,6 +2541,37 @@ function renderSession(session, processingError, suggestion) {
   const reprocess = el("button", { class: "icon-only more-action", type: "button", title: "Transcribe again: run speaker detection and transcription again", "aria-label": "Transcribe again" },
     svg("refresh", 18), el("span", { class: "menu-text" }, "Transcribe again"));
   reprocess.addEventListener("click", () => processAgain(id));
+  const recordedTrackMenu = (stream, name) => {
+    const heard = scriptLines.filter((s) => s.stream === stream).length;
+    const edited = session.segments.filter((s) => s.stream === stream && s.edited).length;
+    const silent = meta.tracks?.[stream]?.peak === 0;
+    return menuButton(svg("more", 14), [
+      "This track",
+      [isPhone() ? "Delete this track" : "Remove this track",
+        silent ? "It heard nothing · transcribes the meeting again without it" : "Transcribes the meeting again without it",
+        () => {
+          // Asked in the tracks panel, where the menu was, so it's seen.
+          tracks.querySelector(".track-confirm")?.remove();
+          const what = heard ? ` After transcribing again, the ${heard} line${heard === 1 ? "" : "s"} taken from it will come from the other tracks, where they heard it.` : "";
+          const lost = edited ? ` Your edits to ${edited} of its line${edited === 1 ? "" : "s"} will be lost.` : "";
+          const where = isPhone() ? " This can't be undone." : ` Its audio goes to the ${binName()}.`;
+          const go = el("button", { class: "primary danger-fill", type: "button" }, "Remove track");
+          const box = el("div", { class: "inline-form track-confirm", role: "alertdialog" },
+            el("p", {}, `Remove ${name} from this meeting?${what}${lost}${where}`), go,
+            el("button", { class: "pill", type: "button", onclick: () => box.remove() }, "Cancel"));
+          go.addEventListener("click", async () => {
+            go.disabled = true;
+            stopPlayback();
+            try {
+              await invoke("remove_track", { id, name: stream });
+              await reload();
+            } catch (e) { go.disabled = false; showError(box, e); }
+          });
+          tracks.prepend(box);
+          go.focus();
+        }],
+    ]);
+  };
   const used = new Set(scriptLines.map((s) => s.speaker));
   const streams = Object.keys(session.audio).sort();
   const picker = statusPicker(meta.status, async (status) => {
@@ -2952,6 +2983,15 @@ function renderSession(session, processingError, suggestion) {
 
   // The tracks: one lane per recorded input, all on one playhead.
   const tracks = el("div", { class: "tracks" });
+  // Removing tracks leaves the transcript as it was until it's transcribed again, so several can go first.
+  const removed = meta.tracks_removed ?? [];
+  if (removed.length && !meta.compacted) {
+    const names = removed.length === 1 ? removed[0] : `${removed.slice(0, -1).join(", ")} and ${removed.at(-1)}`;
+    const again = el("button", { class: "primary pill", type: "button", disabled: session.busy || !session.model_ready }, "Transcribe again");
+    again.addEventListener("click", () => processAgain(id));
+    tracks.append(el("div", { class: "inline-form track-removed", role: "status" },
+      el("p", {}, `Removed ${names}. The transcript still has what ${removed.length === 1 ? "it" : "they"} heard until you transcribe the meeting again.`), again));
+  }
   if (streams.length) {
     const head = el("span", { class: "playhead" });
     const timeLabel = el("span", { class: "mono hint" });
@@ -3038,7 +3078,10 @@ function renderSession(session, processingError, suggestion) {
       const imported = session.imports?.find((i) => i.name === stream);
       const nameEl = el("span", { class: "name", style: `color:${strong.get(stream) ?? "inherit"}`,
         title: imported ? `${name} · imported · ${placedText(imported, meta.created)}` : trackDetails(name, meta.tracks?.[stream]) }, name);
-      lanes.append(el("div", { class: "track" }, imported ? el("span", { class: "name-wrap" }, nameEl, importMenu(id, imported, name, page, meta.created)) : nameEl, mute, bar));
+      // A recorded track can be taken out too, as one that heard nothing or doubles another.
+      const menu = imported ? importMenu(id, imported, name, page, meta.created)
+        : streams.length > 1 && !meta.compacted && !session.busy ? recordedTrackMenu(stream, name) : null;
+      lanes.append(el("div", { class: "track" }, menu ? el("span", { class: "name-wrap" }, nameEl, menu) : nameEl, mute, bar));
     }
     lanes.append(head);
     lanes.addEventListener("click", (e) => {
@@ -3278,10 +3321,45 @@ function showImport(tracks, id, meetingStart) {
       status.replaceChildren(el("span", { class: "danger" }, `Couldn't import it: ${e?.message ?? e}`));
     }
   });
+  // Someone else's Superteem Voice session of the same meeting: every track of theirs that heard something,
+  // placed by when their recording started (the same instant wherever they were), then by its sound.
+  const owner = el("input", { type: "text", placeholder: "Whose, such as Lin", maxlength: "40", "aria-label": "Whose recording" });
+  const sessionStatus = el("div", { class: "hint", role: "status" });
+  const pickSession = (zip) => async () => {
+    const picked = await window.__TAURI__.dialog.open(zip
+      ? { title: "Their zipped session", filters: [{ name: "Zipped session", extensions: ["zip"] }] }
+      : { directory: true, title: "Their session folder (session-…)" }).catch(() => null);
+    if (!picked) return;
+    sessionButtons.forEach((b) => { b.disabled = true; });
+    sessionStatus.replaceChildren(el("span", { class: "spinner" }), " Reading their tracks and matching them to yours…");
+    try {
+      const done = await invoke("import_session", { id, path: picked, owner: owner.value.trim() });
+      const silent = done.silent ? ` ${done.silent} that heard nothing ${done.silent === 1 ? "was" : "were"} left out.` : "";
+      const placed = done.matched ? placedText(done.added[0], meetingStart)
+        : `Their recording started at ${dayClock(done.started_at)}, ${signedClock(done.started_at - meetingStart)} into the meeting · its sound didn't clearly match nearby, so it's placed by the time of day`;
+      sessionStatus.replaceChildren(`Added ${done.added.length} track${done.added.length === 1 ? "" : "s"}. ${placed}.${silent} Transcribing…`);
+      processAgain(id);
+    } catch (e) {
+      sessionButtons.forEach((b) => { b.disabled = false; });
+      sessionStatus.replaceChildren(el("span", { class: "danger" }, `Couldn't import it: ${e?.message ?? e}`));
+    }
+  };
+  const sessionButtons = [
+    el("button", { class: "pill", type: "button", onclick: pickSession(false) }, "Choose their session folder…"),
+    el("button", { class: "pill", type: "button", onclick: pickSession(true) }, "Choose a .zip…"),
+  ];
+  const fromSession = isDesktop() ? [
+    el("div", { class: "menu-label" }, "Someone else's Superteem Voice recording"),
+    el("label", { class: "import-row" }, el("span", {}, "Whose"), owner, el("small", { class: "hint" }, "Put in front of their track names")),
+    el("div", { class: "import-row" }, ...sessionButtons),
+    sessionStatus,
+    el("div", { class: "menu-label" }, "A recording from anything else"),
+  ] : [];
   const form = el("div", { class: "import-form" },
     el("div", { class: "import-head" }, el("strong", {}, "Import a recording"),
       el("button", { class: "icon-only", "aria-label": "Close", onclick: () => form.remove() }, svg("close", 14))),
     el("p", { class: "hint" }, "Another recording of this meeting becomes a track: a phone in the room, or the other side of a call recorded by the person on it. It's transcribed with the others, so the transcript has everyone."),
+    ...fromSession,
     el("label", { class: "import-row" }, el("span", {}, "Recording"), file),
     el("label", { class: "import-row" }, el("span", {}, "Name"), name),
     el("label", { class: "import-row" }, el("span", {}, "Place it"), how),

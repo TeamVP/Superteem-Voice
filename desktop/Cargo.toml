@@ -36,6 +36,8 @@ minijinja-contrib = { version = "3", features = ["pycompat"] }
 sha2 = "0.10"
 # Voice model archives (.tar.bz2), unpacked on any platform; bzip2 in pure Rust.
 tar = "0.4"
+# Another person's recording of a meeting, sent as a zipped session folder.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 bzip2 = { version = "0.5", default-features = false, features = ["libbz2-rs-sys"] }
 # Choosing the folder exports go to.
 tauri-plugin-dialog = "2"

@@ -149,6 +149,10 @@ function menuButton(label, choices, buttonClass = "icon-only") {
     e.stopPropagation();
     if (!menu.hidden) return close();
     menu.hidden = false;
+    // Near the bottom of the window, as on a track's name, it opens upward so all of it shows.
+    menu.classList.remove("up");
+    const room = menu.getBoundingClientRect();
+    if (room.bottom > window.innerHeight - 8 && button.getBoundingClientRect().top - 8 > room.height) menu.classList.add("up");
     button.setAttribute("aria-expanded", "true");
     document.addEventListener("click", outside, true);
     menu.querySelector("button")?.focus();

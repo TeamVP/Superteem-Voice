@@ -185,6 +185,10 @@ pub struct Meta {
     /// language.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub languages: Vec<String>,
+    /// Tracks taken out since it was last transcribed, by their names then; the transcript still has
+    /// their lines until it is transcribed again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracks_removed: Vec<String>,
 }
 
 /// Workflow states a note or meeting can be in. Empty is the default: no status yet.
@@ -448,6 +452,61 @@ pub fn compact(dir: &Path) -> Result<u64, String> {
     Ok(freed)
 }
 
+/// A recorded track's audio files: its WAV, its journal and any journals it continued into ("input1-2.stvj").
+fn track_files(dir: &Path, stream: &str) -> Vec<PathBuf> {
+    audio_files(dir)
+        .into_iter()
+        .filter(|p| {
+            let ext = p.extension().and_then(|x| x.to_str()).unwrap_or_default();
+            let stem = p.file_stem().and_then(|n| n.to_str()).unwrap_or_default();
+            let continued = stem
+                .strip_prefix(stream)
+                .and_then(|rest| rest.strip_prefix('-'))
+                .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+            (ext == "wav" || ext == "stvj") && (stem == stream || (ext == "stvj" && continued))
+        })
+        .collect()
+}
+
+/// Takes a recorded track out of a meeting, as one that heard nothing or doubles another, so processing
+/// again hears the meeting without it. Its audio goes to the Recycle Bin or Trash where there is one, and
+/// its name and voice print links go. The last track with sound can't be removed.
+pub fn delete_track(dir: &Path, stream: &str) -> Result<(), String> {
+    let plain = !stream.is_empty() && stream.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    let files = if plain { track_files(dir, stream) } else { Vec::new() };
+    if files.is_empty() {
+        return Err("That track no longer exists.".into());
+    }
+    let mut meta = load_meta(dir);
+    if meta.compacted {
+        return Err("This meeting's audio was deleted, so its tracks can't be changed.".into());
+    }
+    // Processing needs a recorded journal with something in it; an input that recorded nothing leaves a
+    // journal of only its header.
+    let others = audio_files(dir).into_iter().filter(|p| !files.contains(p) && p.extension().is_some_and(|x| x == "stvj"));
+    if others.filter(|p| fs::metadata(p).is_ok_and(|m| m.len() > 64)).count() == 0 {
+        return Err("This is the meeting's only track, so removing it would leave nothing to transcribe. Delete the meeting instead.".into());
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    trash::delete_all(&files).map_err(|e| e.to_string())?;
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    for file in &files {
+        fs::remove_file(file).map_err(|e| e.to_string())?;
+    }
+    let name = meta.name(stream);
+    let shown = if name == stream { meta.track_name(stream).unwrap_or(name) } else { name };
+    meta.tracks_removed.push(shown);
+    meta.tracks.remove(stream);
+    meta.names.remove(stream);
+    meta.prints.remove(stream);
+    meta.suggested.remove(stream);
+    // A meeting not yet processed has no details or transcript to change.
+    if has_meta(dir) {
+        write_json(&dir.join(META), &meta)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,6 +593,37 @@ mod tests {
         assert!(compact(&dir).is_err());
         assert!(dir.join("input1.stvj").exists());
         assert!(!load_meta(&dir).compacted);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn deleting_a_track_removes_only_its_audio_and_names() {
+        let dir = std::env::temp_dir().join(format!("stv-delete-track-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mut meta = Meta { title: "Standup".into(), ..Meta::default() };
+        meta.names.insert("input1".into(), "Alice".into());
+        meta.names.insert("input2".into(), "Teams".into());
+        meta.prints.insert("input2".into(), PrintLink { id: "vp".into(), score: Some(0.9) });
+        meta.tracks.insert("input2".into(), Track::default());
+        save(&dir, &meta, &[segment(0, "input1", "Hello")]).unwrap();
+        for file in ["input1.wav", "input1.stvj", "input2.wav", "input2.stvj", "input2-2.stvj", "input12.stvj"] {
+            fs::write(dir.join(file), vec![0u8; 100]).unwrap();
+        }
+
+        delete_track(&dir, "input2").unwrap();
+        let left: Vec<String> = audio_files(&dir).iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(left, ["input1.stvj", "input1.wav", "input12.stvj"]);
+        let meta = load_meta(&dir);
+        assert_eq!(meta.names.keys().collect::<Vec<_>>(), ["input1"]);
+        assert!(meta.prints.is_empty() && meta.tracks.is_empty());
+        assert_eq!(meta.tracks_removed, ["Teams"]);
+
+        assert!(delete_track(&dir, "input2").is_err(), "already gone");
+        assert!(delete_track(&dir, "../input1").is_err());
+        delete_track(&dir, "input12").unwrap();
+        assert!(delete_track(&dir, "input1").is_err(), "the last track stays");
+        assert_eq!(audio_files(&dir).len(), 2);
         let _ = fs::remove_dir_all(&dir);
     }
 

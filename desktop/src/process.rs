@@ -375,6 +375,7 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     progress("Saving", 0.98);
     let duration = sources.iter().map(|s| s.pcm.len()).max().unwrap_or(0) as f64 / RATE as f64;
     let mut meta = library::new_meta(dir, duration);
+    meta.tracks_removed.clear();
     if first_time && meta.langs().is_empty() {
         meta.set_langs(item_languages);
     }
