@@ -305,6 +305,43 @@ function backToList() {
   refreshItems();
 }
 
+/// On a phone, a note's or meeting's top bar stays in place under "Back to Feed" while the page scrolls
+/// beneath it. Its height is kept in --pin-top, so the formatting bar can stay just under it.
+let pinWatch = null;
+function pinTopBar(bar) {
+  unpinTopBar();
+  document.body.classList.add("pin-top");
+  const set = () => document.body.style.setProperty("--pin-top", `${pinnedHeight(bar)}px`);
+  pinWatch = new ResizeObserver(set);
+  pinWatch.observe(bar);
+  pinWatch.observe(document.getElementById("back"));
+  requestAnimationFrame(set);
+}
+function unpinTopBar() {
+  pinWatch?.disconnect();
+  pinWatch = null;
+  document.body.classList.remove("pin-top");
+}
+/// How much of the page's top the pinned bars cover; nothing where the bar isn't pinned.
+function pinnedHeight(bar) {
+  if (!bar?.isConnected || getComputedStyle(bar).position !== "sticky") return 0;
+  return document.getElementById("back").offsetHeight + bar.offsetHeight;
+}
+
+/// How many words a text has, counted as its language counts them where the browser can.
+function wordCount(text) {
+  let n = 0;
+  try {
+    for (const part of new Intl.Segmenter(undefined, { granularity: "word" }).segment(text)) if (part.isWordLike) n++;
+  } catch {
+    n = text.split(/\s+/).filter(Boolean).length;
+  }
+  return n;
+}
+function wordsText(n) {
+  return `${n.toLocaleString()} word${n === 1 ? "" : "s"}`;
+}
+
 /// Leaves whatever page was open: stops playback and polling, and saves a note being edited.
 function leave() {
   stopReading();
@@ -317,6 +354,7 @@ function leave() {
   stopPlayback();
   clearInterval(pollTimer);
   flushNote();
+  unpinTopBar();
   document.body.classList.remove("note-chat-open", "note-chat-page", "note-chat-float");
 }
 
@@ -772,7 +810,8 @@ function renderNote(data, dictate) {
   });
   ed.setFrom(data.doc ? { doc: data.doc } : data.format === "md" ? { markdown: data.body } : { plain: data.body });
   const body = ed.dom;
-  // Sits at the end of the formatting bar: copies the note as it reads, and as formatted text for a rich paste.
+  // Sits at the end of the note, as under a chat app's reply, with how many words it will copy: the note
+  // as it reads, and as formatted text for a rich paste.
   const copyNote = copyIconButton(() => {
     const heading = title.value.trim();
     const plain = [heading, ed.text().trim()].filter(Boolean).join("\n\n");
@@ -783,8 +822,15 @@ function renderNote(data, dictate) {
     } catch { /* The plain text still copies. */ }
     return { text: plain, html };
   }, "Copy note");
-  copyNote.classList.add("note-copy");
-  ed.toolbar.append(copyNote);
+  const copyCount = el("span", { class: "hint" });
+  const noteEnd = el("div", { class: "note-end", hidden: true }, copyNote, copyCount);
+  let countTimer = null;
+  const showCount = () => {
+    const n = wordCount(`${title.value} ${ed.text()}`);
+    noteEnd.hidden = !n;
+    copyCount.textContent = wordsText(n);
+  };
+  const countSoon = () => { clearTimeout(countTimer); countTimer = setTimeout(showCount, 300); };
   note.ed = ed;
   const chip = el("div", { class: "dictation-chip", id: "dictation-chip", hidden: true, "aria-live": "polite" });
   const changed = () => {
@@ -794,6 +840,7 @@ function renderNote(data, dictate) {
     note.rich = true;
     note.dirty = true;
     status.textContent = "Editing…";
+    countSoon();
     clearTimeout(noteTimer);
     noteTimer = setTimeout(() => saveNote(status), 600);
   };
@@ -820,7 +867,7 @@ function renderNote(data, dictate) {
   function openSearch() {
     ed.search.open();
     searchBar.hidden = false;
-    searchBar.style.top = `${ed.toolbar.offsetHeight + 6}px`;
+    searchBar.style.top = `${pinnedHeight(topBar) + ed.toolbar.offsetHeight + 6}px`;
     searchLink.classList.add("on");
     searchLink.setAttribute("aria-expanded", "true");
     searchInput.value = "";
@@ -910,6 +957,7 @@ function renderNote(data, dictate) {
     ed.setFrom(fresh.doc ? { doc: fresh.doc } : fresh.format === "md" ? { markdown: fresh.body } : { plain: fresh.body });
     Object.assign(note, { title: fresh.title, body: fresh.body, rich: fresh.format === "md", doc: fresh.doc ?? null, dirty: false, savedAt: fresh.updated });
     showSaved(status);
+    showCount();
     refreshItems();
     refreshAnalyses();
     note.showVersion?.();
@@ -965,8 +1013,7 @@ function renderNote(data, dictate) {
   moreItems.addEventListener("click", (e) => { if (e.target.closest(".export-menu .menu")) closeMore(); });
   foot.append(el("span", { class: "grow" }), talk, live);
   // On a computer the chat runs the full height of the page, and the top bar and the note sit beside it.
-  main.replaceChildren(el("div", { class: "note-split" }, el("div", { class: "note-main" },
-    el("div", { class: "topbar" }, picker, languagePicker(note.languages, async (list) => {
+  const topBar = el("div", { class: "topbar" }, picker, languagePicker(note.languages, async (list) => {
       try {
         if (!note.id) {
           note.id = await invoke("save_note", noteArgs(null));
@@ -988,16 +1035,19 @@ function renderNote(data, dictate) {
       el("span", { class: "top-actions" },
         // The selection when there is one, else the whole note.
         readAloudButton(() => { const sel = getSelection().toString().trim(); return `${HEADING}${title.value}\n${sel || ed.text()}`; }, "Read the note aloud", { lang: noteLanguage }),
-        more)),
-    exporter.status, langNotice,
+        more));
+  main.replaceChildren(el("div", { class: "note-split" }, el("div", { class: "note-main" },
+    topBar, exporter.status, langNotice,
     // The note scrolls under the top bar; the chat folds to a thin bar on the right.
     el("div", { class: "note-col" },
       ed.toolbar,
-      el("div", { class: "note" }, title, stackSlot, searchBar, chip, editorHolder, toEnd),
+      el("div", { class: "note" }, title, stackSlot, searchBar, chip, editorHolder, noteEnd, toEnd),
       foot)),
     chat?.panel));
   note.syncStack();
   chat?.sync();
+  pinTopBar(topBar);
+  showCount();
   setLanguage([title, body], noteLanguage());
   // A new note starts dictating straight away unless Settings says not to. A note opened to read starts at
   // its top, with the cursor at its end for what is written or dictated next; on a phone the keyboard waits
@@ -2558,7 +2608,15 @@ function renderSession(session, processingError, suggestion) {
     player.nextClip = nextClip;
     requestAnimationFrame(() => player?.seek(keepTime));
   }
+  // At the end of the transcript, as at the end of a note: copies it all, and says how many words that is.
+  const spoken = scriptLines.filter((l) => hasWords(l.text));
+  if (spoken.length) {
+    const transcriptText = () => spoken.map((l) => `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? "Someone"}: ${l.text}`).join("\n");
+    page.append(el("div", { class: "note-end" }, copyIconButton(transcriptText, "Copy transcript"),
+      el("span", { class: "hint" }, wordsText(wordCount(spoken.map((l) => l.text).join(" "))))));
+  }
   setLanguage([page], meetingLanguage());
+  pinTopBar(topBar);
   main.replaceChildren(topBar, el("div", { class: "review" }, page, streams.length ? tracks : null));
 }
 
