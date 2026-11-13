@@ -1171,6 +1171,11 @@ body.note-chat-page .note-col { display: flex; flex-direction: column; flex: 1; 
 .chat-form { display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px 14px; }
 .chat-input { flex: 1; min-width: 0; resize: none; box-sizing: border-box; min-height: 40px; max-height: 160px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: transparent; color: var(--text); font: inherit; font-size: 14px; line-height: 1.4; }
 .chat-send { width: 38px; height: 38px; border-radius: 50%; flex: none; }
+/* Speak instead of typing: records up to two minutes, then the words go in the field. */
+.voice-btn { width: 38px; height: 38px; border-radius: 50%; flex: none; padding: 0; display: inline-flex; align-items: center; justify-content: center; gap: 4px; color: var(--soft); }
+.voice-btn.recording { width: auto; padding: 0 10px; border-radius: 19px; background: var(--danger, #c0392b); color: #fff; font-size: 12px; font-variant-numeric: tabular-nums; }
+.voice-btn.recording .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; animation: pulse 1.2s ease-in-out infinite; }
+.voice-btn.busy { opacity: 0.6; }
 /* In a narrow window the chat lies over the note rather than squeezing it. */
 @media (max-width: 1020px) {
   body.note-chat-open .note-chat { position: absolute; top: 0; right: 0; bottom: 0; width: min(var(--chat-width, 360px), 100%); max-width: none; z-index: 15; box-shadow: -8px 0 28px rgba(0, 0, 0, 0.2); }
@@ -1279,6 +1284,12 @@ body:is([data-platform="android"], [data-platform="ios"]) .ne-menu .menu kbd { d
 .note-body th > p, .note-body td > p { margin: 0; }
 .note-body .selectedCell::after { content: ""; position: absolute; inset: 0; background: var(--highlight); opacity: 0.5; pointer-events: none; }
 .note-body .dictation-slot { display: inline-flex; align-items: center; margin: 0 2px; }
+/* Where dictated words will go while it listens: a pulsing dot and a caret, in place of the empty note's hint. */
+.note-body .dictation-listen { display: inline-flex; align-items: center; gap: 5px; height: 1.2em; margin: 0 3px; vertical-align: -0.2em; user-select: none; }
+.dictation-listen .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--key); animation: pulse 1.2s ease-in-out infinite; }
+.dictation-listen .caret { width: 2px; height: 1.1em; background: var(--key); animation: chat-caret 1s steps(1) infinite; }
+@media (prefers-reduced-motion: reduce) { .dictation-listen .dot, .dictation-listen .caret { animation: none; } }
+.note-body:has(.dictation-listen) p.is-editor-empty::before { content: none; }
 dialog.note-ask textarea, dialog.note-ask input[type="text"] { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; }
 dialog.note-ask textarea { font: 13px ui-monospace, "Cascadia Mono", Consolas, monospace; resize: vertical; }
 dialog.sheet .actions .grow { flex: 1; }
@@ -1363,14 +1374,17 @@ dialog.note-shortcuts h3 { font-size: 13px; margin: 16px 0 8px; color: var(--mut
 /* A note's chat on a phone, or in a narrow window: a round button on the right that opens it over the note. */
 .chat-back { display: none; min-height: 32px; padding: 2px 12px 2px 6px; }
 .chat-back svg { transform: rotate(180deg); }
+/* A dark grey tab stuck to the right edge, holding a large chat bubble. */
 body.note-chat-float .chat-rail {
-  position: fixed; z-index: 14; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(92px + env(safe-area-inset-bottom, 0px));
-  width: 52px; height: 52px; padding: 0; justify-content: center; border: none; border-radius: 26px; background: var(--key);
-  box-shadow: 0 8px 24px rgb(111 82 173 / 0.4), 0 2px 6px rgb(0 0 0 / 0.2);
+  position: fixed; z-index: 14; right: 0; bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+  width: auto; height: auto; padding: 6px calc(4px + env(safe-area-inset-right, 0px)) 6px 6px; justify-content: center; border: none;
+  border-radius: 12px 0 0 12px; background: #3a3a3e; box-shadow: 0 4px 16px rgb(0 0 0 / 0.3);
 }
-body.note-chat-float .chat-rail:hover, body.note-chat-float .chat-rail:active { background: var(--key-1); }
+body.note-chat-float .chat-rail:hover, body.note-chat-float .chat-rail:active { background: #4a4a4f; }
+body.note-chat-float .chat-opener { width: 40px; height: 40px; }
+body.note-chat-float .chat-opener svg { width: 36px; height: 36px; }
 body.note-chat-float .chat-opener, body.note-chat-float .chat-rail.unread .chat-opener { color: #fff; background: transparent; }
-body.note-chat-float .chat-dot { background: #fff; box-shadow: 0 0 0 2px var(--key); }
+body.note-chat-float .chat-dot { top: 4px; right: 4px; background: var(--key); box-shadow: 0 0 0 2px #3a3a3e; }
 body.note-chat-float .note-chat {
   position: fixed; inset: 0; z-index: 40; width: auto; max-width: none; border-left: none; box-shadow: none;
   padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);

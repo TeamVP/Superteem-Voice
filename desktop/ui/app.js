@@ -1135,11 +1135,79 @@ function stoppedSignal() {
   if (isPhone()) invoke("haptic").catch(() => {});
 }
 
+/// A button beside a text field that records the person speaking, for up to two minutes, and puts the
+/// words in the field at its cursor. A second press stops it; stopping by itself chirps and buzzes.
+const VOICE_LIMIT_S = 120;
+let voiceRecording = null; // The voice button now recording, so only one records at a time.
+function voiceButton(field, { onWords } = {}) {
+  const label = el("span", { class: "rec-time" });
+  const b = el("button", { class: "icon-only voice-btn", type: "button", title: "Speak instead of typing (up to two minutes)", "aria-label": "Speak instead of typing" }, svg("mic", 18));
+  b.addEventListener("mousedown", (e) => e.preventDefault());
+  let timer = null, started = 0;
+  const idle = () => {
+    clearInterval(timer);
+    b.classList.remove("recording", "busy");
+    b.disabled = false;
+    b.replaceChildren(svg("mic", 18));
+    b.setAttribute("aria-label", "Speak instead of typing");
+    if (voiceRecording === b) voiceRecording = null;
+  };
+  const stop = async (auto) => {
+    if (!b.classList.contains("recording")) return;
+    clearInterval(timer);
+    b.classList.replace("recording", "busy");
+    b.disabled = true;
+    b.replaceChildren(el("span", { class: "spinner" }));
+    b.setAttribute("aria-label", "Writing it down");
+    if (auto) stoppedSignal();
+    let words = "";
+    try {
+      words = (await invoke("dictate_stop", { languages: note?.languages ?? null })).trim();
+    } catch (e) {
+      micToast(String(e));
+    }
+    idle();
+    if (!words || !field.isConnected) return;
+    const at = field.selectionStart ?? field.value.length, end = field.selectionEnd ?? at;
+    const before = field.value.slice(0, at), after = field.value.slice(end);
+    const text = (before && !/\s$/.test(before) ? " " : "") + words + (after && !/^\s/.test(after) ? " " : "");
+    field.value = before + text + after;
+    field.selectionStart = field.selectionEnd = at + text.length;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    field.focus({ preventScroll: true });
+    onWords?.(words);
+  };
+  b.addEventListener("click", async () => {
+    if (b.classList.contains("recording")) return stop(false);
+    if (b.disabled || dictation || voiceRecording) return;
+    voiceRecording = b;
+    b.disabled = true;
+    try {
+      await invoke("dictate_start");
+    } catch (e) {
+      idle();
+      return showDictationError(e);
+    }
+    b.disabled = false;
+    started = Date.now();
+    b.classList.add("recording");
+    b.setAttribute("aria-label", "Stop and write it down");
+    label.textContent = "0:00";
+    b.replaceChildren(el("span", { class: "rec-dot" }), label);
+    timer = setInterval(() => {
+      const s = (Date.now() - started) / 1000;
+      label.textContent = clock(Math.min(s, VOICE_LIMIT_S));
+      if (s >= VOICE_LIMIT_S || !b.isConnected) stop(b.isConnected);
+    }, 250);
+  });
+  return b;
+}
+
 /// Dictation records until it's stopped, or until a silence after the person has finished. At each pause
 /// the clip so far is saved and written down at the cursor while the next clip records, so nothing is missed.
 async function startDictation() {
   const body = document.getElementById("note-body");
-  if (!body || dictation) return;
+  if (!body || dictation || voiceRecording) return;
   dictation = { slots: new Map() };
   document.getElementById("dictation-chip").hidden = true;
   // Kept audio is filed under the note, so the note is saved as keeping it first.

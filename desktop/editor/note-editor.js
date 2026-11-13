@@ -19,7 +19,7 @@ import { TableKit } from "@tiptap/extension-table";
 import TextAlign from "@tiptap/extension-text-align";
 import { Placeholder } from "@tiptap/extensions";
 import { Markdown } from "@tiptap/markdown";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { EditorState, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 const ATTACHMENT = "attachment:";
@@ -112,8 +112,12 @@ function dictationPlugin() {
     props: {
       decorations(state) {
         const { slots, fades } = dictationKey.getState(state);
-        const widgets = slots.filter((s) => !s.anchor).map((s) => Decoration.widget(s.pos, () =>
-          h("span", { class: "dictation-slot", contenteditable: "false" }, h("span", { class: "spinner" }), "Writing it down…"), { side: -1000 + s.order, key: `slot-${s.id}` }));
+        const widgets = slots.map((s) => s.anchor
+          // Where the words will go, shown while the dictation listens: it takes the place of the empty note's hint.
+          ? Decoration.widget(s.pos, () => h("span", { class: "dictation-listen", contenteditable: "false", "aria-label": "Listening: your words go here" },
+            h("span", { class: "dot" }), h("span", { class: "caret" })), { side: 1000, key: `listen-${s.id}` })
+          : Decoration.widget(s.pos, () =>
+            h("span", { class: "dictation-slot", contenteditable: "false" }, h("span", { class: "spinner" }), "Writing it down…"), { side: -1000 + s.order, key: `slot-${s.id}` }));
         return widgets.length ? fades.add(state.doc, widgets) : fades;
       },
     },
@@ -663,10 +667,15 @@ export function create({ element, host, placeholder = "" }) {
 
   // ----- What the page uses
 
+  /// Puts a note's text in the editor. Undo starts afresh: it never goes back to an earlier note, or
+  /// to the empty editor the note was opened in.
   const setFrom = ({ doc, markdown, plain }) => {
     if (doc) editor.commands.setContent(doc, { emitUpdate: false });
     else if (markdown != null) editor.commands.setContent(markdown, { contentType: "markdown", emitUpdate: false });
     else editor.commands.setContent(plainToDoc(plain), { emitUpdate: false });
+    const { state } = editor;
+    editor.view.updateState(EditorState.create({ doc: state.doc, selection: state.selection, plugins: state.plugins }));
+    drawState();
     adoptWebImages();
   };
 
@@ -703,6 +712,28 @@ export function create({ element, host, placeholder = "" }) {
     addEventListener("resize", again);
     setTimeout(() => { seen?.removeEventListener("resize", again); removeEventListener("resize", again); }, 1500);
   }
+
+  /// On a phone, a selection the keyboard comes up over is brought back into sight, above it. One taller
+  /// than what can be seen shows its end.
+  function keepSelectionSeen() {
+    if (editor.isDestroyed || !editor.isFocused || editor.state.selection.empty) return;
+    const seen = window.visualViewport;
+    if (!seen) return;
+    const box = scroller();
+    const { from, to } = editor.state.selection;
+    const start = editor.view.coordsAtPos(from), end = editor.view.coordsAtPos(to);
+    const frame = box.getBoundingClientRect();
+    const bar = toolbar.isConnected ? toolbar.getBoundingClientRect().bottom : 0;
+    const top = Math.max(frame.top, bar, seen.offsetTop) + 8;
+    const bottom = Math.min(frame.bottom, seen.offsetTop + seen.height) - 8;
+    if (bottom <= top) return;
+    if (end.bottom - start.top > bottom - top) box.scrollTop += end.bottom - bottom;
+    else if (end.bottom > bottom) box.scrollTop += end.bottom - bottom;
+    else if (start.top < top) box.scrollTop -= top - start.top;
+  }
+  const settle = () => requestAnimationFrame(keepSelectionSeen);
+  window.visualViewport?.addEventListener("resize", settle);
+  editor.on("destroy", () => window.visualViewport?.removeEventListener("resize", settle));
 
   const searchState = () => searchKey.getState(editor.state);
   const sendSearch = (meta) => editor.view.dispatch(editor.state.tr.setMeta(searchKey, meta));

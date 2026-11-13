@@ -66,7 +66,7 @@ function noteChat(status) {
   const log = el("div", { class: "chat-log", role: "log", "aria-live": "polite" });
   const input = el("textarea", { class: "chat-input", rows: "1", placeholder: "Ask about this note, or ask for a rewrite", "aria-label": "Message" });
   const send = el("button", { class: "primary icon-only chat-send", type: "submit", title: "Send (Enter)", "aria-label": "Send" }, svg("send", 16));
-  const form = el("form", { class: "chat-form" }, input, send);
+  const form = el("form", { class: "chat-form" }, input, voiceButton(input), send);
   const close = el("button", { class: "icon-only chat-collapse", type: "button", title: "Collapse the chat (Esc)", "aria-label": "Collapse the chat" }, svg("chevron", 16));
   // On a phone, or in a narrow window, the chat covers the note: this goes back to it.
   const back = el("button", { class: "pill with-icon chat-back", type: "button", title: "Back to the note", "aria-label": "Back to the note" }, svg("chevron", 16), "Note");
