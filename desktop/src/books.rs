@@ -49,6 +49,18 @@ pub struct Book {
     /// Missing in a book saved before this meant it can be edited.
     #[serde(default = "editable_by_default")]
     pub editable: bool,
+    /// The natural voice the book suggests reading it in (a voice id, as `tts::Voice::id`); empty for none.
+    /// Offered the first time the book is read aloud on a device that has natural voices.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub voice: String,
+    /// Why that voice, in a sentence, for the offer.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub voice_why: String,
+    /// How to say words the voices get wrong, for this book only: each word as written ("Phocion") to how
+    /// it's spelt for the voice ("Foe-shee-on"). Whole words, matching case; the page shows the words as
+    /// written.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub pronounce: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -159,7 +171,7 @@ fn write(book: &mut Book, touch: bool) -> Result<(), String> {
 
 pub fn create(title: String) -> Result<String, String> {
     let now = library::now();
-    let mut book = Book { id: format!("b{}-{}", now, std::process::id() ^ (now as u32).rotate_left(7)), title, created: now, updated: now, notes: vec![], parts: vec![], editable: true };
+    let mut book = Book { id: format!("b{}-{}", now, std::process::id() ^ (now as u32).rotate_left(7)), title, created: now, updated: now, editable: true, ..Default::default() };
     write(&mut book, false)?;
     Ok(book.id)
 }
@@ -417,7 +429,8 @@ fn install_bundled(now: u64) -> Result<(), String> {
     library::write_json(&book_file, &book)
 }
 
-const EXAMPLE_BOOK: u32 = 2;
+/// 3: the book suggests a voice.
+const EXAMPLE_BOOK: u32 = 3;
 const EXAMPLE_ID: &str = "plutarch-lives";
 
 fn example_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf> {
@@ -436,6 +449,23 @@ mod tests {
         assert!(book.editable);
         let locked: Book = serde_json::from_str(r#"{"editable":false}"#).unwrap();
         assert!(!locked.editable);
+    }
+
+    #[test]
+    fn the_example_books_pronunciations_are_words_in_it() {
+        let dir = example_dir(None).expect("the example book is beside the crate");
+        let book: Book = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{EXAMPLE_ID}.json"))).unwrap()).unwrap();
+        assert!(!book.voice.is_empty() && !book.pronounce.is_empty());
+        let mut text = String::new();
+        for f in std::fs::read_dir(dir.join("notes")).unwrap().flatten() {
+            text.push_str(&std::fs::read_to_string(f.path()).unwrap());
+        }
+        let words: std::collections::HashSet<&str> = text.split(|c: char| !c.is_alphabetic()).collect();
+        for (word, said) in &book.pronounce {
+            assert!(word.chars().all(char::is_alphabetic), "{word} is one word");
+            assert!(!said.trim().is_empty() && said != word, "{word} has a spelling for the voice");
+            assert!(words.contains(word.as_str()), "{word} is in the book");
+        }
     }
 
     #[test]

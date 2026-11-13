@@ -2318,10 +2318,29 @@ fn offered_voice(language: String) -> Option<tts::Voice> {
     tts::first_for(&language)
 }
 
-/// The natural voice that reads `language`, or None when the system's voice does.
+/// The natural voice that reads `language`, or None when the system's voice does. `prefer` (a book's own
+/// voice) reads instead when it's downloaded and speaks the language.
 #[tauri::command]
-fn reading_voice(language: Option<String>) -> Option<tts::Voice> {
+fn reading_voice(language: Option<String>, prefer: Option<String>) -> Option<tts::Voice> {
+    if let Some(id) = prefer.filter(|id| !id.is_empty()) {
+        let speaks = |v: &tts::Voice| language.as_deref().is_none_or(|l| v.langs.iter().any(|x| x == l));
+        if let Some(v) = tts::voices().into_iter().find(|v| v.id == id && tts::ready(v) && speaks(v)) {
+            return Some(v);
+        }
+    }
     tts::for_language(&prefs::load(), language.as_deref())
+}
+
+/// Sets the voice a book reads in: a natural voice's id, or "default" for the main one.
+#[tauri::command]
+fn set_book_voice(book: String, voice: String) -> Result<(), String> {
+    if !(voice == "default" || tts::voices().iter().any(|v| v.id == voice)) {
+        return Err("That voice isn't in the list.".into());
+    }
+    prefs::update(|p| {
+        p.book_voices.insert(book, voice);
+    })
+    .map(|_| ())
 }
 
 /// Speech for `text` in a natural voice (`voice`, else the main one) at the chosen speed, as a WAV for the
@@ -3206,6 +3225,7 @@ pub fn run() {
             cancel_tts_download,
             add_tts_voice,
             reading_voice,
+            set_book_voice,
             get_languages,
             save_languages,
             set_line_language,

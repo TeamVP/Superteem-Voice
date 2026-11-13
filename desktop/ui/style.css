@@ -1522,3 +1522,12 @@ body.note-chat-float .chat-head { padding-left: 8px; }
   :root:not([data-theme="light"]) ::highlight(search-hit) { background-color: var(--key-2); }
 }
 .book-hit-more { padding: 2px 10px 6px 18px; font-size: 13px; }
+
+/* A book's suggested voice, offered the first time it's read aloud. */
+.book-voice-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 10px; }
+.book-voice-option { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; min-width: 0; }
+.book-voice-option small { color: var(--muted); font-size: 12px; }
+.book-voice-option strong { overflow-wrap: anywhere; }
+.book-voice-option .book-voice-extra { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.book-voice-status:empty { display: none; }
+@media (max-width: 420px) { .book-voice-options { grid-template-columns: 1fr; } }
