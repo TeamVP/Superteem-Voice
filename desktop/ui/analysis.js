@@ -704,8 +704,10 @@ let reading = null;
 /// A button that reads aloud what `text()` returns, and stops when pressed again.
 /// `lang`: the language code what's read is in, or a function giving it; unset for the main voice.
 /// `pieces()`, instead of text, gives the pieces to say already split (see speechPieces), and `onPiece` is
-/// told each as it's said, then null when reading ends.
-function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPiece } = {}) {
+/// told each as it's said, then null when reading ends. `voice(lang)`, before each reading, gives the voice
+/// to read in instead of the usual one (a book's own; see bookVoice), or false to not read. `pronounce`: a
+/// book's own pronunciations (see respeller).
+function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPiece, voice, pronounce } = {}) {
   const button = label
     ? el("button", { class: "pill with-icon read-aloud", type: "button", title: what, "aria-pressed": "false" }, svg("play", 14), label)
     : el("button", { class: "icon-only read-aloud", type: "button", title: what, "aria-label": what, "aria-pressed": "false" }, svg("speak", 16));
@@ -713,15 +715,23 @@ function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPie
   // A labelled button says Stop while it reads.
   if (label) button.reading = (on) => button.replaceChildren(svg(on ? "pause" : "play", 14), on ? "Stop" : label);
   button.addEventListener("mousedown", (e) => e.preventDefault());
-  button.addEventListener("click", () => {
+  const langNow = () => (typeof lang === "function" ? lang() : lang);
+  button.addEventListener("click", async () => {
     if (reading?.button === button) return stopReading();
     stopReading();
-    readAloud(button, pieces ? null : text(), typeof lang === "function" ? lang() : lang, { pieces: pieces?.(), onPiece });
+    // What to read is taken at the click, before any question about the voice moves the selection.
+    const words = pieces ? null : text();
+    const given = pieces?.();
+    const prefer = voice ? await voice(langNow()) : null;
+    if (prefer === false) return;
+    readAloud(button, words, langNow(), { pieces: given, onPiece, voice: prefer, pronounce });
   });
   /// Reads `text` now, in place of whatever is being read: "Read aloud from here".
-  button.readText = (words, language) => {
+  button.readText = async (words, language) => {
     stopReading();
-    readAloud(button, words, language ?? (typeof lang === "function" ? lang() : lang));
+    const prefer = voice ? await voice(language ?? langNow()) : null;
+    if (prefer === false) return;
+    readAloud(button, words, language ?? langNow(), { voice: prefer, pronounce });
   };
   return button;
 }
@@ -730,8 +740,9 @@ function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPie
 const HEADING = "\u2063";
 
 /// Pauses, in milliseconds at normal speed: after a sentence, after a paragraph (a line), and around a
-/// heading.
-const PAUSE = { phrase: 150, sentence: 350, paragraph: 700, heading: 800 };
+/// heading; `line` is added on top wherever the text breaks a line (the end of a paragraph or heading, or a
+/// blank line). All of them stretch and shrink with the reading speed (see readAloud).
+const PAUSE = { phrase: 150, sentence: 350, paragraph: 700, heading: 800, line: 120 };
 
 /// The text as pieces to say, each with the pause before and after it: a heading on its own; otherwise a
 /// sentence at a time, and a very long one at its commas.
@@ -740,11 +751,11 @@ function speechPieces(text) {
   const lines = (text ?? "").replace(/\r/g, "").split("\n");
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i].trim();
-    if (!raw) { if (pieces.length) pieces.at(-1).after = Math.max(pieces.at(-1).after, PAUSE.paragraph); continue; }
+    if (!raw) { if (pieces.length) pieces.at(-1).after = Math.max(pieces.at(-1).after, PAUSE.paragraph + PAUSE.line); continue; }
     // A line marked as one, or written as one in Markdown.
     if (raw.startsWith(HEADING) || /^#{1,6}\s/.test(raw)) {
       const heading = raw.replace(HEADING, "").replace(/^#{1,6}\s+/, "").trim();
-      if (heading) pieces.push({ text: heading, before: PAUSE.heading, after: PAUSE.heading });
+      if (heading) pieces.push({ text: heading, before: PAUSE.heading + PAUSE.line, after: PAUSE.heading + PAUSE.line });
       continue;
     }
     // Sentences end at . ! ? and their Chinese forms, which have no space after them.
@@ -754,11 +765,23 @@ function speechPieces(text) {
       const parts = sentence.length > 280 ? sentence.split(/(?<=[,;，；])\s*/).filter(Boolean) : [sentence];
       parts.forEach((part, m) => {
         const end = m === parts.length - 1;
-        pieces.push({ text: part, before: 0, after: !end ? PAUSE.phrase : last ? PAUSE.paragraph : PAUSE.sentence });
+        pieces.push({ text: part, before: 0, after: !end ? PAUSE.phrase : last ? PAUSE.paragraph + PAUSE.line : PAUSE.sentence });
       });
     });
   }
   return pieces;
+}
+
+/// Rewrites text for the voice by a book's pronunciations ({ "Phocion": "Foe-shee-on" }): whole words only
+/// ("Phocion's" too, not "Phocionic"), matching case. Without any, the text as it is.
+function respeller(pronounce) {
+  const words = Object.keys(pronounce ?? {}).filter((w) => w && pronounce[w]);
+  if (!words.length) return (text) => text;
+  // Longest first, so "Lacedaemonians" wins over "Lacedaemon".
+  words.sort((a, b) => b.length - a.length);
+  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`(?<![\\p{L}\\p{M}])(?:${escaped.join("|")})(?![\\p{L}\\p{M}])`, "gu");
+  return (text) => text.replace(pattern, (w) => pronounce[w]);
 }
 
 /// Waits `ms`, or less if reading is stopped.
@@ -773,12 +796,16 @@ function pause(ms, mine) {
 /// Says the text a sentence at a time, with a pause after each and longer ones around headings and between
 /// paragraphs. Short pieces also keep long text going where a voice gives up after a while, and let it stop
 /// between them.
-async function readAloud(button, text, lang, { pieces: given, onPiece } = {}) {
+async function readAloud(button, text, lang, { pieces: given, onPiece, voice: prefer, pronounce } = {}) {
   const pieces = given ?? speechPieces(text);
   if (!pieces.length) return;
-  // The gap between two pieces: the longer of what the first wants after it and the next before it, shorter
-  // when reading faster.
-  const gap = (i) => (i + 1 < pieces.length ? Math.max(pieces[i].after, pieces[i + 1].before) : 0) / (prefs.read_speed ?? 1);
+  // What the voice is given: the piece, with the book's own pronunciations. onPiece still gets the words
+  // as written.
+  const said = respeller(pronounce);
+  // The gap between two pieces: the longer of what the first wants after it and the next before it, in
+  // proportion to the speed: at half speed twice as long, at double speed half as long. (Read at each gap,
+  // so changing the speed while reading takes effect at once.)
+  const gap = (i) => (i + 1 < pieces.length ? Math.max(pieces[i].after, pieces[i + 1].before) : 0) / Math.max(0.5, prefs.read_speed ?? 1);
   const mine = { button, cancelled: false, onPiece, what: button.dataset.what || "Read aloud" };
   reading = mine;
   button.classList.add("on");
@@ -789,13 +816,13 @@ async function readAloud(button, text, lang, { pieces: given, onPiece } = {}) {
   invoke("listen_mute", { muted: true }).catch(() => {});
   try {
     // The natural voice for this language, if there is one; otherwise the system's voice reads.
-    const voice = isDesktop() ? await invoke("reading_voice", { language: lang ?? null }).catch(() => null) : null;
+    const voice = isDesktop() ? await invoke("reading_voice", { language: lang ?? null, prefer: prefer ?? null }).catch(() => null) : null;
     if (voice) {
       // The natural voice makes the next piece while this one plays, so there's no gap between them.
-      let next = invoke("natural_speak", { text: pieces[0].text, voice: voice.id });
+      let next = invoke("natural_speak", { text: said(pieces[0].text), voice: voice.id });
       for (let i = 0; i < pieces.length && !mine.cancelled; i++) {
         const wav = await next;
-        if (i + 1 < pieces.length) next = invoke("natural_speak", { text: pieces[i + 1].text, voice: voice.id });
+        if (i + 1 < pieces.length) next = invoke("natural_speak", { text: said(pieces[i + 1].text), voice: voice.id });
         if (mine.cancelled) break;
         onPiece?.(pieces[i], voice);
         await playWav(wav, mine);
@@ -804,7 +831,7 @@ async function readAloud(button, text, lang, { pieces: given, onPiece } = {}) {
     } else {
       for (let i = 0; i < pieces.length && !mine.cancelled; i++) {
         onPiece?.(pieces[i], null);
-        await systemSay(pieces[i].text, lang);
+        await systemSay(said(pieces[i].text), lang);
         await pause(gap(i), mine);
       }
     }
@@ -822,6 +849,84 @@ async function readAloud(button, text, lang, { pieces: given, onPiece } = {}) {
     button.reading?.(false);
   }
   if (!reading) invoke("listen_mute", { muted: false }).catch(() => {});
+}
+
+/// The voice a book reads in, for readAloudButton's `voice`: its own, when the person chose it; else null
+/// for the usual one. The first time a book that suggests a voice is read on a device with natural voices,
+/// asks which, offering to download the suggested one; false when they close the question without choosing.
+async function bookVoice(book, lang) {
+  if (!book?.voice || !isDesktop()) return null;
+  const chosen = prefs.book_voices?.[book.id];
+  if (chosen) return chosen === "default" ? null : chosen;
+  const status = await invoke("tts_status").catch(() => null);
+  const suggested = status?.supported && status.voices.find((v) => v.id === book.voice);
+  // Not on this device, or in another language than the one read: nothing to ask.
+  if (!suggested || (lang && !suggested.langs?.includes(lang))) return null;
+  const usual = await invoke("reading_voice", { language: lang ?? null, prefer: null }).catch(() => null);
+  if (usual?.id === suggested.id) return null;
+  const choice = await bookVoiceDialog(book, usual, suggested, status.downloading);
+  if (!choice) return false;
+  try {
+    await invoke("set_book_voice", { book: book.id, voice: choice });
+    prefs.book_voices = { ...prefs.book_voices, [book.id]: choice };
+  } catch (e) {
+    micToast(`The choice wasn't saved: ${e}`);
+  }
+  return choice === "default" ? null : choice;
+}
+
+/// What a voice is, in a few words: "British English, male".
+const voiceKind = (v) => [v.language, v.gender?.toLowerCase()].filter(Boolean).join(", ");
+
+/// Asks which voice reads a book: the person's usual one, or the one the book suggests, downloaded first
+/// when it isn't yet. Gives "default", the suggested voice's id, or null when closed.
+function bookVoiceDialog(book, usual, suggested, busy) {
+  return new Promise((done) => {
+    let result = null;
+    let downloading = false;
+    const usualName = usual ? usual.name : prefs.system_voice || "The system's voice";
+    const usualKind = usual ? voiceKind(usual) : "Built into this device";
+    const size = suggested.size ? `${Math.round(suggested.size / 1e6)} MB download` : "Download";
+    const status = el("p", { class: "hint book-voice-status" });
+    const option = (title, name, kind, extra) => el("div", { class: "book-voice-option" },
+      el("small", {}, title), el("strong", {}, name), el("span", {}, kind), extra ? el("span", { class: "book-voice-extra" }, extra) : null);
+    const keep = el("button", { class: "pill", type: "button" }, "Keep my voice");
+    const use = el("button", { class: "primary pill", type: "button", disabled: !suggested.ready && !!busy },
+      suggested.ready ? `Use ${suggested.name}` : `Download and use ${suggested.name}`);
+    const finish = (value) => { result = value; dialog.close(); };
+    keep.addEventListener("click", () => finish("default"));
+    use.addEventListener("click", async () => {
+      if (suggested.ready) return finish(suggested.id);
+      downloading = true;
+      use.disabled = keep.disabled = true;
+      status.replaceChildren(el("span", { class: "spinner" }), " ", `Downloading ${suggested.name}… `, el("span", { "data-tts-progress": suggested.id }, ""));
+      try {
+        await invoke("download_tts", { id: suggested.id });
+        downloading = false;
+        if (dialog.open) finish(suggested.id);
+      } catch (e) {
+        downloading = false;
+        use.disabled = keep.disabled = false;
+        status.replaceChildren(el("span", { class: "danger" }, String(e)));
+      }
+    });
+    const dialog = el("dialog", { class: "sheet book-voice-dialog", "aria-label": "A voice for this book" },
+      el("h2", {}, "A voice for this book"),
+      el("p", {}, `${book.title || "This book"} suggests a voice to read it.${book.voice_why ? ` ${book.voice_why}` : ""}`),
+      el("div", { class: "book-voice-options" },
+        option("Your voice", usualName, usualKind),
+        option("Suggested", suggested.name, voiceKind(suggested), suggested.ready ? "Downloaded" : `${size}, then works offline`)),
+      el("p", { class: "hint" }, "Only this book changes. Everything else keeps reading in your voice."),
+      status,
+      el("div", { class: "actions" }, el("span", { class: "grow" }), keep, use));
+    if (busy && !suggested.ready) status.textContent = "Another voice is downloading. Try again when it's done, or keep your voice.";
+    // Closing while it downloads stops the download.
+    dialog.addEventListener("cancel", () => { if (downloading) invoke("cancel_tts_download").catch(() => {}); });
+    dialog.addEventListener("close", () => { dialog.remove(); done(result); });
+    document.body.append(dialog);
+    dialog.showModal();
+    use.focus();
+  });
 }
 
 /// Says `text` in the system's voice chosen in Settings, at the chosen speed and pitch. (Named apart from

@@ -791,7 +791,7 @@ async function openReadingBook(book, chapterId, find = null) {
     let marks = null;
     // What is selected, or from where the text was last clicked; otherwise the whole chapter.
     const speak = readAloudButton(() => marks?.readingText() ?? `${HEADING}${heading.textContent}\n${body.innerText}`,
-      "Read the chapter aloud (from where you click, or what you select)", { lang });
+      "Read the chapter aloud (from where you click, or what you select)", { lang, voice: (l) => bookVoice(book, l), pronounce: book.pronounce });
     const mark = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or where you clicked", "aria-label": "Bookmark" }, svg("bookmark", 16));
     mark.addEventListener("mousedown", (e) => e.preventDefault());
     mark.addEventListener("click", () => marks?.create());
@@ -963,7 +963,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
       const sel = from.surface.selection();
       if (sel && sel.from !== sel.to) return start;
       return [start, ...attached.slice(i + 1).map(chapterText)].join("\n\n");
-    }, "Read the book aloud (from where you click, or what you select)");
+    }, "Read the book aloud (from where you click, or what you select)", { voice: (l) => bookVoice(book, l), pronounce: book.pronounce });
     if (chapters.length) modes.append(el("span", { class: "grow" }), speak);
     let part = "";
     for (const c of chapters) {

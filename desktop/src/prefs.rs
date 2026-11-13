@@ -102,6 +102,9 @@ pub struct Prefs {
     /// The voice that reads each language, by code: a natural voice's id, or "system". A language not here
     /// reads with the main voice when it speaks that language.
     pub voice_for: std::collections::BTreeMap<String, String>,
+    /// The voice each book reads in, by book id, once its suggested voice has been offered: a natural
+    /// voice's id, or "default" for the voice that reads everything else.
+    pub book_voices: std::collections::BTreeMap<String, String>,
     /// The languages new notes and meetings start in; empty for the primary one alone.
     pub default_languages: Vec<String>,
     /// Languages notes and meetings are translated into when asked, or after processing when
