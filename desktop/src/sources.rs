@@ -321,14 +321,21 @@ mod win {
         let step = config.sample_rate().0 as f64 / LOOPBACK_RATE as f64;
         let (tx, blocks) = mpsc::channel::<Vec<f32>>();
         let mut position = 0f64;
+        let mut carried: Vec<f32> = Vec::new();
         let mut convert = move |mono: Vec<f32>| {
-            // Linear steps from the device's rate to 48 kHz.
-            let mut out = Vec::with_capacity((mono.len() as f64 / step) as usize + 1);
-            while (position as usize) < mono.len() {
-                out.push(mono[position as usize]);
+            // Interpolates between neighbouring samples from the device's rate to 48 kHz, carrying the
+            // last samples over so blocks join without a step.
+            carried.extend(mono);
+            let mut out = Vec::with_capacity((carried.len() as f64 / step) as usize + 1);
+            while position as usize + 1 < carried.len() {
+                let i = position as usize;
+                let f = (position - i as f64) as f32;
+                out.push(carried[i] * (1.0 - f) + carried[i + 1] * f);
                 position += step;
             }
-            position -= mono.len() as f64;
+            let used = (position as usize).min(carried.len());
+            carried.drain(..used);
+            position -= used as f64;
             drop(tx.send(out));
         };
         let stream = match config.sample_format() {
@@ -508,8 +515,6 @@ mod win {
             let names: Vec<String> = parts.keys().map(|p| format!("{} {p}", all.get(p).map_or("?", |x| x.program.as_str()))).collect();
             event(format!("Capturing {} directly: {}", friendly(program), names.join(", ")));
         }
-        let started = std::time::Instant::now();
-        let mut sent: u64 = 0;
         let mut last_scan = std::time::Instant::now();
         // Each part may run up to this far ahead before its oldest sound is dropped.
         let most = LOOPBACK_RATE as usize / 5;
@@ -594,9 +599,15 @@ mod win {
                 let via = fallback.as_ref().map_or(String::new(), |f| format!(" (recording {} instead)", f.device));
                 log(&format!("{program}: {}{via}", line.join("; ")));
             }
-            // Behind the clock by a little, so parts that arrive in bursts are mixed rather than cut.
-            let due = (started.elapsed().as_micros() as u64 * LOOPBACK_RATE as u64 / 1_000_000).saturating_sub(LOOPBACK_RATE as u64 / 20);
-            let n = due.saturating_sub(sent) as usize;
+            // The output follows one stream's own clock, the device when it is being recorded, else the
+            // loudest part, so its sound is passed on whole. Pacing by the computer's clock instead
+            // left tiny gaps whenever the sound arrived a little late, heard as a buzz. The other parts
+            // add what they have; the recorder places any pause by the clock.
+            let leader_len = match fallback.as_ref() {
+                Some(f) => f.queue.len(),
+                None => parts.values().max_by(|a, b| a.peak.total_cmp(&b.peak).then(a.queue.len().cmp(&b.queue.len()))).map_or(0, |p| p.queue.len()),
+            };
+            let n = leader_len;
             if n == 0 {
                 continue;
             }
@@ -613,7 +624,6 @@ mod win {
                     *o += s;
                 }
             }
-            sent += n as u64;
             if out.send(block).is_err() {
                 break;
             }
@@ -742,12 +752,16 @@ mod live {
         let dir = std::env::temp_dir().join(format!("stv-sources-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let recorder = crate::recorder::start(dir.clone(), &names, false).unwrap();
-        std::thread::sleep(std::time::Duration::from_secs(3));
+        std::thread::sleep(std::time::Duration::from_secs(8));
         for s in recorder.status().unwrap().streams {
             println!("{} {:?}: {} {} frames level {:.2} {}", s.name, crate::recorder::device_of(&s.name, &names), s.state, s.frames, s.level, s.detail);
         }
         recorder.stop().unwrap();
-        let _ = std::fs::remove_dir_all(dir);
+        if std::env::var("STV_KEEP").is_ok() {
+            println!("kept {}", dir.display());
+        } else {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     /// Which process of an app carries its sound: `cargo test --lib live_pids -- --ignored --nocapture`.
