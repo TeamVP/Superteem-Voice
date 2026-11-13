@@ -1402,6 +1402,9 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 .book-mode .pill.on { background: var(--key); color: #fff; }
 .book-notes .row { gap: 8px; }
 .book-num { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.5em; text-align: right; }
+.book-num.chapter { min-width: 7.2em; text-align: left; }
+.book-part { margin: 28px 0 4px; font-size: 26px; }
+.book-notes .group-label { background: var(--bg, transparent); }
 .book-notes .icon-only:disabled { opacity: 0.3; cursor: default; }
 .book-add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .book-add select { max-width: 100%; }

@@ -732,7 +732,12 @@ async function openBook(id, { naming = false, reading = false } = {}) {
     // All the notes one after another, each under its title, which opens it.
     const fileBase = platform === "windows" || platform === "android" ? "http://stvnote.localhost/" : "stvnote://localhost/";
     if (!chapters.length) page.append(el("p", { class: "hint" }, "This book has no notes yet."));
+    let part = "";
     for (const c of chapters) {
+      if (c.part && c.part !== part) {
+        part = c.part;
+        page.append(el("h2", { class: "book-part" }, c.part));
+      }
       const body = el("div", { class: "book-chapter-body" });
       if (c.format === "md") {
         try {
@@ -743,8 +748,9 @@ async function openBook(id, { naming = false, reading = false } = {}) {
       } else {
         body.append(...c.body.split(/\n{2,}/).filter((p) => p.trim()).map((p) => el("p", {}, p)));
       }
+      const heading = c.label ? `${c.label}. ${c.title}` : c.title;
       page.append(el("section", { class: "book-chapter" },
-        el("h2", {}, el("button", { class: "link", onclick: () => openNote(c.id) }, c.title)), body));
+        el("h2", {}, el("button", { class: "link", onclick: () => openNote(c.id) }, heading)), body));
     }
     main.replaceChildren(page);
     return;
@@ -757,14 +763,23 @@ async function openBook(id, { naming = false, reading = false } = {}) {
     await invoke("reorder_book", { id, order: next }).catch(() => {});
     reopen();
   };
-  const list = el("div", { class: "group book-notes" }, chapters.length ? chapters.map((c, i) => el("div", { class: "row" },
-    el("span", { class: "book-num" }, String(i + 1)),
-    el("button", { class: "label link-label", onclick: () => openNote(c.id) }, c.title,
-      el("small", {}, `${timeText(c.updated)} · ${c.words} word${c.words === 1 ? "" : "s"}`)),
-    el("button", { class: "icon-only", title: "Move up", "aria-label": `Move ${c.title} up`, disabled: i === 0, onclick: () => move(i, -1) }, svg("up", 16)),
-    el("button", { class: "icon-only", title: "Move down", "aria-label": `Move ${c.title} down`, disabled: i === chapters.length - 1, onclick: () => move(i, 1) }, svg("down", 16)),
-    el("button", { class: "pill", onclick: async () => { await invoke("remove_note_from_book", { id, note: c.id }).catch(() => {}); reopen(); } }, "Take out")))
-    : el("div", { class: "row" }, el("span", { class: "label" }, "No notes yet. Write a new one, or add notes you have.")));
+  const rows = [];
+  let part = "";
+  chapters.forEach((c, i) => {
+    if (c.part && c.part !== part) {
+      part = c.part;
+      rows.push(el("div", { class: "group-label" }, c.part));
+    }
+    const otherPart = (j) => c.part && chapters[j] && chapters[j].part !== c.part;
+    rows.push(el("div", { class: "row" },
+      el("span", { class: "book-num" + (c.label ? " chapter" : "") }, c.label || String(i + 1)),
+      el("button", { class: "label link-label", onclick: () => openNote(c.id) }, c.title,
+        el("small", {}, `${timeText(c.updated)} · ${c.words} word${c.words === 1 ? "" : "s"}`)),
+      el("button", { class: "icon-only", title: "Move up", "aria-label": `Move ${c.title} up`, disabled: i === 0 || otherPart(i - 1), onclick: () => move(i, -1) }, svg("up", 16)),
+      el("button", { class: "icon-only", title: "Move down", "aria-label": `Move ${c.title} down`, disabled: i === chapters.length - 1 || otherPart(i + 1), onclick: () => move(i, 1) }, svg("down", 16)),
+      el("button", { class: "pill", onclick: async () => { await invoke("remove_note_from_book", { id, note: c.id }).catch(() => {}); reopen(); } }, "Take out")));
+  });
+  const list = el("div", { class: "group book-notes" }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "No notes yet. Write a new one, or add notes you have.")));
 
   const newNote = el("button", { class: "pill", onclick: async () => {
     try {

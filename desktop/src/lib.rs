@@ -2879,6 +2879,7 @@ pub fn run() {
             listen::init(move |text| drop(handle.emit("heard", text)), move |heard| drop(phrases.emit("keyphrase", heard)));
             // After the library is set up (above, on phones), so the vocabulary is in the right place.
             vocabulary::add_examples();
+            books::install_example(app.path().resource_dir().ok().as_deref());
             std::thread::spawn(notes::purge_old_audio);
             let root = library::root();
             std::fs::create_dir_all(&root)?;

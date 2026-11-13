@@ -1,0 +1,475 @@
+{
+  "id": "plutarch-lives",
+  "title": "Plutarch's Lives",
+  "created": 1763030400,
+  "updated": 1763030400,
+  "notes": [
+    "plutarch-00-preface",
+    "plutarch-01-01-theseus",
+    "plutarch-01-02-romulus",
+    "plutarch-01-03-comparison-theseus-romulus",
+    "plutarch-02-01-lycurgus",
+    "plutarch-02-02-numa-pompilius",
+    "plutarch-02-03-comparison-lycurgus-numa",
+    "plutarch-03-01-solon",
+    "plutarch-03-02-poplicola",
+    "plutarch-03-03-comparison-solon-poplicola",
+    "plutarch-04-01-themistocles",
+    "plutarch-04-02-camillus",
+    "plutarch-05-01-pericles",
+    "plutarch-05-02-fabius",
+    "plutarch-05-03-comparison-pericles-fabius",
+    "plutarch-06-01-alcibiades",
+    "plutarch-06-02-coriolanus",
+    "plutarch-06-03-comparison-alcibiades-coriolanus",
+    "plutarch-07-01-timoleon",
+    "plutarch-07-02-aemilius-paulus",
+    "plutarch-07-03-comparison-timoleon-aemilius-paulus",
+    "plutarch-08-01-pelopidas",
+    "plutarch-08-02-marcellus",
+    "plutarch-08-03-comparison-pelopidas-marcellus",
+    "plutarch-09-01-aristides",
+    "plutarch-09-02-marcus-cato",
+    "plutarch-09-03-comparison-aristides-marcus-cato",
+    "plutarch-10-01-philopoemen",
+    "plutarch-10-02-flamininus",
+    "plutarch-10-03-comparison-philopoemen-flamininus",
+    "plutarch-11-01-pyrrhus",
+    "plutarch-11-02-caius-marius",
+    "plutarch-12-01-lysander",
+    "plutarch-12-02-sylla",
+    "plutarch-12-03-comparison-lysander-sylla",
+    "plutarch-13-01-cimon",
+    "plutarch-13-02-lucullus",
+    "plutarch-13-03-comparison-cimon-lucullus",
+    "plutarch-14-01-nicias",
+    "plutarch-14-02-crassus",
+    "plutarch-14-03-comparison-nicias-crassus",
+    "plutarch-15-01-eumenes",
+    "plutarch-15-02-sertorius",
+    "plutarch-15-03-comparison-eumenes-sertorius",
+    "plutarch-16-01-agesilaus",
+    "plutarch-16-02-pompey",
+    "plutarch-16-03-comparison-agesilaus-pompey",
+    "plutarch-17-01-alexander",
+    "plutarch-17-02-caesar",
+    "plutarch-18-01-phocion",
+    "plutarch-18-02-cato-the-younger",
+    "plutarch-19-01-agis",
+    "plutarch-19-02-cleomenes",
+    "plutarch-19-03-tiberius-gracchus",
+    "plutarch-19-04-caius-gracchus",
+    "plutarch-19-05-comparison-agis-cleomenes-gracchi",
+    "plutarch-20-01-demosthenes",
+    "plutarch-20-02-cicero",
+    "plutarch-20-03-comparison-demosthenes-cicero",
+    "plutarch-21-01-demetrius",
+    "plutarch-21-02-antony",
+    "plutarch-21-03-comparison-demetrius-antony",
+    "plutarch-22-01-dion",
+    "plutarch-22-02-marcus-brutus",
+    "plutarch-22-03-comparison-dion-marcus-brutus",
+    "plutarch-24-01-artaxerxes",
+    "plutarch-24-02-aratus",
+    "plutarch-24-03-galba",
+    "plutarch-24-04-otho"
+  ],
+  "parts": [
+    {
+      "title": "Preface",
+      "chapters": [
+        {
+          "note": "plutarch-00-preface",
+          "label": ""
+        }
+      ]
+    },
+    {
+      "title": "Book 1",
+      "chapters": [
+        {
+          "note": "plutarch-01-01-theseus",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-01-02-romulus",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-01-03-comparison-theseus-romulus",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 2",
+      "chapters": [
+        {
+          "note": "plutarch-02-01-lycurgus",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-02-02-numa-pompilius",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-02-03-comparison-lycurgus-numa",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 3",
+      "chapters": [
+        {
+          "note": "plutarch-03-01-solon",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-03-02-poplicola",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-03-03-comparison-solon-poplicola",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 4",
+      "chapters": [
+        {
+          "note": "plutarch-04-01-themistocles",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-04-02-camillus",
+          "label": "Chapter 2"
+        }
+      ]
+    },
+    {
+      "title": "Book 5",
+      "chapters": [
+        {
+          "note": "plutarch-05-01-pericles",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-05-02-fabius",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-05-03-comparison-pericles-fabius",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 6",
+      "chapters": [
+        {
+          "note": "plutarch-06-01-alcibiades",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-06-02-coriolanus",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-06-03-comparison-alcibiades-coriolanus",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 7",
+      "chapters": [
+        {
+          "note": "plutarch-07-01-timoleon",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-07-02-aemilius-paulus",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-07-03-comparison-timoleon-aemilius-paulus",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 8",
+      "chapters": [
+        {
+          "note": "plutarch-08-01-pelopidas",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-08-02-marcellus",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-08-03-comparison-pelopidas-marcellus",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 9",
+      "chapters": [
+        {
+          "note": "plutarch-09-01-aristides",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-09-02-marcus-cato",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-09-03-comparison-aristides-marcus-cato",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 10",
+      "chapters": [
+        {
+          "note": "plutarch-10-01-philopoemen",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-10-02-flamininus",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-10-03-comparison-philopoemen-flamininus",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 11",
+      "chapters": [
+        {
+          "note": "plutarch-11-01-pyrrhus",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-11-02-caius-marius",
+          "label": "Chapter 2"
+        }
+      ]
+    },
+    {
+      "title": "Book 12",
+      "chapters": [
+        {
+          "note": "plutarch-12-01-lysander",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-12-02-sylla",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-12-03-comparison-lysander-sylla",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 13",
+      "chapters": [
+        {
+          "note": "plutarch-13-01-cimon",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-13-02-lucullus",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-13-03-comparison-cimon-lucullus",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 14",
+      "chapters": [
+        {
+          "note": "plutarch-14-01-nicias",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-14-02-crassus",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-14-03-comparison-nicias-crassus",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 15",
+      "chapters": [
+        {
+          "note": "plutarch-15-01-eumenes",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-15-02-sertorius",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-15-03-comparison-eumenes-sertorius",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 16",
+      "chapters": [
+        {
+          "note": "plutarch-16-01-agesilaus",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-16-02-pompey",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-16-03-comparison-agesilaus-pompey",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 17",
+      "chapters": [
+        {
+          "note": "plutarch-17-01-alexander",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-17-02-caesar",
+          "label": "Chapter 2"
+        }
+      ]
+    },
+    {
+      "title": "Book 18",
+      "chapters": [
+        {
+          "note": "plutarch-18-01-phocion",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-18-02-cato-the-younger",
+          "label": "Chapter 2"
+        }
+      ]
+    },
+    {
+      "title": "Book 19",
+      "chapters": [
+        {
+          "note": "plutarch-19-01-agis",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-19-02-cleomenes",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-19-03-tiberius-gracchus",
+          "label": "Chapter 3"
+        },
+        {
+          "note": "plutarch-19-04-caius-gracchus",
+          "label": "Chapter 4"
+        },
+        {
+          "note": "plutarch-19-05-comparison-agis-cleomenes-gracchi",
+          "label": "Chapter 5"
+        }
+      ]
+    },
+    {
+      "title": "Book 20",
+      "chapters": [
+        {
+          "note": "plutarch-20-01-demosthenes",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-20-02-cicero",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-20-03-comparison-demosthenes-cicero",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 21",
+      "chapters": [
+        {
+          "note": "plutarch-21-01-demetrius",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-21-02-antony",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-21-03-comparison-demetrius-antony",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 22",
+      "chapters": [
+        {
+          "note": "plutarch-22-01-dion",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-22-02-marcus-brutus",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-22-03-comparison-dion-marcus-brutus",
+          "label": "Chapter 3"
+        }
+      ]
+    },
+    {
+      "title": "Book 24",
+      "chapters": [
+        {
+          "note": "plutarch-24-01-artaxerxes",
+          "label": "Chapter 1"
+        },
+        {
+          "note": "plutarch-24-02-aratus",
+          "label": "Chapter 2"
+        },
+        {
+          "note": "plutarch-24-03-galba",
+          "label": "Chapter 3"
+        },
+        {
+          "note": "plutarch-24-04-otho",
+          "label": "Chapter 4"
+        }
+      ]
+    }
+  ]
+}
