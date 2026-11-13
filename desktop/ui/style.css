@@ -1392,3 +1392,23 @@ body.note-chat-float .note-chat {
 body.note-chat-float .chat-splitter, body.note-chat-float .chat-collapse { display: none; }
 body.note-chat-float .chat-back { display: inline-flex; }
 body.note-chat-float .chat-head { padding-left: 8px; }
+
+/* Books: a list of notes in order, or all of them read as one */
+.new-tile.wide { grid-column: 1 / -1; }
+.book-head { display: flex; align-items: center; gap: 10px; }
+.book-head .note-title { flex: 1; min-width: 0; }
+.book-icon { color: var(--key); display: inline-flex; }
+.book-mode { display: flex; gap: 6px; margin: 12px 0 16px; }
+.book-mode .pill.on { background: var(--key); color: #fff; }
+.book-notes .row { gap: 8px; }
+.book-num { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.5em; text-align: right; }
+.book-notes .icon-only:disabled { opacity: 0.3; cursor: default; }
+.book-add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.book-add select { max-width: 100%; }
+.book-chapter { padding: 8px 0 24px; border-bottom: 1px solid var(--border, rgba(127,127,127,.2)); }
+.book-chapter:last-child { border-bottom: none; }
+.book-chapter h2 { margin: 16px 0 8px; font-size: 22px; }
+.book-chapter h2 .link { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; text-align: left; }
+.book-chapter h2 .link:hover { text-decoration: underline; }
+.book-chapter-body { line-height: 1.6; overflow-wrap: anywhere; }
+.book-chapter-body img { max-width: 100%; }

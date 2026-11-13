@@ -15,6 +15,7 @@ pub mod llm;
 pub mod isolate;
 pub mod listen;
 pub mod notes;
+pub mod books;
 pub mod optimise;
 pub mod prefs;
 pub mod probe;
@@ -1327,6 +1328,51 @@ fn serve_note_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Resp
 }
 
 #[tauri::command]
+fn list_books(query: String) -> Vec<books::BookSummary> {
+    books::list(&query)
+}
+
+#[tauri::command]
+fn get_book(id: String) -> Result<books::Book, String> {
+    books::load(&id)
+}
+
+#[tauri::command]
+fn book_chapters(id: String) -> Result<Vec<books::Chapter>, String> {
+    books::chapters(&id)
+}
+
+#[tauri::command]
+fn create_book(title: String) -> Result<String, String> {
+    books::create(title)
+}
+
+#[tauri::command]
+fn rename_book(id: String, title: String) -> Result<(), String> {
+    books::rename(&id, title)
+}
+
+#[tauri::command]
+fn add_note_to_book(id: String, note: String) -> Result<(), String> {
+    books::add_note(&id, &note)
+}
+
+#[tauri::command]
+fn remove_note_from_book(id: String, note: String) -> Result<(), String> {
+    books::remove_note(&id, &note)
+}
+
+#[tauri::command]
+fn reorder_book(id: String, order: Vec<String>) -> Result<(), String> {
+    books::reorder(&id, order)
+}
+
+#[tauri::command]
+fn delete_book(id: String) -> Result<(), String> {
+    books::delete(&id)
+}
+
+#[tauri::command]
 fn archive_note(id: String, archived: bool) -> Result<(), String> {
     notes::set_archived(&id, archived)
 }
@@ -1340,6 +1386,7 @@ fn set_note_status(id: String, status: String) -> Result<(), String> {
 fn delete_note(id: String) -> Result<(), String> {
     notes::delete(&id)?;
     analysis::forget_note(&id);
+    books::forget_note(&id);
     Ok(())
 }
 
@@ -2895,6 +2942,15 @@ pub fn run() {
             get_note,
             save_note,
             delete_note,
+            list_books,
+            get_book,
+            book_chapters,
+            create_book,
+            rename_book,
+            add_note_to_book,
+            remove_note_from_book,
+            reorder_book,
+            delete_book,
             set_wake,
             dictate_start,
             dictate_stop,

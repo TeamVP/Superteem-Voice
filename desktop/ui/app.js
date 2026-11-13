@@ -36,6 +36,9 @@ let prefs = { wake: false, quiet: false, onboarded: true, terms_accepted: 1, inp
 
 const icon = {
   pen: '<path d="M4 20h4L19 9l-4-4L4 16z"></path>',
+  book: '<path d="M5 4.5A1.5 1.5 0 016.5 3H19v15H6.5A1.5 1.5 0 005 19.5z"></path><path d="M5 19.5A1.5 1.5 0 006.5 21H19v-3"></path>',
+  up: '<path d="M6 15l6-6 6 6"></path>',
+  down: '<path d="M6 9l6 6 6-6"></path>',
   wave: '<path d="M4 9v6M8 6v12M12 10v4M16 7v10M20 10v4"></path>',
   phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2z"></path>',
   calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"></rect><path d="M3.5 10h17M8 3v4M16 3v4"></path>',
@@ -472,15 +475,20 @@ function nameMeetings(all) {
 
 async function refreshItems() {
   const query = search.value;
-  const [notes, sessions, all] = await Promise.all([
+  const [notes, sessions, all, books] = await Promise.all([
     invoke("list_notes", { query }).catch(() => []),
     invoke("list_sessions", { query }).catch(() => []),
     query.trim() ? invoke("list_sessions", { query: "" }).catch(() => []) : null,
+    invoke("list_books", { query }).catch(() => []),
   ]);
   nameMeetings(all ?? sessions);
+  // Notes in a book are listed in their book; a search still finds them on their own.
+  const inBook = new Set(query.trim() ? [] : books.flatMap((b) => b.notes));
   const items = [
     // Archived notes are left out of the list but still found by search.
-    ...notes.filter((n) => query.trim() || !n.archived).map((n) => ({ kind: "note", id: n.id, title: n.title, when: n.updated, status: n.status,
+    ...books.map((b) => ({ kind: "book", id: b.id, title: b.title, when: b.updated,
+      sub: `Book · ${timeText(b.updated)} · ${b.notes.length} note${b.notes.length === 1 ? "" : "s"}` })),
+    ...notes.filter((n) => (query.trim() || !n.archived) && !inBook.has(n.id)).map((n) => ({ kind: "note", id: n.id, title: n.title, when: n.updated, status: n.status,
       sub: [`Note · ${timeText(n.updated)}`, n.words ? `${n.words} words` : null, n.archived ? "Archived" : null].filter(Boolean).join(" · ") })),
     ...sessions.map((s) => ({ kind: "session", id: s.id, title: meetingTitle(s.id, s.title), when: s.created, status: s.status,
       sub: [`Meeting · ${timeText(s.created)}`, s.duration_s ? clock(s.duration_s) : null,
@@ -513,11 +521,10 @@ async function refreshItems() {
       group = label;
       itemsNav.append(el("div", { class: "group-label" }, label));
     }
-    const active = (view.kind === "note" && it.kind === "note" && view.id === it.id)
-      || (view.kind === "session" && it.kind === "session" && view.id === it.id);
+    const active = view.kind === it.kind && view.id === it.id;
     itemsNav.append(el("button", { class: "item" + (active ? " active" : "") + (it.status === "done" ? " done" : ""),
-      onclick: () => (it.kind === "note" ? openNote(it.id) : openSession(it.id)) },
-      el("span", { class: "icon" + (it.kind === "session" ? " meeting" : "") }, svg(it.kind === "note" ? "pen" : "wave", 16)),
+      onclick: () => (it.kind === "note" ? openNote(it.id) : it.kind === "book" ? openBook(it.id) : openSession(it.id)) },
+      el("span", { class: "icon" + (it.kind === "session" ? " meeting" : "") }, svg({ note: "pen", book: "book", session: "wave" }[it.kind], 16)),
       el("span", { class: "body" }, el("span", { class: "title" }, it.title), el("span", { class: "sub" }, statusBadge(it.status), it.sub))));
   }
   if (archiveLink) itemsNav.append(archiveLink);
@@ -633,9 +640,10 @@ function showNewHome() {
     { name: "Meeting", sub: "Record and transcribe", icon: "wave", open: () => showMeeting() },
     { name: "Call", sub: "Capture a phone call", icon: "phone" },
     { name: "Event", sub: "Notes for a talk or session", icon: "calendar" },
+    { name: "Book", sub: "Gather notes into one place", icon: "book", open: () => newBook(), wide: true },
   ];
   const tiles = kinds.map((k) => el("button", {
-    class: `new-tile${k.open ? "" : " soon"}`, "aria-disabled": k.open ? null : "true",
+    class: `new-tile${k.open ? "" : " soon"}${k.wide ? " wide" : ""}`, "aria-disabled": k.open ? null : "true",
     "aria-label": k.open ? `New ${k.name.toLowerCase()}` : `${k.name}, coming soon`,
     onclick: k.open ?? (() => micToast(`${k.name}s are coming soon`)),
   }, el("span", { class: "tile-head" }, svg(k.icon, 31), el("span", { class: "tile-name" }, k.name),
@@ -664,6 +672,119 @@ function homeExtras() {
   }).catch(() => {});
   // Once a note and a meeting are made, a suggestion to optimise, when it would change something.
   optimiseNudge().then((card) => { if (card && view.kind === "home") main.querySelector(".home")?.append(card); }).catch(() => {});
+}
+
+// ---------- Books: notes gathered in order ----------
+
+async function newBook() {
+  try {
+    openBook(await invoke("create_book", { title: "" }), { naming: true });
+  } catch (e) {
+    micToast(String(e));
+  }
+}
+
+/// A book's page: its notes in order, to open, reorder, take out or add to; or all of them read as one.
+async function openBook(id, { naming = false, reading = false } = {}) {
+  leave();
+  showPage();
+  const mine = view = { kind: "book", id };
+  refreshItems();
+  let book;
+  try {
+    book = await invoke("get_book", { id });
+  } catch (e) {
+    main.replaceChildren(el("div", { class: "page" }, el("div", { class: "error" }, String(e))));
+    return;
+  }
+  const [chapters, allNotes] = await Promise.all([
+    invoke("book_chapters", { id }).catch(() => []),
+    reading ? [] : invoke("list_notes", { query: "" }).catch(() => []),
+  ]);
+  if (view !== mine) return;
+  const reopen = (opts = {}) => openBook(id, { reading, ...opts });
+
+  const title = el("input", { class: "note-title", placeholder: "Untitled book", value: book.title, "aria-label": "Book title" });
+  let titleTimer = null;
+  const saveTitle = () => { clearTimeout(titleTimer); invoke("rename_book", { id, title: title.value }).then(refreshItems).catch(() => {}); };
+  title.addEventListener("input", () => { clearTimeout(titleTimer); titleTimer = setTimeout(saveTitle, 500); });
+  title.addEventListener("change", saveTitle);
+
+  const remove = el("button", { class: "icon-only danger", title: "Delete book", "aria-label": "Delete book" }, svg("trash", 18));
+  remove.addEventListener("click", async () => {
+    if (!remove.dataset.armed) {
+      remove.dataset.armed = "1";
+      remove.classList.add("armed");
+      remove.replaceChildren(svg("trash", 16), "Click again to delete the book (its notes stay)");
+      setTimeout(() => { delete remove.dataset.armed; remove.classList.remove("armed"); remove.replaceChildren(svg("trash", 18)); }, 4000);
+      return;
+    }
+    await invoke("delete_book", { id }).catch(() => {});
+    showHome();
+  });
+  const modes = el("div", { class: "book-mode", role: "group", "aria-label": "View" },
+    el("button", { class: "pill" + (reading ? "" : " on"), "aria-pressed": String(!reading), onclick: () => reopen({ reading: false }) }, "Notes"),
+    el("button", { class: "pill" + (reading ? " on" : ""), "aria-pressed": String(reading), onclick: () => reopen({ reading: true }) }, "Read"));
+  const page = el("div", { class: "page book" },
+    el("div", { class: "book-head" }, el("span", { class: "book-icon" }, svg("book", 22)), title, remove), modes);
+
+  if (reading) {
+    // All the notes one after another, each under its title, which opens it.
+    const fileBase = platform === "windows" || platform === "android" ? "http://stvnote.localhost/" : "stvnote://localhost/";
+    if (!chapters.length) page.append(el("p", { class: "hint" }, "This book has no notes yet."));
+    for (const c of chapters) {
+      const body = el("div", { class: "book-chapter-body" });
+      if (c.format === "md") {
+        try {
+          body.innerHTML = NoteEditor.toHTML(c.body, (file) => `${fileBase}${c.id}/${encodeURIComponent(file)}`);
+        } catch {
+          body.textContent = c.body;
+        }
+      } else {
+        body.append(...c.body.split(/\n{2,}/).filter((p) => p.trim()).map((p) => el("p", {}, p)));
+      }
+      page.append(el("section", { class: "book-chapter" },
+        el("h2", {}, el("button", { class: "link", onclick: () => openNote(c.id) }, c.title)), body));
+    }
+    main.replaceChildren(page);
+    return;
+  }
+
+  const order = chapters.map((c) => c.id);
+  const move = async (i, by) => {
+    const next = [...order];
+    [next[i], next[i + by]] = [next[i + by], next[i]];
+    await invoke("reorder_book", { id, order: next }).catch(() => {});
+    reopen();
+  };
+  const list = el("div", { class: "group book-notes" }, chapters.length ? chapters.map((c, i) => el("div", { class: "row" },
+    el("span", { class: "book-num" }, String(i + 1)),
+    el("button", { class: "label link-label", onclick: () => openNote(c.id) }, c.title,
+      el("small", {}, `${timeText(c.updated)} · ${c.words} word${c.words === 1 ? "" : "s"}`)),
+    el("button", { class: "icon-only", title: "Move up", "aria-label": `Move ${c.title} up`, disabled: i === 0, onclick: () => move(i, -1) }, svg("up", 16)),
+    el("button", { class: "icon-only", title: "Move down", "aria-label": `Move ${c.title} down`, disabled: i === chapters.length - 1, onclick: () => move(i, 1) }, svg("down", 16)),
+    el("button", { class: "pill", onclick: async () => { await invoke("remove_note_from_book", { id, note: c.id }).catch(() => {}); reopen(); } }, "Take out")))
+    : el("div", { class: "row" }, el("span", { class: "label" }, "No notes yet. Write a new one, or add notes you have.")));
+
+  const newNote = el("button", { class: "pill", onclick: async () => {
+    try {
+      const n = await invoke("save_note", { id: null, title: "", body: "", keepAudio: false, rich: false, doc: null });
+      await invoke("add_note_to_book", { id, note: n });
+      openNote(n);
+    } catch (e) { micToast(String(e)); }
+  } }, svg("pen", 14), "New note in this book");
+  const others = allNotes.filter((n) => !order.includes(n.id));
+  const picker = el("select", { "aria-label": "Add a note you have", disabled: !others.length },
+    el("option", { value: "" }, others.length ? "Add a note you have…" : "No other notes to add"),
+    ...others.map((n) => el("option", { value: n.id }, n.title)));
+  picker.addEventListener("change", async () => {
+    if (!picker.value) return;
+    await invoke("add_note_to_book", { id, note: picker.value }).catch((e) => micToast(String(e)));
+    reopen();
+  });
+  page.append(list, el("div", { class: "book-add" }, newNote, picker));
+  main.replaceChildren(page);
+  if (naming) title.focus();
 }
 
 // ---------- Notes: a text editor that listens ----------
