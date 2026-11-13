@@ -3868,9 +3868,9 @@ const TERMS = [
 // What a check for an update sends. A dialog rather than a hover tip, so it opens by tap on a phone too.
 // Closes with Close, Escape, or a tap outside it.
 function showCheckDetails(opener) {
-  const dialog = el("dialog", { class: "check-details", "aria-label": "What a check sends" },
+  const dialog = el("dialog", { class: "check-details", "aria-label": "Telemetry" },
     el("div", { class: "body" },
-      el("h2", {}, "What a check sends"),
+      el("h2", {}, "Telemetry"),
       el("p", {}, "Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted."),
       el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => dialog.close() }, "Close"))));
   dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
