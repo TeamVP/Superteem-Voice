@@ -239,6 +239,8 @@ h2 { font-size: 13px; margin: 28px 0 8px; color: var(--muted); text-transform: u
 .items > :last-child { margin-bottom: 80px; }
 .phone-home { justify-content: flex-start; padding: 24px 16px 40px; gap: 16px; }
 .phone-home h1 { font-size: 24px; margin: 28px 0 4px; }
+/* On a computer, Home sits in the middle of the pane, top to bottom. */
+@media (min-width: 721px) { .phone-home { justify-content: center; } }
 @media (max-width: 720px) {
   .new-fab {
     position: fixed; right: calc(18px + env(safe-area-inset-right, 0px)); bottom: auto; top: 75%; transform: translateY(-50%);
