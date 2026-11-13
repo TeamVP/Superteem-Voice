@@ -684,6 +684,69 @@ async function newBook() {
   }
 }
 
+/// Scrolls that follow opening a note, so focusing the cursor doesn't count as the person scrolling.
+let noteOpenQuiet = 0;
+
+/// The note opens at the top. Focusing the end can pull the view down a moment later, so this is said again.
+function openAtTop(node) {
+  const go = () => {
+    for (let box = node?.parentElement; box; box = box.parentElement) {
+      const y = getComputedStyle(box).overflowY;
+      if (y === "auto" || y === "scroll" || y === "overlay") box.scrollTop = 0;
+    }
+  };
+  noteOpenQuiet = performance.now() + 500;
+  go();
+  requestAnimationFrame(go);
+  setTimeout(go, 60);
+  setTimeout(go, 240);
+}
+
+/// Down jumps to the end of a note while it is being scrolled. Up joins it once the top of the note
+/// has left the screen. Both fade over a second after three seconds still.
+function noteScrollButtons(topEl, { floor = null, cover = null } = {}) {
+  const motion = () => (matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
+  const up = el("button", { class: "jump-end jump-up", type: "button", title: "Go to the top", "aria-label": "Go to the top of the note", tabindex: "-1" }, svg("up", 20));
+  const down = el("button", { class: "jump-end", type: "button", title: "Go to the end", "aria-label": "Go to the end of the note", tabindex: "-1" }, svg("down", 20));
+  let timer = null;
+  let box = null;
+  const hide = () => { up.classList.remove("show"); down.classList.remove("show"); };
+  const onScroll = (e) => {
+    if (!down.isConnected) return document.removeEventListener("scroll", onScroll, true);
+    if (performance.now() < noteOpenQuiet) return;
+    const target = e.target === document ? document.scrollingElement : e.target;
+    if (!(target instanceof Element) || !target.contains(topEl)) return;
+    box = target;
+    clearTimeout(timer);
+    const frame = target.getBoundingClientRect();
+    const seen = window.visualViewport;
+    const floorTop = floor?.isConnected ? floor.getBoundingClientRect().top : Infinity;
+    const bottom = Math.min(frame.bottom, floorTop, seen ? seen.offsetTop + seen.height : innerHeight);
+    const visibleTop = Math.max(frame.top, cover?.isConnected ? cover.getBoundingClientRect().bottom : frame.top);
+    const topGone = topEl.getBoundingClientRect().top < visibleTop - 8;
+    const atEnd = target.scrollHeight - target.scrollTop - target.clientHeight < 120;
+    down.classList.toggle("show", !atEnd);
+    up.classList.toggle("show", topGone);
+    const y = bottom - 54;
+    const x = `${Math.min(frame.right, innerWidth) - 60}px`;
+    down.style.top = `${y}px`;
+    down.style.left = x;
+    up.style.top = `${atEnd ? y : y - 50}px`;
+    up.style.left = x;
+    if (!atEnd || topGone) timer = setTimeout(hide, 3000);
+    else hide();
+  };
+  for (const button of [up, down]) {
+    button.addEventListener("mousedown", (e) => e.preventDefault());
+    button.addEventListener("pointerenter", () => clearTimeout(timer));
+    button.addEventListener("pointerleave", () => { clearTimeout(timer); timer = setTimeout(hide, 3000); });
+  }
+  down.addEventListener("click", () => box?.scrollTo({ top: box.scrollHeight, behavior: motion() }));
+  up.addEventListener("click", () => box?.scrollTo({ top: 0, behavior: motion() }));
+  document.addEventListener("scroll", onScroll, true);
+  return [up, down];
+}
+
 /// A book kept for reading: a contents list, then one chapter at a time. Nothing in it can be changed.
 async function openReadingBook(book, chapterId) {
   const mine = view;
@@ -722,13 +785,22 @@ async function openReadingBook(book, chapterId) {
       el("button", { class: "pill", disabled: index === 0, onclick: () => openBook(book.id, { chapter: contents[index - 1].id }) }, "Previous"),
       el("span", { class: "book-kicker" }, `${index + 1} of ${contents.length}`),
       el("button", { class: "pill", disabled: index === contents.length - 1, onclick: () => openBook(book.id, { chapter: contents[index + 1].id }) }, "Next"));
+    const heading = el("h1", {}, note.title || chapter.title);
+    const speak = readAloudButton(() => {
+      const sel = getSelection().toString().trim();
+      if (sel) return sel;
+      return `${HEADING}${heading.textContent}\n${body.innerText}`;
+    }, "Read the note aloud", { lang: () => itemLanguages(note)[0] });
     const page = el("div", { class: "page book book-read" },
-      el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"),
+      el("div", { class: "book-contents-bar" },
+        el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"),
+        speak),
       kicker ? el("p", { class: "book-kicker" }, kicker) : "",
-      el("h1", {}, note.title || chapter.title),
-      turn(), body, turn());
+      heading,
+      turn(), body, turn(),
+      ...noteScrollButtons(heading));
     main.replaceChildren(page);
-    main.scrollTop = 0;
+    openAtTop(page);
     return;
   }
   const rows = [];
@@ -748,7 +820,7 @@ async function openReadingBook(book, chapterId) {
     el("p", { class: "hint" }, "For reading. The chapters stay as they are."),
     el("div", { class: "group book-notes" }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "This book has no chapters."))));
   main.replaceChildren(page);
-  main.scrollTop = 0;
+  openAtTop(page);
 }
 
 /// A book's page: its notes in order, to open, reorder, take out or add to; or all of them read as one.
@@ -825,7 +897,10 @@ async function openBook(id, { naming = false, reading = false, chapter = null } 
       page.append(el("section", { class: "book-chapter" },
         el("h2", {}, el("button", { class: "link", onclick: () => openNote(c.id) }, heading)), body));
     }
+    const top = page.querySelector("h1, h2") || page;
+    page.append(...noteScrollButtons(top));
     main.replaceChildren(page);
+    openAtTop(page);
     return;
   }
 
@@ -1093,32 +1168,9 @@ function renderNote(data, dictate) {
     else if (e.key === "Enter") { e.preventDefault(); if (found) showFound(found, ed.search.step(e.shiftKey)); }
   });
 
-  // A way to the end of a long note: an arrow that shows over the note while it is being scrolled, and goes again.
-  const toEnd = el("button", { class: "jump-end", type: "button", title: "Go to the end", "aria-label": "Go to the end of the note", tabindex: "-1" }, svg("down", 20));
   const foot = el("div", { class: "toolbar note-foot" });
-  let toEndTimer = null;
-  let toEndBox = null;
-  const hideToEnd = () => toEnd.classList.remove("show");
-  const onNoteScroll = (e) => {
-    if (!toEnd.isConnected) return document.removeEventListener("scroll", onNoteScroll, true);
-    const box = e.target === document ? document.scrollingElement : e.target;
-    if (!(box instanceof Element) || !box.contains(body)) return;
-    clearTimeout(toEndTimer);
-    if (box.scrollHeight - box.scrollTop - box.clientHeight < 120) return hideToEnd();
-    // Kept above the Dictate bar, and above a phone's keyboard.
-    const frame = box.getBoundingClientRect();
-    const seen = window.visualViewport;
-    const floor = Math.min(frame.bottom, foot.getBoundingClientRect().top, seen ? seen.offsetTop + seen.height : innerHeight);
-    toEnd.style.top = `${floor - 54}px`;
-    toEnd.style.left = `${Math.min(frame.right, innerWidth) - 60}px`;
-    toEndBox = box;
-    toEnd.classList.add("show");
-    toEndTimer = setTimeout(hideToEnd, 1600);
-  };
-  toEnd.addEventListener("mousedown", (e) => e.preventDefault());
-  toEnd.addEventListener("pointerenter", () => clearTimeout(toEndTimer));
-  toEnd.addEventListener("pointerleave", () => { clearTimeout(toEndTimer); toEndTimer = setTimeout(hideToEnd, 1600); });
-  toEnd.addEventListener("click", () => toEndBox?.scrollTo({ top: toEndBox.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }));
+  // Down to the end, and up to the top once the title has scrolled away. They fade after the scrolling stops.
+  const jumps = noteScrollButtons(title, { floor: foot, cover: ed.toolbar });
 
   // "Analysis templates", "Versions" and "Translate" sit under the title from the start: greyed out
   // until the note has something in it and is saved, then the real ones take their place.
@@ -1228,7 +1280,7 @@ function renderNote(data, dictate) {
     // The note scrolls under the top bar; the chat folds to a thin bar on the right.
     el("div", { class: "note-col" },
       ed.toolbar,
-      el("div", { class: "note" }, title, stackSlot, searchBar, chip, editorHolder, noteEnd, toEnd),
+      el("div", { class: "note" }, title, stackSlot, searchBar, chip, editorHolder, noteEnd, ...jumps),
       foot)),
     chat?.panel));
   note.syncStack();
@@ -1236,16 +1288,13 @@ function renderNote(data, dictate) {
   pinTopBar(topBar);
   showCount();
   setLanguage([title, body], noteLanguage());
-  // A new note starts dictating straight away unless Settings says not to. A note opened to read starts at
-  // its top, with the cursor at its end for what is written or dictated next; on a phone the keyboard waits
-  // for a tap.
+  // A new note starts dictating straight away unless Settings says not to. Every note opens at its top,
+  // with the cursor at its end for what is written or dictated next. On a phone the keyboard waits for a tap
+  // unless dictation is starting.
   const dictating = dictate ?? (!data.id && !prefs.dictate_manually);
-  if (!data.id || dictating) ed.focusEnd();
-  else {
-    ed.cursorEnd(!isPhone());
-    ed.scroller().scrollTop = 0;
-  }
-  document.addEventListener("scroll", onNoteScroll, true);
+  // Quiet first, so focusing the end doesn't flash the jump buttons before the view is put back at the top.
+  openAtTop(title);
+  ed.cursorEnd(!isPhone() || dictating);
   if (dictating) startDictation();
 }
 

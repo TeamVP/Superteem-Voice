@@ -1320,11 +1320,11 @@ dialog.note-shortcuts h3 { font-size: 13px; margin: 16px 0 8px; color: var(--mut
 .note-body h2.ne-fold { margin-left: 1.3em; }
 @media (prefers-reduced-motion: reduce) { .note-body .ne-fold::before { transition: none; } }
 
-/* The way to the end of a note: it shows over the note while it scrolls, and fades when it stops. */
-.jump-end { position: fixed; z-index: 14; width: 42px; height: 42px; min-height: 0; padding: 0; border-radius: 21px; border: 1px solid var(--line); background: var(--panel); color: var(--text); display: grid; place-items: center; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity 0.25s; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); }
-.jump-end.show { opacity: 0.6; pointer-events: auto; }
+/* Ways to the ends of a note: they show over it while it scrolls, and fade over a second once it has been still. */
+.jump-end { position: fixed; z-index: 14; width: 42px; height: 42px; min-height: 0; padding: 0; border-radius: 21px; border: 1px solid var(--line); background: var(--panel); color: var(--text); display: grid; place-items: center; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity 1s; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); }
+.jump-end.show { opacity: 0.6; pointer-events: auto; transition: opacity 0.2s; }
 .jump-end.show:hover, .jump-end.show:focus-visible { opacity: 0.95; }
-@media (prefers-reduced-motion: reduce) { .jump-end { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .jump-end, .jump-end.show { transition: none; } }
 
 /* A note's Export, Archive and Delete: side by side on a computer, behind a "more" button on a phone. */
 .top-more, .top-more-items { display: contents; }
@@ -1417,6 +1417,7 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 .book-chapter-body img { max-width: 100%; }
 .book-chapter-body p { margin: 0 0 0.9em; }
 .book-locked-title { margin: 0; font-size: 28px; flex: 1; min-width: 0; }
+.book-contents-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .book-kicker { color: var(--muted); margin: 14px 0 0; font-size: 13px; letter-spacing: 0.04em; }
 .book-read h1 { margin: 6px 0 0; font-size: 28px; }
 .book-turn { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px 0; }
