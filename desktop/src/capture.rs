@@ -28,6 +28,8 @@ pub struct StreamStats {
     pub lost: u64,
     pub level_db: f32,
     pub detail: String,
+    pub notes: Vec<String>,
+    pub peak: f32,
 }
 
 pub struct Shared {
@@ -52,6 +54,17 @@ impl Shared {
 
     fn now_us(&self) -> u64 {
         self.started.elapsed().as_micros() as u64
+    }
+
+    /// Adds a note to the stream's record, with the time into the recording.
+    fn note(&self, name: &str, text: &str) {
+        let s = self.started.elapsed().as_secs();
+        let line = format!("{}:{:02} {text}", s / 60, s % 60);
+        self.update(name, |st| {
+            if st.notes.len() < 200 && st.notes.last().map(|l| l.split_once(' ').map(|x| x.1)) != Some(Some(text)) {
+                st.notes.push(line);
+            }
+        });
     }
 }
 
@@ -119,6 +132,8 @@ pub(crate) struct Input {
     failure: Arc<Mutex<Option<String>>>,
     rate: u32,
     name: String,
+    /// Things worth keeping in the track's record, such as an app capture switching to its device.
+    events: Arc<Mutex<Vec<String>>>,
 }
 
 fn find_input(name: &str) -> Option<cpal::Device> {
@@ -145,8 +160,9 @@ pub(crate) fn open_named(name: &str) -> Result<Input, String> {
 fn open_app(name: &str, program: &str) -> Result<Input, String> {
     let (tx, blocks) = mpsc::channel::<Vec<f32>>();
     let failure = Arc::new(Mutex::new(None::<String>));
-    let (capture, rate) = crate::sources::open_app(program, tx, failure.clone())?;
-    Ok(Input { _keep: Box::new(capture), blocks, failure, rate, name: name.into() })
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let (capture, rate) = crate::sources::open_app(program, tx, failure.clone(), events.clone())?;
+    Ok(Input { _keep: Box::new(capture), blocks, failure, rate, name: name.into(), events })
 }
 
 #[cfg(not(windows))]
@@ -188,7 +204,7 @@ fn open_stream(device: cpal::Device, output: bool, name: &str) -> Result<Input, 
     }
     .map_err(|e| e.to_string())?;
     stream.play().map_err(|e| e.to_string())?;
-    Ok(Input { _keep: Box::new(stream), blocks, failure, rate: config.sample_rate().0, name })
+    Ok(Input { _keep: Box::new(stream), blocks, failure, rate: config.sample_rate().0, name, events: Default::default() })
 }
 
 /// Waits for a microphone to come back after the one being recorded was lost, for example when a
@@ -197,6 +213,7 @@ fn open_stream(device: cpal::Device, output: bool, name: &str) -> Result<Input, 
 /// Returns None once a stop is requested.
 fn reconnect(shared: &Shared, device_name: &str, label: &str, reason: &str) -> Option<Input> {
     let source = crate::sources::is_source(device_name);
+    shared.note(label, &if source { format!("Waiting: {reason}") } else { format!("Lost {device_name}: {reason}") });
     shared.update(label, |s| {
         // An app that isn't running yet is waited for, not reported as lost.
         s.state = if source { "waiting" } else { "reconnecting" }.into();
@@ -247,6 +264,10 @@ fn record_input(shared: &Shared, device_name: &str, label: &str) -> Result<(), S
                 s.state = "recording".into();
                 s.detail = format!("{} ({} Hz)", input.name, input.rate);
             });
+            shared.note(label, &format!("Recording {} at {} Hz", input.name, input.rate));
+        }
+        for event in std::mem::take(&mut *input.events.lock().unwrap()) {
+            shared.note(label, &event);
         }
         let mut lost = input.failure.lock().unwrap().take();
         if lost.is_none() {
@@ -303,9 +324,11 @@ fn record_input(shared: &Shared, device_name: &str, label: &str) -> Result<(), S
             sequence += 1;
             sample = sample.wrapping_add(FRAME_SAMPLES as u32);
             let level = window_db(pcm, FRAME_SAMPLES)[0];
+            let peak = pcm.iter().fold(0f32, |m, &v| m.max((v as f32 / 32768.0).abs()));
             shared.update(label, |s| {
                 s.frames += 1;
                 s.level_db = level;
+                s.peak = s.peak.max(peak);
             });
         }
         let used = pending.len() / FRAME_SAMPLES * FRAME_SAMPLES;

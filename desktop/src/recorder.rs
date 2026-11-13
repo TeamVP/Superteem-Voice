@@ -22,6 +22,12 @@ pub struct Stream {
     /// Frames recorded by the chosen input itself, where the stream may have fallen back to another.
     #[serde(default)]
     pub own_frames: Option<u64>,
+    /// What happened while recording, with times, kept with the meeting.
+    #[serde(default)]
+    pub notes: Vec<String>,
+    /// The loudest it got, 0 to 1.
+    #[serde(default)]
+    pub peak: f32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -197,6 +203,8 @@ mod imp {
                     notice: String::new(),
                     notice_id: 0,
                     own_frames: None,
+                    notes: s.notes.clone(),
+                    peak: s.peak,
                 })
                 .collect();
             Ok(Status { elapsed_s: self.shared.started.elapsed().as_secs(), streams })

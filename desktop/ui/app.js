@@ -1664,6 +1664,13 @@ async function startMeeting(devices, pins) {
   renderRecording(await invoke("recording_status"));
 }
 
+/// A track's tooltip: where its sound came from and what happened while recording.
+function trackDetails(name, t) {
+  if (!t) return name;
+  const kind = { app: "App sound", output: "Everything on an output", microphone: "Microphone", pin: "Voice Pin" }[t.kind] ?? t.kind;
+  return [`${name} · ${kind}`, t.source !== name ? t.source : "", t.peak === 0 ? "Silent" : "", ...(t.notes ?? [])].filter(Boolean).join("\n");
+}
+
 /// Readable names for streams: inputs are numbered in the order chosen.
 function streamName(stream, devices = recording?.devices ?? []) {
   const input = /^input(\d+)$/.exec(stream);
@@ -2276,7 +2283,7 @@ function renderSession(session, processingError, suggestion) {
   }
 
   const duration = meta.duration_s || Math.max(1, ...session.segments.map((s) => s.end_s));
-  const trackName = (stream) => session.speakers.find((s) => s.key === stream)?.name ?? streamName(stream, prefs.inputs);
+  const trackName = (stream) => session.speakers.find((s) => s.key === stream)?.name ?? streamName(stream, session.meta.inputs?.length ? session.meta.inputs : prefs.inputs);
   const lineEls = [];
   const transcript = el("div", { class: "transcript" });
   const allMarkers = sessionMarkers(meta.markers ?? [], session.keyphrases ?? []);
@@ -2543,7 +2550,7 @@ function renderSession(session, processingError, suggestion) {
     drawMix();
     for (const stream of streams) {
       const speaker = session.speakers.find((s) => s.key === stream);
-      const name = speaker?.name ?? streamName(stream, prefs.inputs);
+      const name = speaker?.name ?? streamName(stream, session.meta.inputs?.length ? session.meta.inputs : prefs.inputs);
       const mute = el("button", { class: "mute", "aria-pressed": "false", title: `Mute ${name}. In the transcript mix it lights up while the track is muted; pressing it switches to Manual.` }, "M");
       mute.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -2585,7 +2592,7 @@ function renderSession(session, processingError, suggestion) {
       // An imported track has a menu: sync it, say where it starts, or take it out.
       const imported = session.imports?.find((i) => i.name === stream);
       const nameEl = el("span", { class: "name", style: `color:${strong.get(stream) ?? "inherit"}`,
-        title: imported ? `${name} · imported · ${placedText(imported, meta.created)}` : name }, name);
+        title: imported ? `${name} · imported · ${placedText(imported, meta.created)}` : trackDetails(name, meta.tracks?.[stream]) }, name);
       lanes.append(el("div", { class: "track" }, imported ? el("span", { class: "name-wrap" }, nameEl, importMenu(id, imported, name, page, meta.created)) : nameEl, mute, bar));
     }
     lanes.append(head);

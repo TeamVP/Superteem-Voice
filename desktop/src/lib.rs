@@ -273,10 +273,54 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>, devices: Vec<String>, pi
         chosen.push(prefs::PINS.into());
     }
     let dir = library::new_session_dir().map_err(|e| e.to_string())?;
+    // The session keeps which input each track came from, and an app's track is named after the app.
+    let mut meta = library::load_meta(&dir);
+    meta.inputs = devices.clone();
+    for (i, device) in devices.iter().enumerate() {
+        if let Some(label) = sources::track_label(device) {
+            meta.names.insert(format!("input{}", i + 1), label);
+        }
+    }
+    library::write_json(&dir.join(library::META), &meta)?;
     let started = blocking(move || recorder::start(dir, &devices, pins)).await??;
     *state.recording.lock().unwrap() = Some(started);
     *state.chosen.lock().unwrap() = chosen;
     Ok(())
+}
+
+/// Keeps what each track was recorded from, and what happened to it, with the meeting.
+fn keep_track_records(dir: &std::path::Path, status: &recorder::Status) {
+    let mut meta = library::load_meta(dir);
+    for s in &status.streams {
+        let Some(source) = recorder::device_of(&s.name, &meta.inputs).or_else(|| s.name.starts_with("pin").then(|| prefs::PINS.to_string())) else { continue };
+        let kind = if s.name.starts_with("pin") {
+            "pin"
+        } else if sources::app_program(&source).is_some() {
+            "app"
+        } else if sources::output_device(&source).is_some() {
+            "output"
+        } else {
+            "microphone"
+        };
+        let mut notes = s.notes.clone();
+        if s.frames > 0 && s.peak == 0.0 {
+            notes.push("Silent: nothing but silence was recorded".into());
+        }
+        meta.tracks.insert(
+            s.name.clone(),
+            library::Track {
+                kind: kind.into(),
+                label: sources::track_label(&source).unwrap_or_else(|| source.clone()),
+                program: sources::app_program(&source).unwrap_or_default().into(),
+                source,
+                frames: s.frames,
+                lost: s.lost,
+                peak: s.peak,
+                notes,
+            },
+        );
+    }
+    let _ = library::write_json(&dir.join(library::META), &meta);
 }
 
 /// Remembers which of the chosen inputs recorded audio, from the streams' final counts.
@@ -347,6 +391,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, discard: Option<bool>) ->
         r.stop()?;
         if let Ok(status) = last {
             remember_outcomes(&chosen, &status);
+            keep_track_records(&dir, &status);
         }
         let id = id_of(&dir);
         if !discard.unwrap_or(false) {
@@ -449,7 +494,14 @@ fn get_session(state: State<AppState>, id: String) -> Result<SessionView, String
                 prints.iter().find(|p| p.id == l.id).map(|p| PrintInfo { id: p.id.clone(), name: p.name.clone(), score: l.score })
             });
             let voiced_s = voices::speaker_voice(&segments, &line_voices, &key).map_or(0.0, |v| v.seconds());
-            SpeakerOption { name: meta.name(&key), print, voiced_s, key }
+            // An unnamed track is called after the input it came from.
+            let mut name = meta.name(&key);
+            if name == key {
+                if let Some(device) = recorder::device_of(&key, &meta.inputs) {
+                    name = sources::track_label(&device).unwrap_or(device);
+                }
+            }
+            SpeakerOption { name, print, voiced_s, key }
         })
         .collect();
     let transcribed = segments.iter().any(|s| !s.text.is_empty());

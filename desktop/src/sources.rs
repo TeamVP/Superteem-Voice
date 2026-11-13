@@ -45,6 +45,15 @@ pub fn output_device(name: &str) -> Option<&str> {
     name.strip_prefix(OUTPUT_PREFIX).filter(|d| !d.is_empty())
 }
 
+/// The name a source's track is shown by: "Microsoft Teams", or the output device.
+pub fn track_label(name: &str) -> Option<String> {
+    if let Some(device) = output_device(name) {
+        return Some(device.to_string());
+    }
+    let rest = name.strip_prefix(APP_PREFIX)?;
+    Some(rest.rfind(" (").map_or(rest, |i| &rest[..i]).to_string())
+}
+
 pub fn app_name(label: &str, program: &str) -> String {
     format!("{APP_PREFIX}{label} ({program})")
 }
@@ -159,6 +168,8 @@ mod win {
         pid: u32,
         active: bool,
         level: f32,
+        /// The output device it plays to.
+        device: String,
     }
 
     fn sessions(enumerator: &IMMDeviceEnumerator) -> WinResult<Vec<Session>> {
@@ -168,6 +179,7 @@ mod win {
             for i in 0..devices.GetCount()? {
                 let Ok(device) = devices.Item(i) else { continue };
                 let Ok(manager) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else { continue };
+                let device_label = device_name(&device).unwrap_or_default();
                 let Ok(list) = manager.GetSessionEnumerator() else { continue };
                 for j in 0..list.GetCount().unwrap_or(0) {
                     let Ok(control) = list.GetSession(j) else { continue };
@@ -182,7 +194,7 @@ mod win {
                     }
                     let Ok(pid) = control2.GetProcessId() else { continue };
                     let level = control.cast::<IAudioMeterInformation>().ok().and_then(|m| m.GetPeakValue().ok()).unwrap_or(0.0);
-                    out.push(Session { pid, active: state == AudioSessionStateActive, level });
+                    out.push(Session { pid, active: state == AudioSessionStateActive, level, device: device_label.clone() });
                 }
             }
         }
@@ -242,19 +254,113 @@ mod win {
         out
     }
 
-    /// The process to capture for a program: the app that owns a sound session if there is one, else
-    /// any running copy that wasn't started by another copy of itself.
-    fn target(program: &str) -> Option<u32> {
+    /// The top of a run of processes of one program: a browser's or WebView2's main process above its
+    /// renderer and audio helpers.
+    fn chain_top(pid: u32, all: &HashMap<u32, Process>) -> u32 {
+        let mut current = pid;
+        for _ in 0..16 {
+            let Some(me) = all.get(&current) else { break };
+            match all.get(&me.parent) {
+                Some(parent) if me.parent != current && parent.program.eq_ignore_ascii_case(&me.program) => current = me.parent,
+                _ => break,
+            }
+        }
+        current
+    }
+
+    /// The processes to capture for a program. Windows credits an app's sound to the process that plays
+    /// it, and doesn't always count a hosted WebView2 as part of the app's tree (new Teams plays calls
+    /// through one), so each part of the app with a sound session is captured, plus the app itself.
+    fn targets(program: &str) -> Vec<u32> {
         let all = processes();
         com();
         let enumerator = unsafe { CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) }.ok();
         let owners = enumerator.and_then(|e| sessions(&e).ok()).unwrap_or_default();
-        let mine = |pid: &u32| all.get(pid).is_some_and(|p| p.program.eq_ignore_ascii_case(program));
-        owners
-            .iter()
-            .map(|s| root(s.pid, &all))
-            .find(mine)
-            .or_else(|| all.keys().copied().filter(mine).find(|&pid| root(pid, &all) == pid))
+        let mine = |pid: u32| all.get(&pid).is_some_and(|p| p.program.eq_ignore_ascii_case(program));
+        let mut out: Vec<u32> = all.keys().copied().filter(|&pid| mine(pid) && root(pid, &all) == pid).collect();
+        for s in owners {
+            if mine(root(s.pid, &all)) {
+                out.push(chain_top(s.pid, &all));
+                out.push(s.pid);
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// How loud the program's own sound sessions are, and the output device of the loudest.
+    fn app_level(program: &str) -> (f32, String) {
+        com();
+        let all = processes();
+        let Ok(e) = (unsafe { CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) }) else { return (0.0, String::new()) };
+        sessions(&e)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| all.get(&root(s.pid, &all)).is_some_and(|p| p.program.eq_ignore_ascii_case(program)))
+            .fold((0.0, String::new()), |best, s| if s.level > best.0 { (s.level, s.device) } else { best })
+    }
+
+    /// Records everything an output device plays, converted to 48 kHz mono, until dropped.
+    struct DeviceFallback {
+        _stream: cpal::Stream,
+        blocks: mpsc::Receiver<Vec<f32>>,
+        queue: std::collections::VecDeque<f32>,
+        device: String,
+    }
+
+    fn open_device(name: &str) -> std::result::Result<DeviceFallback, String> {
+        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+        let device = cpal::default_host()
+            .output_devices()
+            .map_err(|e| e.to_string())?
+            .find(|d| d.name().is_ok_and(|n| n == name))
+            .ok_or_else(|| format!("{name} isn't connected"))?;
+        let config = device.default_output_config().map_err(|e| e.to_string())?;
+        let channels = config.channels() as usize;
+        let step = config.sample_rate().0 as f64 / LOOPBACK_RATE as f64;
+        let (tx, blocks) = mpsc::channel::<Vec<f32>>();
+        let mut position = 0f64;
+        let mut convert = move |mono: Vec<f32>| {
+            // Linear steps from the device's rate to 48 kHz.
+            let mut out = Vec::with_capacity((mono.len() as f64 / step) as usize + 1);
+            while (position as usize) < mono.len() {
+                out.push(mono[position as usize]);
+                position += step;
+            }
+            position -= mono.len() as f64;
+            drop(tx.send(out));
+        };
+        let stream = match config.sample_format() {
+            cpal::SampleFormat::F32 => device.build_input_stream(&config.config(), move |d: &[f32], _: &_| convert(crate::capture::downmix(d, channels, |s| s)), |_| {}, None),
+            cpal::SampleFormat::I16 => device.build_input_stream(&config.config(), move |d: &[i16], _: &_| convert(crate::capture::downmix(d, channels, |s| s as f32 / 32768.0)), |_| {}, None),
+            other => return Err(format!("unsupported sample format {other:?}")),
+        }
+        .map_err(|e| e.to_string())?;
+        stream.play().map_err(|e| e.to_string())?;
+        Ok(DeviceFallback { _stream: stream, blocks, queue: Default::default(), device: name.into() })
+    }
+
+    /// For the diagnostic test: every sound session's process, its app and its level.
+    #[cfg(test)]
+    pub fn session_pids() -> Vec<(u32, u32, String, f32)> {
+        com();
+        let all = processes();
+        let e: IMMDeviceEnumerator = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }.unwrap();
+        sessions(&e).unwrap().into_iter().map(|s| (s.pid, root(s.pid, &all), all.get(&s.pid).map(|p| p.program.clone()).unwrap_or_default(), s.level)).collect()
+    }
+
+    /// For the diagnostic test: records one process tree for `seconds` and returns the peak.
+    #[cfg(test)]
+    pub fn peak_of(pid: u32, seconds: u64) -> std::result::Result<f32, String> {
+        let (tx, rx) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let s2 = stop.clone();
+        let t = thread::spawn(move || { com(); capture_loop(pid, &s2, &tx, || ()) });
+        thread::sleep(Duration::from_secs(seconds));
+        stop.store(true, Ordering::Relaxed);
+        t.join().unwrap()?;
+        Ok(rx.try_iter().flatten().fold(0f32, |m, s: f32| m.max(s.abs())))
     }
 
     #[implement(IActivateAudioInterfaceCompletionHandler)]
@@ -310,7 +416,9 @@ mod win {
         unknown.ok_or("Windows gave no audio client.")?.cast::<IAudioClient>().map_err(|e| e.to_string())
     }
 
-    /// Records one app on its own thread until dropped, sending mono blocks at 48 kHz.
+    /// Records one app until dropped, sending mono blocks at 48 kHz. Each of its processes with sound is
+    /// captured on a thread of its own, and new ones are picked up every second, so a call that starts
+    /// after the recording is heard too. The parts are mixed on the clock, so silence keeps time.
     pub struct AppCapture {
         stop: Arc<AtomicBool>,
         thread: Option<JoinHandle<()>>,
@@ -325,36 +433,193 @@ mod win {
         }
     }
 
+    struct Part {
+        stop: Arc<AtomicBool>,
+        blocks: mpsc::Receiver<Vec<f32>>,
+        queue: std::collections::VecDeque<f32>,
+        failed: Arc<Mutex<Option<String>>>,
+        /// Loudest sample since the last line of the log.
+        peak: f32,
+        packets: u64,
+    }
+
+    /// Notes which processes an app capture listens to and what each hears, every few seconds, in
+    /// sources.log beside the app's data, for finding out why a track is silent.
+    fn log(line: &str) {
+        use std::io::Write;
+        let path = crate::library::data_dir().join("sources.log");
+        if std::fs::metadata(&path).is_ok_and(|m| m.len() > 2_000_000) {
+            let _ = std::fs::remove_file(&path);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            let _ = writeln!(f, "{secs} {line}");
+        }
+    }
+
+    fn start_part(pid: u32) -> Part {
+        let stop = Arc::new(AtomicBool::new(false));
+        let failed = Arc::new(Mutex::new(None));
+        let (tx, blocks) = mpsc::channel();
+        {
+            let (stop, failed) = (stop.clone(), failed.clone());
+            thread::spawn(move || {
+                com();
+                if let Err(message) = capture_loop(pid, &stop, &tx, || ()) {
+                    *failed.lock().unwrap() = Some(message);
+                }
+            });
+        }
+        Part { stop, blocks, queue: Default::default(), failed, peak: 0.0, packets: 0 }
+    }
+
     /// Starts recording a program's sound. Fails if it isn't running.
     pub fn open_app(
         program: &str,
         blocks: Sender<Vec<f32>>,
         failure: Arc<Mutex<Option<String>>>,
+        events: Arc<Mutex<Vec<String>>>,
     ) -> std::result::Result<(AppCapture, u32), String> {
-        let pid = target(program).ok_or_else(|| format!("{} isn't running", friendly(program)))?;
+        let first = targets(program);
+        if first.is_empty() {
+            return Err(format!("{} isn't running", friendly(program)));
+        }
+        let program = program.to_string();
         let stop = Arc::new(AtomicBool::new(false));
-        let (ready_tx, ready_rx) = mpsc::channel();
         let thread = {
             let stop = stop.clone();
-            thread::spawn(move || {
-                com();
-                let ready = ready_tx.clone();
-                if let Err(message) = capture_loop(pid, &stop, &blocks, move || drop(ready.send(Ok(())))) {
-                    if ready_tx.send(Err(message.clone())).is_err() {
-                        *failure.lock().unwrap() = Some(message);
+            thread::spawn(move || mix(&program, first, &stop, &blocks, &failure, &events))
+        };
+        Ok((AppCapture { stop, thread: Some(thread) }, LOOPBACK_RATE))
+    }
+
+    fn mix(program: &str, first: Vec<u32>, stop: &AtomicBool, out: &Sender<Vec<f32>>, failure: &Mutex<Option<String>>, events: &Mutex<Vec<String>>) {
+        let event = |text: String| events.lock().unwrap().push(text);
+        let mut parts: HashMap<u32, Part> = first.into_iter().map(|pid| (pid, start_part(pid))).collect();
+        let mut last_log = std::time::Instant::now();
+        // Windows hands some apps' sound to per-app capture as silence (Teams' calls). When the app's own
+        // meter shows sound that the capture doesn't hear, its output device is recorded instead.
+        let mut fallback: Option<DeviceFallback> = None;
+        let mut unheard = 0u32;
+        let mut heard_peak = 0f32;
+        log(&format!("{program}: capturing {:?}", parts.keys().collect::<Vec<_>>()));
+        {
+            let all = processes();
+            let names: Vec<String> = parts.keys().map(|p| format!("{} {p}", all.get(p).map_or("?", |x| x.program.as_str()))).collect();
+            event(format!("Capturing {} directly: {}", friendly(program), names.join(", ")));
+        }
+        let started = std::time::Instant::now();
+        let mut sent: u64 = 0;
+        let mut last_scan = std::time::Instant::now();
+        // Each part may run up to this far ahead before its oldest sound is dropped.
+        let most = LOOPBACK_RATE as usize / 5;
+        while !stop.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(10));
+            if last_scan.elapsed() >= Duration::from_secs(1) {
+                last_scan = std::time::Instant::now();
+                for pid in targets(program) {
+                    parts.entry(pid).or_insert_with(|| {
+                        log(&format!("{program}: also capturing {pid}"));
+                        start_part(pid)
+                    });
+                }
+                // A process that ended or couldn't be captured is let go; it comes back if it plays again.
+                parts.retain(|_, p| {
+                    let gone = p.failed.lock().unwrap().is_some();
+                    if gone {
+                        log(&format!("{program}: let go of a part: {:?}", p.failed.lock().unwrap()));
+                        p.stop.store(true, Ordering::Relaxed);
+                    }
+                    !gone
+                });
+                if parts.is_empty() {
+                    *failure.lock().unwrap() = Some(format!("{} closed", friendly(program)));
+                    return;
+                }
+                let (level, device) = app_level(program);
+                if heard_peak > 0.001 {
+                    unheard = 0;
+                    if let Some(f) = fallback.take() {
+                        log(&format!("{program}: heard directly again; stopped recording {}", f.device));
+                        event(format!("Heard {} directly again; stopped recording {}", friendly(program), f.device));
+                    }
+                } else if level > 0.02 {
+                    unheard += 1;
+                }
+                heard_peak = 0.0;
+                let wrong_device = fallback.as_ref().is_some_and(|f| !device.is_empty() && f.device != device && level > 0.02);
+                if (unheard >= 2 && fallback.is_none()) || wrong_device {
+                    match open_device(&device) {
+                        Ok(f) => {
+                            log(&format!("{program}: plays at {level:.2} but per-app capture hears nothing; recording {device}"));
+                            event(format!("Windows gave silence for {}'s sound, so recording everything on {device} instead", friendly(program)));
+                            fallback = Some(f);
+                        }
+                        Err(e) => {
+                            log(&format!("{program}: couldn't record {device}: {e}"));
+                            event(format!("Couldn't record {device}: {e}"));
+                        }
                     }
                 }
-            })
-        };
-        let mut capture = AppCapture { stop, thread: Some(thread) };
-        match ready_rx.recv_timeout(Duration::from_secs(8)) {
-            Ok(Ok(())) => Ok((capture, LOOPBACK_RATE)),
-            Ok(Err(message)) => Err(message),
-            Err(_) => {
-                capture.stop.store(true, Ordering::Relaxed);
-                drop(capture.thread.take());
-                Err("the app's sound didn't start".into())
             }
+            for p in parts.values_mut() {
+                for block in p.blocks.try_iter() {
+                    p.packets += 1;
+                    p.peak = block.iter().fold(p.peak, |m, s| m.max(s.abs()));
+                    heard_peak = heard_peak.max(p.peak);
+                    p.queue.extend(block);
+                }
+                let extra = p.queue.len().saturating_sub(most);
+                p.queue.drain(..extra);
+            }
+            if let Some(f) = fallback.as_mut() {
+                for block in f.blocks.try_iter() {
+                    f.queue.extend(block);
+                }
+                let extra = f.queue.len().saturating_sub(most);
+                f.queue.drain(..extra);
+            }
+            if last_log.elapsed() >= Duration::from_secs(3) {
+                last_log = std::time::Instant::now();
+                let all = processes();
+                let line: Vec<String> = parts
+                    .iter_mut()
+                    .map(|(pid, p)| {
+                        let name = all.get(pid).map_or("?", |x| x.program.as_str());
+                        let text = format!("{pid} {name} packets {} peak {:.3}", p.packets, p.peak);
+                        (p.peak, p.packets) = (0.0, 0);
+                        text
+                    })
+                    .collect();
+                let via = fallback.as_ref().map_or(String::new(), |f| format!(" (recording {} instead)", f.device));
+                log(&format!("{program}: {}{via}", line.join("; ")));
+            }
+            // Behind the clock by a little, so parts that arrive in bursts are mixed rather than cut.
+            let due = (started.elapsed().as_micros() as u64 * LOOPBACK_RATE as u64 / 1_000_000).saturating_sub(LOOPBACK_RATE as u64 / 20);
+            let n = due.saturating_sub(sent) as usize;
+            if n == 0 {
+                continue;
+            }
+            let mut block = vec![0f32; n];
+            for p in parts.values_mut() {
+                let take = n.min(p.queue.len());
+                for (o, s) in block.iter_mut().zip(p.queue.drain(..take)) {
+                    *o += s;
+                }
+            }
+            if let Some(f) = fallback.as_mut() {
+                let take = n.min(f.queue.len());
+                for (o, s) in block.iter_mut().zip(f.queue.drain(..take)) {
+                    *o += s;
+                }
+            }
+            sent += n as u64;
+            if out.send(block).is_err() {
+                break;
+            }
+        }
+        for p in parts.values() {
+            p.stop.store(true, Ordering::Relaxed);
         }
     }
 
@@ -432,6 +697,8 @@ mod tests {
         assert_eq!(app_program("Sound from A (b) (c.exe)"), Some("c.exe"));
         assert_eq!(output_device("Everything playing on Speakers (Realtek)"), Some("Speakers (Realtek)"));
         assert!(!is_source("Microphone (USB)"));
+        assert_eq!(track_label(&name).as_deref(), Some("Microsoft Teams"));
+        assert_eq!(track_label("Mic"), None);
     }
 
     #[test]
@@ -453,7 +720,7 @@ mod live {
             if let (Some(program), true) = (super::app_program(&s.name), s.active) {
                 let (tx, rx) = std::sync::mpsc::channel();
                 let failure = std::sync::Arc::new(std::sync::Mutex::new(None));
-                match super::open_app(program, tx, failure) {
+                match super::open_app(program, tx, failure, Default::default()) {
                     Ok((capture, rate)) => {
                         std::thread::sleep(std::time::Duration::from_secs(2));
                         drop(capture);
@@ -481,5 +748,71 @@ mod live {
         }
         recorder.stop().unwrap();
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Which process of an app carries its sound: `cargo test --lib live_pids -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn live_pids() {
+        let sessions = super::win::session_pids();
+        for (pid, root, program, level) in &sessions {
+            println!("session pid {pid} ({program}) root {root} level {level:.2}");
+        }
+        let mut pids: Vec<u32> = sessions.iter().flat_map(|s| [s.0, s.1]).collect::<Vec<u32>>().into_iter().collect();
+        pids.extend(std::env::var("STV_PIDS").unwrap_or_default().split(',').filter_map(|p| p.trim().parse::<u32>().ok()));
+        pids.sort();
+        pids.dedup();
+        for pid in pids {
+            println!("pid {pid}: {:?}", super::win::peak_of(pid, 2));
+        }
+    }
+
+    /// Plays a tone to each output and records this process: shows which outputs per-app capture hears.
+    #[test]
+    #[ignore]
+    fn live_device_tone() {
+        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+        let host = cpal::default_host();
+        println!("default output: {:?}", host.default_output_device().and_then(|d| d.name().ok()));
+        for device in host.output_devices().unwrap() {
+            let name = device.name().unwrap_or_default();
+            let Ok(config) = device.default_output_config() else { continue };
+            let (rate, channels) = (config.sample_rate().0 as f32, config.channels() as usize);
+            let mut t = 0f32;
+            let stream = match device.build_output_stream(&config.config(), move |d: &mut [f32], _: &_| {
+                for frame in d.chunks_mut(channels) { t += 1.0; let v = (t * 440.0 * 6.283 / rate).sin() * 0.2; frame.iter_mut().for_each(|s| *s = v); }
+            }, |_| {}, None) { Ok(s) => s, Err(e) => { println!("{name}: can't play ({e})"); continue } };
+            stream.play().unwrap();
+            println!("{name}: per-app peak {:?}", super::win::peak_of(std::process::id(), 2));
+        }
+    }
+
+    /// Waits up to ten minutes for an app's session to play, then records each process of every app
+    /// playing: `cargo test --lib live_wait -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn live_wait() {
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < 600 {
+            let sessions = super::win::session_pids();
+            let root: u32 = std::env::var("STV_ROOT").ok().and_then(|r| r.parse().ok()).unwrap_or(0);
+            if sessions.iter().any(|s| s.3 > 0.02 && (root == 0 || s.1 == root)) {
+                for (pid, root, program, level) in &sessions {
+                    println!("session pid {pid} ({program}) root {root} level {level:.2}");
+                }
+                let all: Vec<u32> = sessions.iter().flat_map(|s| [s.0, s.1]).collect::<Vec<u32>>();
+                let mut pids = all.clone();
+                pids.extend(std::env::var("STV_PIDS").unwrap_or_default().split(',').filter_map(|p| p.trim().parse::<u32>().ok()));
+                pids.sort();
+                pids.dedup();
+                for pid in pids {
+                    let name = std::process::Command::new("powershell").args(["-NoProfile", "-Command", &format!("(Get-Process -Id {pid}).ProcessName")]).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+                    println!("pid {pid} {name}: {:?}", super::win::peak_of(pid, 3));
+                }
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+        println!("nothing played");
     }
 }

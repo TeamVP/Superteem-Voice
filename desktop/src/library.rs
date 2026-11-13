@@ -11,7 +11,7 @@ use stv_core::export::{self, Line};
 
 pub const UNKNOWN: &str = "unknown";
 const TRANSCRIPT: &str = "transcript.json";
-const META: &str = "meta.json";
+pub const META: &str = "meta.json";
 /// Below this, the editor highlights a line for checking.
 pub const LOW_CONFIDENCE: f32 = 0.5;
 
@@ -120,6 +120,30 @@ impl Segment {
     }
 }
 
+/// Where a track's sound came from, kept with the meeting so a silent or odd track can be explained.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Track {
+    /// "microphone", "app", "output" or "pin".
+    pub kind: String,
+    /// The name shown: "Microsoft Teams", or the microphone's own name.
+    pub label: String,
+    /// The full name it was chosen by: "Sound from Microsoft Teams (ms-teams.exe)".
+    pub source: String,
+    /// The program recorded, for an app.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub program: String,
+    /// 20 ms frames recorded, and frames lost.
+    pub frames: u64,
+    #[serde(default)]
+    pub lost: u64,
+    /// The loudest it got, 0 to 1; 0 means the track is silent.
+    #[serde(default)]
+    pub peak: f32,
+    /// What happened while recording, each with the time: "0:02 Recording Headset Earphone instead".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Meta {
     pub title: String,
@@ -144,6 +168,12 @@ pub struct Meta {
     /// The audio was deleted to save space; only the transcript is left, so it can't be processed again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub compacted: bool,
+    /// The inputs recorded, in order: input1 is the first. Names the tracks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<String>,
+    /// What each track was recorded from and how, by stream ("input1", "pin1").
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tracks: BTreeMap<String, Track>,
     /// The language older versions kept, before a meeting could be in two; read into `languages`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub language: String,
