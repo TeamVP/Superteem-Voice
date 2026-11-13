@@ -701,7 +701,9 @@ async function editTemplate(t) {
 /// The one thing being read aloud: { button, cancelled }.
 let reading = null;
 
-/// A button that reads aloud what `text()` returns, and stops when pressed again.
+/// A button that reads aloud what `text()` returns, and stops when pressed again. Every Read aloud button is
+/// one of these. Without a label it shows a speaker; while it reads, a play sign with a shimmer, which turns
+/// into a stop sign under the pointer; pressed then, it shows stop for a moment and goes back to the speaker.
 /// `lang`: the language code what's read is in, or a function giving it; unset for the main voice.
 /// `pieces()`, instead of text, gives the pieces to say already split (see speechPieces), and `onPiece` is
 /// told each as it's said, then null when reading ends. `voice(lang)`, before each reading, gives the voice
@@ -710,14 +712,22 @@ let reading = null;
 function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPiece, voice, pronounce } = {}) {
   const button = label
     ? el("button", { class: "pill with-icon read-aloud", type: "button", title: what, "aria-pressed": "false" }, svg("play", 14), label)
-    : el("button", { class: "icon-only read-aloud", type: "button", title: what, "aria-label": what, "aria-pressed": "false" }, svg("speak", 16));
+    : el("button", { class: "icon-only read-aloud", type: "button", title: what, "aria-label": what, "aria-pressed": "false" },
+      ...["speak", "play", "stop"].map((name) => { const icon = svg(name, 16); icon.classList.add(`ra-${name}`); return icon; }));
   button.dataset.what = what;
   // A labelled button says Stop while it reads.
   if (label) button.reading = (on) => button.replaceChildren(svg(on ? "pause" : "play", 14), on ? "Stop" : label);
   button.addEventListener("mousedown", (e) => e.preventDefault());
   const langNow = () => (typeof lang === "function" ? lang() : lang);
   button.addEventListener("click", async () => {
-    if (reading?.button === button) return stopReading();
+    if (reading?.button === button) {
+      // Stop shows for a moment, so the press is seen, then the speaker again.
+      button.classList.add("stopped");
+      clearTimeout(button.stoppedTimer);
+      button.stoppedTimer = setTimeout(() => button.classList.remove("stopped"), 700);
+      return stopReading();
+    }
+    button.classList.remove("stopped");
     stopReading();
     // What to read is taken at the click, before any question about the voice moves the selection.
     const words = pieces ? null : text();
@@ -726,6 +736,18 @@ function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPie
     if (prefer === false) return;
     readAloud(button, words, langNow(), { pieces: given, onPiece, voice: prefer, pronounce });
   });
+  button.isReading = () => reading?.button === button;
+  /// Goes on reading from the piece being said, in the voice `voice` now gives: after the voice is changed.
+  button.readOn = async () => {
+    if (reading?.button !== button) return;
+    const { pieces: all, index = 0, onPiece: follow } = reading;
+    stopReading();
+    // The old reading lets go of the button first.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const prefer = voice ? await voice(langNow()) : null;
+    if (prefer === false || !all?.length) return;
+    readAloud(button, null, langNow(), { pieces: all.slice(index), onPiece: follow, voice: prefer, pronounce });
+  };
   /// Reads `text` now, in place of whatever is being read: "Read aloud from here".
   button.readText = async (words, language) => {
     stopReading();
@@ -806,7 +828,8 @@ async function readAloud(button, text, lang, { pieces: given, onPiece, voice: pr
   // proportion to the speed: at half speed twice as long, at double speed half as long. (Read at each gap,
   // so changing the speed while reading takes effect at once.)
   const gap = (i) => (i + 1 < pieces.length ? Math.max(pieces[i].after, pieces[i + 1].before) : 0) / Math.max(0.5, prefs.read_speed ?? 1);
-  const mine = { button, cancelled: false, onPiece, what: button.dataset.what || "Read aloud" };
+  // Where it is, so it can go on from there in another voice (see readOn).
+  const mine = { button, cancelled: false, onPiece, what: button.dataset.what || "Read aloud", pieces, index: 0 };
   reading = mine;
   button.classList.add("on");
   button.setAttribute("aria-pressed", "true");
@@ -824,12 +847,14 @@ async function readAloud(button, text, lang, { pieces: given, onPiece, voice: pr
         const wav = await next;
         if (i + 1 < pieces.length) next = invoke("natural_speak", { text: said(pieces[i + 1].text), voice: voice.id });
         if (mine.cancelled) break;
+        mine.index = i;
         onPiece?.(pieces[i], voice);
         await playWav(wav, mine);
         await pause(gap(i), mine);
       }
     } else {
       for (let i = 0; i < pieces.length && !mine.cancelled; i++) {
+        mine.index = i;
         onPiece?.(pieces[i], null);
         await systemSay(said(pieces[i].text), lang);
         await pause(gap(i), mine);
@@ -866,21 +891,42 @@ async function bookVoice(book, lang) {
   if (usual?.id === suggested.id) return null;
   const choice = await bookVoiceDialog(book, usual, suggested, status.downloading);
   if (!choice) return false;
+  await saveBookVoice(book, choice);
+  return choice === "default" ? null : choice;
+}
+
+async function saveBookVoice(book, choice) {
   try {
     await invoke("set_book_voice", { book: book.id, voice: choice });
     prefs.book_voices = { ...prefs.book_voices, [book.id]: choice };
+    return true;
   } catch (e) {
     micToast(`The choice wasn't saved: ${e}`);
+    return false;
   }
-  return choice === "default" ? null : choice;
+}
+
+/// Changes which voice reads a book that suggests one, from its right-click menu: back to the person's own
+/// voice after choosing the book's, or the other way. Reading now goes on in the new voice from where it is.
+async function changeBookVoice(book, lang, readOn) {
+  const status = await invoke("tts_status").catch(() => null);
+  const suggested = status?.supported && status.voices.find((v) => v.id === book.voice);
+  if (!suggested) return micToast("This book's own voice can't be used on this device.");
+  const usual = await invoke("reading_voice", { language: lang ?? null, prefer: null }).catch(() => null);
+  const current = prefs.book_voices?.[book.id] ?? null;
+  const choice = await bookVoiceDialog(book, usual, suggested, status.downloading, current);
+  if (!choice || choice === current || !(await saveBookVoice(book, choice))) return;
+  if (readOn) readOn();
+  else micToast(`${book.title || "This book"} now reads in ${choice === "default" ? (usual?.name ?? "your voice") : suggested.name}.`);
 }
 
 /// What a voice is, in a few words: "British English, male".
 const voiceKind = (v) => [v.language, v.gender?.toLowerCase()].filter(Boolean).join(", ");
 
 /// Asks which voice reads a book: the person's usual one, or the one the book suggests, downloaded first
-/// when it isn't yet. Gives "default", the suggested voice's id, or null when closed.
-function bookVoiceDialog(book, usual, suggested, busy) {
+/// when it isn't yet. Gives "default", the suggested voice's id, or null when closed. `current`, when changing
+/// an earlier choice: the one in use, marked as such.
+function bookVoiceDialog(book, usual, suggested, busy, current) {
   return new Promise((done) => {
     let result = null;
     let downloading = false;
@@ -890,9 +936,11 @@ function bookVoiceDialog(book, usual, suggested, busy) {
     const status = el("p", { class: "hint book-voice-status" });
     const option = (title, name, kind, extra) => el("div", { class: "book-voice-option" },
       el("small", {}, title), el("strong", {}, name), el("span", {}, kind), extra ? el("span", { class: "book-voice-extra" }, extra) : null);
-    const keep = el("button", { class: "pill", type: "button" }, "Keep my voice");
-    const use = el("button", { class: "primary pill", type: "button", disabled: !suggested.ready && !!busy },
-      suggested.ready ? `Use ${suggested.name}` : `Download and use ${suggested.name}`);
+    const changing = current !== undefined;
+    const onSuggested = current === suggested.id;
+    const keep = el("button", { class: onSuggested ? "primary pill" : "pill", type: "button" }, changing && onSuggested ? "Use my voice" : "Keep my voice");
+    const use = el("button", { class: onSuggested ? "pill" : "primary pill", type: "button", disabled: !suggested.ready && !!busy },
+      onSuggested ? `Keep ${suggested.name}` : suggested.ready ? `Use ${suggested.name}` : `Download and use ${suggested.name}`);
     const finish = (value) => { result = value; dialog.close(); };
     keep.addEventListener("click", () => finish("default"));
     use.addEventListener("click", async () => {
@@ -912,10 +960,11 @@ function bookVoiceDialog(book, usual, suggested, busy) {
     });
     const dialog = el("dialog", { class: "sheet book-voice-dialog", "aria-label": "A voice for this book" },
       el("h2", {}, "A voice for this book"),
-      el("p", {}, `${book.title || "This book"} suggests a voice to read it.${book.voice_why ? ` ${book.voice_why}` : ""}`),
+      el("p", {}, changing ? `Choose which voice reads ${book.title || "this book"}.`
+        : `${book.title || "This book"} suggests a voice to read it.${book.voice_why ? ` ${book.voice_why}` : ""}`),
       el("div", { class: "book-voice-options" },
-        option("Your voice", usualName, usualKind),
-        option("Suggested", suggested.name, voiceKind(suggested), suggested.ready ? "Downloaded" : `${size}, then works offline`)),
+        option(changing && !onSuggested ? "Your voice · in use" : "Your voice", usualName, usualKind),
+        option(onSuggested ? "Suggested · in use" : "Suggested", suggested.name, voiceKind(suggested), suggested.ready ? "Downloaded" : `${size}, then works offline`)),
       el("p", { class: "hint" }, "Only this book changes. Everything else keeps reading in your voice."),
       status,
       el("div", { class: "actions" }, el("span", { class: "grow" }), keep, use));
@@ -925,7 +974,7 @@ function bookVoiceDialog(book, usual, suggested, busy) {
     dialog.addEventListener("close", () => { dialog.remove(); done(result); });
     document.body.append(dialog);
     dialog.showModal();
-    use.focus();
+    (onSuggested ? keep : use).focus();
   });
 }
 

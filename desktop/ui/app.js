@@ -51,6 +51,7 @@ const icon = {
   import: '<path d="M12 3v12M7.5 10.5L12 15l4.5-4.5"></path><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"></path>',
   keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"></path>',
   play: '<path d="M7 4l13 8-13 8z" fill="currentColor" stroke="none"></path>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" stroke="none"></rect>',
   "skip-back": '<path d="M18 5l-10 7 10 7z" fill="currentColor" stroke="none"></path><path d="M6 5v14"></path>',
   "skip-forward": '<path d="M6 5l10 7-10 7z" fill="currentColor" stroke="none"></path><path d="M18 5v14"></path>',
   pause: '<rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"></rect><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"></rect>',
@@ -805,7 +806,8 @@ async function openReadingBook(book, chapterId, find = null) {
       ...noteScrollButtons(heading));
     main.replaceChildren(page);
     const surface = domSurface(body);
-    marks = attachBookmarks({ surface, holder: bodyHolder, noteId: () => note.id, onRead: (text) => speak.readText(text, lang()) });
+    marks = attachBookmarks({ surface, holder: bodyHolder, noteId: () => note.id, onRead: (text) => speak.readText(text, lang()),
+      onVoice: book.voice && isDesktop() ? () => changeBookVoice(book, lang(), speak.isReading() ? speak.readOn : null) : null });
     openAtTop(page);
     revealSnippet(surface, find);
     return;
@@ -995,7 +997,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
       a.marks = attachBookmarks({ surface: a.surface, holder: a.holder, noteId: () => a.c.id, onRead: (text, { toEnd } = {}) => {
         const i = attached.indexOf(a);
         speak.readText(toEnd ? [text, ...attached.slice(i + 1).map(chapterText)].join("\n\n") : text);
-      } });
+      }, onVoice: book.voice && isDesktop() ? () => changeBookVoice(book, null, speak.isReading() ? speak.readOn : null) : null });
       a.bodyEl.addEventListener("click", () => { lastClicked = a; });
     }
     openAtTop(page);

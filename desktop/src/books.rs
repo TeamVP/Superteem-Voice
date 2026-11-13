@@ -429,8 +429,9 @@ fn install_bundled(now: u64) -> Result<(), String> {
     library::write_json(&book_file, &book)
 }
 
-/// 3: the book suggests a voice.
-const EXAMPLE_BOOK: u32 = 3;
+/// 3: the book suggests a voice. 4: names respelled so the voice says them right: whole syllables it reads
+/// as words, unstressed lead-ins ("de Ryus"), and none where it already says the name well.
+const EXAMPLE_BOOK: u32 = 4;
 const EXAMPLE_ID: &str = "plutarch-lives";
 
 fn example_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf> {

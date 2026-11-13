@@ -221,8 +221,9 @@ const modKey = () => (platform === "macos" ? "⌘" : "Ctrl+");
 
 /// Bookmarks on one surface. `holder` is an element around the surface's root, which the markers are drawn
 /// over. `noteId()` is the note's id, or null before it is saved; `ensureNote()` saves it and gives its id.
-/// `onRead(text)` reads text aloud. Returns { create, readingText, reload }.
-function attachBookmarks({ surface, holder, noteId, ensureNote = async () => noteId(), onRead }) {
+/// `onRead(text)` reads text aloud. `onVoice()`, for a book with its own voice, changes which voice reads it.
+/// Returns { create, readingText, reload }.
+function attachBookmarks({ surface, holder, noteId, ensureNote = async () => noteId(), onRead, onVoice }) {
   const layer = el("div", { class: "bm-layer", "aria-hidden": "false" });
   holder.classList.add("bm-holder");
   surface.root.classList.add("bm-root");
@@ -459,6 +460,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     const mod = modKey();
     showContextMenu(e.clientX, e.clientY, [
       { icon: "speak", text: selected ? "Read aloud" : "Read aloud from here", disabled: !here, run: () => onRead?.(textFrom(here.from, here.to), { toEnd: !selected }) },
+      onVoice && { icon: "speak", text: "Voice for this book…", run: () => onVoice(here) },
       { icon: "bookmark", text: selected ? "Bookmark…" : "Bookmark here…", disabled: !here, run: () => create(here) },
       "-",
       !surface.readOnly && { icon: "cut", text: "Cut", keys: `${mod}X`, disabled: !selected, run: () => document.execCommand("cut") },

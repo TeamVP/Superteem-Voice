@@ -947,6 +947,24 @@ body[data-platform="ios"] { box-sizing: border-box; padding: env(safe-area-inset
 .row .star.on { color: #e0a72e; }
 .analysis-menu .menu .menu-label { padding: 8px 10px 2px; }
 .read-aloud.on { color: var(--key); background: var(--highlight); }
+/* Read aloud: a speaker; reading, a play sign with a slow shimmer, stop under the pointer; stopped, stop
+   for a moment. */
+.read-aloud .ra-play, .read-aloud .ra-stop { display: none !important; }
+.read-aloud.on .ra-speak, .read-aloud.stopped .ra-speak { display: none !important; }
+.read-aloud.on .ra-play { display: inline-flex !important; }
+.read-aloud.on:hover .ra-play, .read-aloud.on:focus-visible .ra-play, .read-aloud.stopped .ra-play { display: none !important; }
+.read-aloud.on:hover .ra-stop, .read-aloud.on:focus-visible .ra-stop, .read-aloud.stopped .ra-stop { display: inline-flex !important; }
+.read-aloud.on {
+  background: linear-gradient(110deg, var(--highlight) 20%, color-mix(in srgb, var(--key) 22%, var(--highlight)) 50%, var(--highlight) 80%);
+  background-size: 300% 100%;
+  animation: read-aloud-shimmer 2.6s ease-in-out infinite;
+}
+.read-aloud.on .ra-play { animation: read-aloud-glow 2.6s ease-in-out infinite; }
+@keyframes read-aloud-shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
+@keyframes read-aloud-glow { 0%, 100% { color: var(--key); } 50% { color: var(--key-light); } }
+@media (prefers-reduced-motion: reduce) {
+  .read-aloud.on, .read-aloud.on .ra-play { animation: none; }
+}
 /* Importing a recording as a track. */
 .import-form { margin: 12px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
 .import-head { display: flex; align-items: center; justify-content: space-between; }
