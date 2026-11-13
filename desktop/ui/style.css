@@ -1246,3 +1246,41 @@ dialog.note-shortcuts h3 { font-size: 13px; margin: 16px 0 8px; color: var(--mut
   .note-toolbar { padding: 6px 12px; }
   .ne-btn { width: 38px; height: 36px; }
 }
+
+/* Searching a note: a bar under the title, and the note folded to its chapters and sections. */
+.note-search { position: sticky; top: 52px; z-index: 11; display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--muted); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08); }
+.note-search[hidden] { display: none; }
+.note-search input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; padding: 6px 0; font: inherit; color: var(--text); }
+.note-search .hint { white-space: nowrap; }
+.add-analysis.on { color: var(--accent-text); }
+.note-body .ne-hidden { display: none !important; }
+.note-body[contenteditable="false"] { cursor: pointer; }
+.note-body .ne-hit { background: var(--highlight); border-radius: 3px; }
+.note-body .ne-hit-picked { box-shadow: 0 0 0 2px var(--key); }
+.note-body .ne-picked { background: var(--hover); border-radius: 6px; box-shadow: -4px 0 0 var(--key); }
+.note-body .ne-fold { position: relative; padding-left: 1.1em; margin-top: 0.5em; }
+.note-body .ne-fold::before { content: ""; position: absolute; left: 0.1em; top: 0.42em; width: 0.36em; height: 0.36em; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; }
+.note-body .ne-fold.ne-open::before { transform: rotate(45deg); top: 0.34em; }
+.note-body h2.ne-fold { margin-left: 1.3em; }
+@media (prefers-reduced-motion: reduce) { .note-body .ne-fold::before { transition: none; } }
+
+/* The way to the end of a note: it shows over the note while it scrolls, and fades when it stops. */
+.jump-end { position: fixed; z-index: 14; width: 42px; height: 42px; min-height: 0; padding: 0; border-radius: 21px; border: 1px solid var(--line); background: var(--panel); color: var(--text); display: grid; place-items: center; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity 0.25s; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); }
+.jump-end.show { opacity: 0.6; pointer-events: auto; }
+.jump-end.show:hover, .jump-end.show:focus-visible { opacity: 0.95; }
+@media (prefers-reduced-motion: reduce) { .jump-end { transition: none; } }
+
+/* A note's Export, Archive and Delete: side by side on a computer, behind a "more" button on a phone. */
+.top-more, .top-more-items { display: contents; }
+.top-more-button, .menu-text { display: none; }
+@media (max-width: 640px) {
+  .top-more { display: inline-flex; position: relative; }
+  .top-more-button { display: inline-grid; }
+  .top-more-items { display: none; position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; min-width: 210px; flex-direction: column; align-items: stretch; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25); }
+  .top-more.open .top-more-items { display: flex; }
+  .top-more-items > .export-menu { display: flex; }
+  .top-more-items .export-button, .top-more-items > .icon-only { width: 100%; height: auto; display: flex; align-items: center; justify-content: flex-start; gap: 12px; padding: 10px; border-radius: 8px; color: var(--text); font-size: 15px; font-weight: 400; text-decoration: none; white-space: nowrap; }
+  .top-more-items .wide-only, .top-more-items .menu-text { display: inline; }
+  .top-more-items > .icon-only.danger { color: var(--danger); }
+  .top-more-items > .icon-only.armed, .top-more-items > .icon-only.armed:hover { color: #fff; font-weight: 600; }
+}

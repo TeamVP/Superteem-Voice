@@ -41,7 +41,7 @@ listen("analysed", (e) => {
   refreshAnalyses();
 });
 
-/// The stack for a meeting or note. `ctx`: { speakers: [names], go(source) }.
+/// The stack for a meeting or note. `ctx`: { speakers: [names], go(source), lead: [what sits before "Analysis"] }.
 function analysisStack(kind, id, ctx) {
   // The cards, then the translations (ctx.translations), then the bar to add either. The translations
   // keep their place as the cards are redrawn, so one being read or corrected isn't disturbed.
@@ -120,7 +120,7 @@ function addAnalysis(page, data) {
   if (!data.ready) {
     // Translating needs the analysis model too, so both lead to setting it up.
     const setUp = () => { from(); showAnalysisSettings(null, true); };
-    bar.append(el("button", { class: "link add-analysis", onclick: setUp }, label), el("span", { class: "grow" }), ...(page.ctx.links ?? []),
+    bar.append(...(page.ctx.lead ?? []), el("button", { class: "link add-analysis", onclick: setUp }, label), el("span", { class: "grow" }), ...(page.ctx.links ?? []),
       page.ctx.translations ? el("button", { class: "link add-analysis", onclick: setUp }, el("span", { class: "with-icon" }, svg("globe", 16), "Translate")) : null);
     return bar;
   }
@@ -134,7 +134,7 @@ function addAnalysis(page, data) {
   const choices = [...starred.map(choice)];
   if (others.length) choices.push(starred.length ? "More templates" : "Templates", ...others.map(choice));
   choices.push(["Star or edit templates…", null, () => { from(); showTemplates(); }]);
-  bar.append(menuButton(label, choices, "link add-analysis"), el("span", { class: "grow" }), ...(page.ctx.links ?? []), translateMenu(page.kind, page.id));
+  bar.append(...(page.ctx.lead ?? []), menuButton(label, choices, "link add-analysis"), el("span", { class: "grow" }), ...(page.ctx.links ?? []), translateMenu(page.kind, page.id));
   return bar;
 }
 

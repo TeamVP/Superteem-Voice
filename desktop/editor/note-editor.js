@@ -9,6 +9,7 @@
 //   open(href)                                        opens a link or a kept file
 //   onChange()                                        the text changed
 //   notify(text)                                      a short message for the person
+//   onSearchJump()                                    a place was chosen in a search: close it
 
 import { Editor, Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
@@ -196,6 +197,137 @@ function dictationApi(editor) {
   };
 }
 
+// ---------- Search: the note folded to its chapters and sections, or to the lines holding a word
+
+const searchKey = new PluginKey("noteSearch");
+const LEAF = "￼";
+
+/// A Heading 1 starts a chapter and a Heading 2 a section in it. Returns each top-level block with the
+/// chapter and section it sits in, and whether the note has enough headings to fold.
+function outline(doc) {
+  const blocks = [];
+  let h1 = null, h2 = null, headings = 0;
+  doc.forEach((node, pos) => {
+    const level = node.type.name === "heading" && node.attrs.level <= 2 ? node.attrs.level : 0;
+    if (level === 1) { blocks.push({ node, pos, level, h1: null, h2: null }); h1 = pos; h2 = null; }
+    else if (level === 2) { blocks.push({ node, pos, level, h1, h2: null }); h2 = pos; }
+    else blocks.push({ node, pos, level, h1, h2 });
+    if (level) headings++;
+  });
+  return { blocks, structured: headings >= 2 };
+}
+
+/// Every place `query` appears in a block, whatever its case.
+function findHits(block, query) {
+  const hits = [];
+  const scan = (node, pos) => {
+    if (!node.isTextblock) return true;
+    // A picture or line break in the line counts as one character, as it does in the document.
+    const text = node.textBetween(0, node.content.size, undefined, LEAF).toLowerCase();
+    for (let at = text.indexOf(query); at >= 0; at = text.indexOf(query, at + query.length)) {
+      hits.push({ from: pos + 1 + at, to: Math.min(pos + 1 + at + query.length, pos + 1 + node.content.size) });
+    }
+    return false;
+  };
+  if (block.node.isTextblock) scan(block.node, block.pos);
+  else block.node.descendants((node, pos) => scan(node, block.pos + 1 + pos));
+  return hits;
+}
+
+/// What a search shows. With a word: the blocks holding it, under their chapter and section headings.
+/// Without one: a note with chapters folds to its headings, each opened and closed with a click.
+function searchView(doc, { active, query, open, picked }) {
+  if (!active) return { decorations: DecorationSet.empty, hits: [], structured: false };
+  const { blocks, structured } = outline(doc);
+  const decorations = [];
+  const hits = [];
+  const hide = (b) => decorations.push(Decoration.node(b.pos, b.pos + b.node.nodeSize, { class: "ne-hidden" }));
+  const q = query.trim().toLowerCase();
+  if (q) {
+    const shown = new Set();
+    for (const b of blocks) {
+      const found = findHits(b, q);
+      if (!found.length) continue;
+      hits.push(...found);
+      shown.add(b.pos);
+      if (b.h1 != null) shown.add(b.h1);
+      if (b.h2 != null) shown.add(b.h2);
+    }
+    for (const b of blocks) if (!shown.has(b.pos)) hide(b);
+    for (const hit of hits) decorations.push(Decoration.inline(hit.from, hit.to, { class: hit.to === picked ? "ne-hit ne-hit-picked" : "ne-hit" }));
+  } else if (structured) {
+    for (const b of blocks) {
+      const chapterOpen = b.h1 == null || open.has(b.h1);
+      if (b.level === 1) decorations.push(Decoration.node(b.pos, b.pos + b.node.nodeSize, { class: open.has(b.pos) ? "ne-fold ne-open" : "ne-fold" }));
+      else if (b.level === 2) {
+        if (chapterOpen) decorations.push(Decoration.node(b.pos, b.pos + b.node.nodeSize, { class: open.has(b.pos) ? "ne-fold ne-open" : "ne-fold" }));
+        else hide(b);
+      } else if (!(chapterOpen && (b.h2 == null || open.has(b.h2)))) hide(b);
+    }
+  }
+  if (picked != null && !hits.some((hit) => hit.to === picked)) {
+    const at = blocks.find((b) => picked >= b.pos && picked <= b.pos + b.node.nodeSize);
+    if (at) decorations.push(Decoration.node(at.pos, at.pos + at.node.nodeSize, { class: "ne-picked" }));
+  }
+  return { decorations: DecorationSet.create(doc, decorations), hits, structured };
+}
+
+/// `jump()` is called when a place in the note is chosen: the search is over, and the note opens there.
+function searchPlugin(jump) {
+  const fresh = () => ({ active: false, query: "", open: new Set(), picked: null });
+  return new Plugin({
+    key: searchKey,
+    state: {
+      init: (_, state) => ({ ...fresh(), ...searchView(state.doc, fresh()) }),
+      apply(tr, value) {
+        const meta = tr.getMeta(searchKey);
+        if (!meta && !tr.docChanged) return value;
+        if (!meta && !value.active) return value;
+        let next = { active: value.active, query: value.query, open: value.open, picked: value.picked };
+        if (tr.docChanged) {
+          next.open = new Set([...next.open].map((pos) => tr.mapping.map(pos)));
+          if (next.picked != null) next.picked = tr.mapping.map(next.picked);
+        }
+        if (meta) next = { ...next, ...meta };
+        if (!next.active) next = fresh();
+        return { ...next, ...searchView(tr.doc, next) };
+      },
+    },
+    props: {
+      decorations: (state) => searchKey.getState(state).decorations,
+      handleClick(view, pos, event) {
+        const search = searchKey.getState(view.state);
+        if (!search.active) return false;
+        // A click on the empty space around the text chooses nothing.
+        if (event.target === view.dom) return true;
+        const { doc } = view.state;
+        const $pos = doc.resolve(pos);
+        const start = $pos.depth ? $pos.before(1) : pos;
+        const block = $pos.depth ? $pos.node(1) : doc.nodeAt(pos);
+        const meta = { picked: pos };
+        let folded = false;
+        if (search.query.trim()) {
+          // The cursor goes to the found word nearest the click, at its end.
+          const end = start + (block?.nodeSize ?? 0);
+          const near = search.hits.filter((hit) => hit.from >= start && hit.to <= end)
+            .sort((a, b) => Math.abs(a.to - pos) - Math.abs(b.to - pos))[0];
+          if (near) meta.picked = near.to;
+        } else if (search.structured && block?.type.name === "heading" && block.attrs.level <= 2) {
+          const open = new Set(search.open);
+          if (!open.delete(start)) open.add(start);
+          meta.open = open;
+          meta.picked = search.picked;
+          folded = true;
+        }
+        view.dispatch(view.state.tr.setMeta(searchKey, meta));
+        // A chapter or section heading opens and closes; anything else is the place to go to.
+        if (!folded) jump();
+        return true;
+      },
+    },
+  });
+}
+
 // ---------- The editor
 
 /// What a note can hold, and Markdown in and out. `files(file)` gives the address a kept file is shown from.
@@ -253,7 +385,7 @@ export function create({ element, host, placeholder = "" }) {
       };
     },
     addProseMirrorPlugins() {
-      return [dictationPlugin()];
+      return [dictationPlugin(), searchPlugin(() => host.onSearchJump?.())];
     },
   });
 
@@ -538,16 +670,99 @@ export function create({ element, host, placeholder = "" }) {
     adoptWebImages();
   };
 
+  // ----- Search, and keeping the cursor in view
+
+  /// What the note scrolls in: the nearest thing around it that scrolls.
+  function scroller() {
+    for (let node = editor.view.dom.parentElement; node && node !== document.body; node = node.parentElement) {
+      if (/(auto|scroll)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight + 1) return node;
+    }
+    return document.scrollingElement;
+  }
+
+  /// Scrolls so the cursor sits in the middle of what can be seen: below the formatting bar, and above
+  /// a phone's keyboard when it is up.
+  function centreCursor() {
+    if (editor.isDestroyed) return;
+    const box = scroller();
+    const at = editor.view.coordsAtPos(editor.state.selection.head);
+    const frame = box.getBoundingClientRect();
+    const seen = window.visualViewport;
+    const bar = toolbar.isConnected ? toolbar.getBoundingClientRect().bottom : 0;
+    const top = Math.max(frame.top, bar, 0);
+    const bottom = Math.min(frame.bottom, seen ? seen.offsetTop + seen.height : innerHeight);
+    box.scrollTop += (at.top + at.bottom) / 2 - (top + bottom) / 2;
+  }
+
+  /// Centres the cursor now, and again as the keyboard comes up and the window settles.
+  function holdCursorCentred() {
+    centreCursor();
+    const again = () => requestAnimationFrame(centreCursor);
+    const seen = window.visualViewport;
+    seen?.addEventListener("resize", again);
+    addEventListener("resize", again);
+    setTimeout(() => { seen?.removeEventListener("resize", again); removeEventListener("resize", again); }, 1500);
+  }
+
+  const searchState = () => searchKey.getState(editor.state);
+  const sendSearch = (meta) => editor.view.dispatch(editor.state.tr.setMeta(searchKey, meta));
+  const search = {
+    active: () => searchState().active,
+    /// Whether the note has chapters to fold into.
+    structured: () => outline(editor.state.doc).structured,
+    /// Folds the note to its chapters. It can't be edited while it is folded, as most of it is out of sight.
+    open() {
+      if (searchState().active) return;
+      editor.setEditable(false, false);
+      sendSearch({ active: true, query: "", open: new Set(), picked: null });
+    },
+    /// Shows only what holds `text`. Returns how many times it was found.
+    query(text) {
+      sendSearch({ query: text, picked: null });
+      return searchState().hits.length;
+    },
+    /// Moves to the next place the word was found (or the one before), and returns its number, from 1.
+    step(back = false) {
+      const { hits, picked } = searchState();
+      if (!hits.length) return 0;
+      const now = hits.findIndex((hit) => hit.to === picked);
+      const next = (now + (back ? -1 : 1) + hits.length) % hits.length;
+      sendSearch({ picked: hits[now < 0 ? 0 : next].to });
+      editor.view.dom.querySelector(".ne-hit-picked")?.scrollIntoView({ block: "nearest" });
+      return (now < 0 ? 0 : next) + 1;
+    },
+    /// Unfolds the note. The cursor goes where the person clicked, in the middle of what can be seen.
+    /// Returns whether there was such a place.
+    close() {
+      const { active, picked } = searchState();
+      if (!active) return false;
+      sendSearch({ active: false });
+      editor.setEditable(true, false);
+      if (picked == null) return false;
+      editor.commands.focus(Math.min(picked, editor.state.doc.content.size), { scrollIntoView: false });
+      holdCursorCentred();
+      return true;
+    },
+  };
+
   return {
     editor,
     toolbar,
     dom: editor.view.dom,
+    search,
+    scroller,
     setFrom,
     json: () => editor.getJSON(),
     markdown: () => editor.getMarkdown(),
     text: () => editor.getText({ blockSeparator: "\n" }),
     isEmpty: () => editor.isEmpty && !dictationKey.getState(editor.state).slots.some((s) => !s.anchor),
     focusEnd: () => editor.commands.focus("end"),
+    /// Puts the cursor at the end without scrolling to it, so the note still opens at its top and
+    /// dictation still goes after what is written. `focus` also puts the keyboard's typing there.
+    cursorEnd(focus) {
+      if (focus) editor.commands.focus("end", { scrollIntoView: false });
+      else editor.commands.setTextSelection(editor.state.doc.content.size);
+    },
     /// Adds Markdown at the end of the note.
     append(markdown) {
       insertMarkdown(markdown, editor.state.doc.content.size);

@@ -55,6 +55,8 @@ const icon = {
   home: '<path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"></path>',
   chevron: '<path d="M9 6l6 6-6 6"></path>',
   down: '<path d="M6 9l6 6 6-6"></path>',
+  search: '<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.8-3.8"></path>',
+  more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"></circle><circle cx="12" cy="12" r="1.4" fill="currentColor"></circle><circle cx="19" cy="12" r="1.4" fill="currentColor"></circle>',
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path>',
   // Lucide's refresh-cw.
   refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path>',
@@ -647,7 +649,9 @@ function renderNote(data, dictate) {
   const status = el("span", { class: "status", "aria-live": "polite" });
   note.savedAt = data.updated ?? null;
   showSaved(status);
-  const remove = el("button", { class: "icon-only danger", title: "Delete", "aria-label": "Delete note" }, svg("trash", 18));
+  // The words show only in the phone's "more" menu, where the buttons are rows.
+  const menuText = (text) => el("span", { class: "menu-text" }, text);
+  const remove = el("button", { class: "icon-only danger", title: "Delete", "aria-label": "Delete note" }, svg("trash", 18), menuText("Delete"));
   remove.addEventListener("click", async () => {
     if (!note.id) return showHome();
     if (!remove.dataset.armed) {
@@ -657,7 +661,7 @@ function renderNote(data, dictate) {
       setTimeout(() => {
         delete remove.dataset.armed;
         remove.classList.remove("armed");
-        remove.replaceChildren(svg("trash", 18));
+        remove.replaceChildren(svg("trash", 18), menuText("Delete"));
       }, 4000);
       return;
     }
@@ -670,7 +674,7 @@ function renderNote(data, dictate) {
     const label = note.archived ? "Unarchive" : "Archive";
     archive.title = label;
     archive.setAttribute("aria-label", label);
-    archive.replaceChildren(svg(note.archived ? "unarchive" : "archive", 18));
+    archive.replaceChildren(svg(note.archived ? "unarchive" : "archive", 18), menuText(label));
   };
   showArchived();
   archive.addEventListener("click", async () => {
@@ -717,6 +721,7 @@ function renderNote(data, dictate) {
       : "Start typing, or press Dictate (Ctrl + Space) and talk. Your words appear at the cursor each time you pause, and it stops by itself when you finish.",
     host: {
       onChange: () => changed(),
+      onSearchJump: () => closeSearch(),
       notify: (text) => micToast(text),
       resolve: fileUrl,
       open: openLink,
@@ -757,6 +762,81 @@ function renderNote(data, dictate) {
   };
   title.addEventListener("input", changed);
 
+  // Search: the note folds to its chapters (Heading 1) and sections (Heading 2), and shows only what holds
+  // the word typed, under its headings. A click on a heading opens it; a click on text unfolds the note there.
+  const searchInput = el("input", { type: "search", placeholder: "Search this note", "aria-label": "Search this note", autocomplete: "off", enterkeyhint: "search" });
+  const searchCount = el("span", { class: "hint", "aria-live": "polite" });
+  const searchBar = el("div", { class: "note-search", role: "search", hidden: true }, svg("search", 16), searchInput, searchCount,
+    el("button", { class: "icon-only", type: "button", title: "Close search", "aria-label": "Close search", onclick: () => closeSearch() }, svg("close", 16)));
+  const searchLink = el("button", { class: "link add-analysis", type: "button", title: "Search this note", "aria-label": "Search this note", "aria-expanded": "false",
+    onclick: () => (ed.search.active() ? closeSearch() : openSearch()) },
+    el("span", { class: "with-icon" }, svg("search", 16), el("span", { class: "wide-only" }, "Search")));
+  const showFound = (found, at) => {
+    searchCount.textContent = !searchInput.value.trim() ? (ed.search.structured() ? "Tap a chapter, or type" : "")
+      : !found ? "Not found" : at ? `${at} of ${found}` : `${found} found`;
+  };
+  // Anything pressed outside the note and the search closes it.
+  const outsideSearch = (e) => {
+    if (!searchBar.isConnected) return document.removeEventListener("pointerdown", outsideSearch, true);
+    if (!searchBar.contains(e.target) && !body.contains(e.target) && !searchLink.contains(e.target)) closeSearch();
+  };
+  function openSearch() {
+    ed.search.open();
+    searchBar.hidden = false;
+    searchBar.style.top = `${ed.toolbar.offsetHeight + 6}px`;
+    searchLink.classList.add("on");
+    searchLink.setAttribute("aria-expanded", "true");
+    searchInput.value = "";
+    found = 0;
+    showFound(0);
+    ed.scroller().scrollTop = 0;
+    searchInput.focus();
+    document.addEventListener("pointerdown", outsideSearch, true);
+  }
+  function closeSearch() {
+    if (!ed.search.active()) return;
+    document.removeEventListener("pointerdown", outsideSearch, true);
+    searchBar.hidden = true;
+    searchLink.classList.remove("on");
+    searchLink.setAttribute("aria-expanded", "false");
+    ed.search.close();
+  }
+  note.closeSearch = closeSearch;
+  let found = 0;
+  searchInput.addEventListener("input", () => { found = ed.search.query(searchInput.value); showFound(found); });
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); closeSearch(); }
+    // Enter goes through what was found, one place at a time.
+    else if (e.key === "Enter") { e.preventDefault(); if (found) showFound(found, ed.search.step(e.shiftKey)); }
+  });
+
+  // A way to the end of a long note: an arrow that shows over the note while it is being scrolled, and goes again.
+  const toEnd = el("button", { class: "jump-end", type: "button", title: "Go to the end", "aria-label": "Go to the end of the note", tabindex: "-1" }, svg("down", 20));
+  const foot = el("div", { class: "toolbar note-foot" });
+  let toEndTimer = null;
+  let toEndBox = null;
+  const hideToEnd = () => toEnd.classList.remove("show");
+  const onNoteScroll = (e) => {
+    if (!toEnd.isConnected) return document.removeEventListener("scroll", onNoteScroll, true);
+    const box = e.target === document ? document.scrollingElement : e.target;
+    if (!(box instanceof Element) || !box.contains(body)) return;
+    clearTimeout(toEndTimer);
+    if (box.scrollHeight - box.scrollTop - box.clientHeight < 120) return hideToEnd();
+    // Kept above the Dictate bar, and above a phone's keyboard.
+    const frame = box.getBoundingClientRect();
+    const seen = window.visualViewport;
+    const floor = Math.min(frame.bottom, foot.getBoundingClientRect().top, seen ? seen.offsetTop + seen.height : innerHeight);
+    toEnd.style.top = `${floor - 54}px`;
+    toEnd.style.left = `${Math.min(frame.right, innerWidth) - 60}px`;
+    toEndBox = box;
+    toEnd.classList.add("show");
+    toEndTimer = setTimeout(hideToEnd, 1600);
+  };
+  toEnd.addEventListener("mousedown", (e) => e.preventDefault());
+  toEnd.addEventListener("pointerenter", () => clearTimeout(toEndTimer));
+  toEnd.addEventListener("pointerleave", () => { clearTimeout(toEndTimer); toEndTimer = setTimeout(hideToEnd, 1600); });
+  toEnd.addEventListener("click", () => toEndBox?.scrollTo({ top: toEndBox.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }));
+
   // "Analysis templates", "Versions" and "Translate" sit under the title from the start: greyed out
   // until the note has something in it and is saved, then the real ones take their place.
   // On a phone it gives the note's version number instead, "V3", so the line fits.
@@ -774,19 +854,20 @@ function renderNote(data, dictate) {
     if (stackFor && stackFor === note.id) return;
     if (note.id && note.body.trim()) {
       stackFor = note.id;
-      stackSlot.replaceChildren(analysisStack("note", note.id, { speakers: ["Me"], lang: noteLanguage, go: (source) => ed.select(source.text),
-        links: [versionsLink()], translations: translationStack("note", note.id, note.languages) }));
+      stackSlot.replaceChildren(analysisStack("note", note.id, { speakers: ["Me"], lang: noteLanguage, go: (source) => { closeSearch(); ed.select(source.text); },
+        lead: [searchLink], links: [versionsLink()], translations: translationStack("note", note.id, note.languages) }));
       note.showVersion();
     } else if (!stackSlot.firstChild) {
       const off = (name, text) => el("button", { class: "link add-analysis", type: "button", disabled: true, title: "Write something in the note first" },
         el("span", { class: "with-icon" }, svg(name, 16), text));
       stackSlot.replaceChildren(el("section", { class: "analyses", "aria-label": "Analyses and translations" },
-        el("div", { class: "analysis-add" }, off("sparkle", el("span", {}, "Analysis", el("span", { class: "wide-only" }, " templates"))), el("span", { class: "grow" }),
+        el("div", { class: "analysis-add" }, searchLink, off("sparkle", el("span", {}, "Analysis", el("span", { class: "wide-only" }, " templates"))), el("span", { class: "grow" }),
           off("history", el("span", { class: "wide-only" }, "Versions")), off("globe", "Translate"))));
     }
   };
   // Puts a text the app made in the editor: an assistant's rewrite, or an earlier version brought back.
   note.apply = (fresh) => {
+    closeSearch();
     clearTimeout(noteTimer);
     title.value = fresh.title;
     ed.setFrom(fresh.doc ? { doc: fresh.doc } : fresh.format === "md" ? { markdown: fresh.body } : { plain: fresh.body });
@@ -815,7 +896,7 @@ function renderNote(data, dictate) {
   const chat = isDesktop() ? noteChat(status) : null;
   title.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); body.focus(); } });
 
-  const talk = el("button", { class: "talk", id: "talk", onclick: () => startDictation() }, svg("mic", 18), "Dictate");
+  const talk = el("button", { class: "talk", id: "talk", onclick: () => { closeSearch(); startDictation(); } }, svg("mic", 18), "Dictate");
   // Pressing Dictate leaves the cursor where it was, so the words can go there.
   talk.addEventListener("mousedown", (e) => e.preventDefault());
   const live = el("div", { class: "dictating", id: "dictating", hidden: true, "aria-live": "polite" });
@@ -831,6 +912,21 @@ function renderNote(data, dictate) {
     if (!note.id) throw new Error("Write something in the note first.");
     return invoke("export_note", { id: note.id, format });
   });
+  // On a phone, Export, Archive and Delete sit behind one "more" button, so the top bar keeps to one line.
+  const moreButton = el("button", { class: "icon-only top-more-button", type: "button", title: "More", "aria-label": "More actions", "aria-haspopup": "menu", "aria-expanded": "false" }, svg("more", 18));
+  const moreItems = el("span", { class: "top-more-items" }, exporter, archive, remove);
+  const more = el("span", { class: "top-more" }, moreButton, moreItems);
+  const closeMore = () => { more.classList.remove("open"); moreButton.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outsideMore, true); };
+  const outsideMore = (e) => { if (!more.contains(e.target)) closeMore(); };
+  moreButton.addEventListener("click", () => {
+    if (more.classList.contains("open")) return closeMore();
+    more.classList.add("open");
+    moreButton.setAttribute("aria-expanded", "true");
+    document.addEventListener("click", outsideMore, true);
+  });
+  // Choosing a kind of export is the end of it; Delete stays, to be pressed again.
+  moreItems.addEventListener("click", (e) => { if (e.target.closest(".export-menu .menu")) closeMore(); });
+  foot.append(el("span", { class: "grow" }), talk, live);
   // On a computer the chat runs the full height of the page, and the top bar and the note sit beside it.
   main.replaceChildren(el("div", { class: "note-split" }, el("div", { class: "note-main" },
     el("div", { class: "topbar" }, picker, languagePicker(note.languages, async (list) => {
@@ -855,20 +951,28 @@ function renderNote(data, dictate) {
       el("span", { class: "top-actions" },
         // The selection when there is one, else the whole note.
         readAloudButton(() => { const sel = getSelection().toString().trim(); return `${HEADING}${title.value}\n${sel || ed.text()}`; }, "Read the note aloud", { lang: noteLanguage }),
-        exporter, archive, remove)),
+        more)),
     exporter.status, langNotice,
     // The note scrolls under the top bar; the chat folds to a thin bar on the right.
     el("div", { class: "note-col" },
       ed.toolbar,
-      el("div", { class: "note" }, title, stackSlot, chip, editorHolder),
-      el("div", { class: "toolbar note-foot" }, el("span", { class: "grow" }), talk, live))),
+      el("div", { class: "note" }, title, stackSlot, searchBar, chip, editorHolder, toEnd),
+      foot)),
     chat?.panel));
   note.syncStack();
   chat?.sync();
   setLanguage([title, body], noteLanguage());
-  // The cursor always starts in the body; a new note starts dictating straight away unless Settings says not to.
-  ed.focusEnd();
-  if (dictate ?? (!data.id && !prefs.dictate_manually)) startDictation();
+  // A new note starts dictating straight away unless Settings says not to. A note opened to read starts at
+  // its top, with the cursor at its end for what is written or dictated next; on a phone the keyboard waits
+  // for a tap.
+  const dictating = dictate ?? (!data.id && !prefs.dictate_manually);
+  if (!data.id || dictating) ed.focusEnd();
+  else {
+    ed.cursorEnd(!isPhone());
+    ed.scroller().scrollTop = 0;
+  }
+  document.addEventListener("scroll", onNoteScroll, true);
+  if (dictating) startDictation();
 }
 
 /// What save_note is given: the note's Markdown, and the editor's document with it.
