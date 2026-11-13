@@ -24,14 +24,14 @@ const jobKey = (j) => `${j.kind}/${j.id}/${j.template}`;
 
 listen("analysis-queue", () => refreshAnalyses());
 listen("analysing", (e) => {
-  if (e.payload.template === "chat") return; // A note's chat, which shows its own progress.
+  if (e.payload.template === "chat" || e.payload.template.startsWith("label:")) return; // A note's chat and an action item's label show their own progress.
   const step = e.payload.step === "Analysing" || !e.payload.step ? "Reading" : e.payload.step;
   analysisProgress.set(jobKey(e.payload), e.payload.parts > 1 ? `${step}: part ${e.payload.part} of ${e.payload.parts}…` : `${step}…`);
   refreshAnalyses();
   if (typeof refreshTranslation === "function") refreshTranslation(e.payload);
 });
 listen("analysed", (e) => {
-  if (e.payload.template === "chat") return;
+  if (e.payload.template === "chat" || e.payload.template.startsWith("label:")) return;
   analysisProgress.delete(jobKey(e.payload));
   if (typeof refreshTranslation === "function") refreshTranslation(e.payload, true);
   if (e.payload.template.startsWith("translate:")) return;

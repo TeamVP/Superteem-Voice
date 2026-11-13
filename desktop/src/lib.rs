@@ -1127,6 +1127,19 @@ fn edit_marker(
     })
 }
 
+/// Has the language model write a short label for an action item with no note, from what was said around
+/// `at_s`. It arrives with the "analysed" event.
+#[tauri::command]
+fn label_action_item<R: Runtime>(app: AppHandle<R>, id: String, at_s: f64) -> Result<(), String> {
+    library::session_dir(&id)?;
+    let p = prefs::load();
+    if p.llm_server.trim().is_empty() && llm::installed().is_empty() {
+        return Err("Suggesting a label needs a language model. Get one in Settings › Analysis.".into());
+    }
+    enqueue_analysis(&app, Job { kind: "meeting".into(), id, template: format!("{LABEL}{at_s}") });
+    Ok(())
+}
+
 /// Puts a doubled-up line back in the script, when it was something said after all.
 #[tauri::command]
 fn keep_segment(state: State<AppState>, id: String, segment: usize) -> Result<(), String> {
@@ -1543,6 +1556,48 @@ fn open_folder(id: Option<String>) -> Result<(), String> {
 
 /// A job whose template is this and a language code translates the item into that language.
 const TRANSLATE: &str = "translate:";
+/// A job that writes a short label for an action item with no note: "label:" and when it was marked.
+const LABEL: &str = "label:";
+
+/// A few words for an action item, from what was said around when it was marked.
+fn action_label(model: &mut dyn stv_core::analysis::Model, segments: &[Segment], at_s: f64) -> Result<String, String> {
+    let clock = |t: f64| format!("{:02}:{:02}", t.max(0.0) as u64 / 60, t.max(0.0) as u64 % 60);
+    let said: Vec<String> = segments
+        .iter()
+        .filter(|s| s.echo_of.is_none() && !s.text.trim().is_empty() && s.end_s >= at_s - 60.0 && s.start_s <= at_s + 30.0)
+        .map(|s| format!("[{}] {}", clock(s.start_s), s.text.trim()))
+        .collect();
+    if said.is_empty() {
+        return Err("Nothing was said around this action item to write a label from.".into());
+    }
+    let system = "You label action items from meetings. Someone marked an action item at a moment in a meeting. \
+        From the transcript around that moment, write what needs doing as a very short label: at most eight words, \
+        starting with a verb, with no full stop and no quotation marks. Use only what the transcript says, in its language. \
+        The words \"action item\" may be a spoken command to mark it: they are not the action. \
+        Answer as JSON: {\"label\": \"...\"}.";
+    let user = format!("The action item was marked at {}.\n\nTranscript:\n{}", clock(at_s), said.join("\n"));
+    let grammar = r#"root ::= "{" ws "\"label\"" ws ":" ws string ws "}"
+ws ::= [ \t\n]{0,8}
+string ::= "\"" ( [^"\\\x00-\x1f] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4}) )* "\""
+"#;
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": { "label": { "type": "string" } },
+        "required": ["label"],
+        "additionalProperties": false,
+    });
+    let answer = model.complete(system, &user, grammar, &schema, 80)?;
+    let json = answer.find('{').zip(answer.rfind('}')).and_then(|(a, b)| answer.get(a..=b)).unwrap_or("");
+    let label = serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|v| v["label"].as_str().map(|l| l.split_whitespace().collect::<Vec<_>>().join(" ")))
+        .unwrap_or_default();
+    let label = label.trim_matches(|c: char| c == '"' || c == '“' || c == '”' || c == '.' || c.is_whitespace()).to_string();
+    if label.is_empty() {
+        return Err("The model gave no label. Try again, or type one.".into());
+    }
+    Ok(label)
+}
 
 /// One analysis or translation waiting to run, or running.
 #[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
@@ -1668,6 +1723,26 @@ fn enqueue_analysis<R: Runtime>(app: &AppHandle<R>, job: Job) {
                     report("Thinking", 1, 1);
                     let id = job.id.clone();
                     return chat::answer(&job.id, model.as_mut(), &mut |partial| drop(app.emit("chat-partial", ChatPartial { id: id.clone(), partial })));
+                }
+                if let Some(at) = job.template.strip_prefix(LABEL) {
+                    report("Writing", 1, 1);
+                    let at_s: f64 = at.parse().map_err(|_| "That action item no longer exists.".to_string())?;
+                    let segments = library::load_segments(&library::session_dir(&job.id)?);
+                    let label = action_label(model.as_mut(), &segments, at_s)?;
+                    return edit_session(&state, &job.id, |meta, _| {
+                        let saved = meta.markers.iter_mut().find(|m| {
+                            !m.removed && (m.kind == "action" || (m.kind.is_empty() && m.text == "Action item")) && (m.at_s - at_s).abs() < 0.05
+                        });
+                        match saved {
+                            Some(m) => m.text = label,
+                            // Heard in the recording rather than marked: saved as a marker of its own.
+                            None => {
+                                meta.markers.push(library::Marker { at_s, text: label, kind: "action".into(), removed: false });
+                                meta.markers.sort_by(|a, b| a.at_s.total_cmp(&b.at_s));
+                            }
+                        }
+                        Ok(())
+                    });
                 }
                 if let Some(language) = job.template.strip_prefix(TRANSLATE) {
                     translations::update(&item, language, model.as_mut(), &info.model, |k, n| report("Translating", k, n))?;
@@ -2731,6 +2806,7 @@ pub fn run() {
             open_models_folder,
             save_markers,
             edit_marker,
+            label_action_item,
             keep_segment,
             export_session,
             export_note,

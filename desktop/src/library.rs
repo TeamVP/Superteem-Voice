@@ -176,7 +176,7 @@ pub struct Marker {
     pub at_s: f64,
     #[serde(default)]
     pub text: String,
-    /// "action" for an action item, written up from what was said there; empty for a bookmark.
+    /// "action" for an action item; empty for a bookmark.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub kind: String,
     /// Deleted by the person. Kept so the same bookmark heard in the recording doesn't come back.

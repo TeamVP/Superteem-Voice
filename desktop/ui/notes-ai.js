@@ -46,6 +46,14 @@ try {
   if (saved) setChatWidth(saved, false);
 } catch {}
 
+/// Whether the chat floats over the note, as a round button that opens it full size: on a phone, and in a
+/// window too narrow to have it beside the note.
+const narrowChat = matchMedia("(max-width: 720px)");
+const floatingChat = () => !isDesktop() || narrowChat.matches;
+narrowChat.addEventListener("change", () => {
+  if (document.body.classList.contains("note-chat-page")) document.body.classList.toggle("note-chat-float", floatingChat());
+});
+
 /// The chat beside a note: a thin bar down the right side that opens into the panel. The bar shows when
 /// there's an answer not seen yet, or one being written. `status` is the note's "Saved" line.
 function noteChat(status) {
@@ -59,11 +67,13 @@ function noteChat(status) {
   const input = el("textarea", { class: "chat-input", rows: "1", placeholder: "Ask about this note, or ask for a rewrite", "aria-label": "Message" });
   const send = el("button", { class: "primary icon-only chat-send", type: "submit", title: "Send (Enter)", "aria-label": "Send" }, svg("send", 16));
   const form = el("form", { class: "chat-form" }, input, send);
-  const close = el("button", { class: "icon-only", type: "button", title: "Collapse the chat (Esc)", "aria-label": "Collapse the chat" }, svg("chevron", 16));
+  const close = el("button", { class: "icon-only chat-collapse", type: "button", title: "Collapse the chat (Esc)", "aria-label": "Collapse the chat" }, svg("chevron", 16));
+  // On a phone, or in a narrow window, the chat covers the note: this goes back to it.
+  const back = el("button", { class: "pill with-icon chat-back", type: "button", title: "Back to the note", "aria-label": "Back to the note" }, svg("chevron", 16), "Note");
   const edge = el("div", { class: "chat-splitter", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the chat", tabindex: "0",
     title: "Drag to resize. Double-click to reset." });
   const panel = el("aside", { class: "note-chat", "aria-label": "Chat about this note", hidden: true }, edge,
-    el("div", { class: "chat-head" }, el("strong", {}, "Chat"), el("span", { class: "hint" }, "On this device"), el("span", { class: "grow" }), close),
+    el("div", { class: "chat-head" }, back, el("strong", {}, "Chat"), el("span", { class: "hint" }, "On this device"), el("span", { class: "grow" }), close),
     log, form);
   const side = el("div", { class: "chat-side" }, rail, panel);
 
@@ -101,10 +111,12 @@ function noteChat(status) {
     rail.hidden = open;
     document.body.classList.toggle("note-chat-open", open);
     if (remember) try { localStorage.setItem("note-chat", open ? "1" : ""); } catch {}
-    if (open) { atEnd = true; load(); if (remember) input.focus(); }
+    // On a phone the keyboard waits for a tap, so the conversation can be read first.
+    if (open) { atEnd = true; load(); if (remember && !isPhone()) input.focus(); }
     else { markRail(); if (remember) opener.focus(); }
   };
   close.addEventListener("click", (e) => { e.stopPropagation(); setOpen(false); });
+  back.addEventListener("click", (e) => { e.stopPropagation(); setOpen(false); });
 
   /// How many messages were on screen when the chat was last open, so the bar knows what's new.
   const seenKey = () => `chat-seen:${mine.id}`;
@@ -232,7 +244,7 @@ function noteChat(status) {
     const rows = [];
     if (!chat.ready) {
       rows.push(el("div", { class: "chat-empty" },
-        el("p", {}, "Chat runs on the same on-device model as analysis templates. Nothing leaves this computer."),
+        el("p", {}, `Chat runs on the same on-device model as analysis templates. Nothing leaves this ${isPhone() ? "phone" : "computer"}.`),
         el("button", { class: "primary pill", type: "button", onclick: async () => {
           const id = await mine.save().catch(() => null);
           analysisOrigin = id ? { kind: "note", id } : null;
@@ -265,14 +277,17 @@ function noteChat(status) {
     send.disabled = !chat.ready || chat.running;
   };
   chat.draw = draw;
-  noteChatNow = { draw, id: () => mine.id };
+  noteChatNow = { draw, id: () => mine.id, close: () => setOpen(false) };
 
   /// Opens the panel if it was left open, else reads the chat so the bar can show a new answer; called once
   /// the page is in place.
   const sync = () => {
-    document.body.classList.add("note-chat-page");
+    // A phone keeps its own page layout: there the chat is a floating button, and covers the note when open.
+    if (isDesktop()) document.body.classList.add("note-chat-page");
+    const float = floatingChat();
+    document.body.classList.toggle("note-chat-float", float);
     let open = false;
-    try { open = localStorage.getItem("note-chat") === "1"; } catch {}
+    try { open = !float && localStorage.getItem("note-chat") === "1"; } catch {}
     setOpen(open, false);
     if (!open) load();
   };

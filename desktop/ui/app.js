@@ -317,7 +317,7 @@ function leave() {
   stopPlayback();
   clearInterval(pollTimer);
   flushNote();
-  document.body.classList.remove("note-chat-open", "note-chat-page");
+  document.body.classList.remove("note-chat-open", "note-chat-page", "note-chat-float");
 }
 
 // ---------- Theme: follows Windows by default; a pick is remembered on this device ----------
@@ -578,6 +578,11 @@ document.getElementById("back").addEventListener("click", () => {
 window.addEventListener("popstate", () => {
   if (!matchMedia("(max-width: 720px)").matches || document.body.classList.contains("show-list")
     || document.body.classList.contains("setup")) return;
+  // Back from a note's chat, when it covers the note, goes to the note.
+  if (view.kind === "note" && document.body.classList.contains("note-chat-float") && document.body.classList.contains("note-chat-open")) {
+    history.pushState({ page: true }, "");
+    return noteChatNow?.close();
+  }
   // Back while dictating stays on the note and asks first, as leaving by the sidebar does.
   if (dictation && view.kind === "note") {
     history.pushState({ page: true }, "");
@@ -925,7 +930,7 @@ function renderNote(data, dictate) {
     note.syncStack();
     return note.id;
   };
-  const chat = isDesktop() ? noteChat(status) : null;
+  const chat = noteChat(status);
   title.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); body.focus(); } });
 
   const talk = el("button", { class: "talk", id: "talk", onclick: () => { closeSearch(); startDictation(); } }, svg("mic", 18), "Dictate");
@@ -1594,7 +1599,7 @@ function nowInRecording() {
   return recording ? (Date.now() - recording.started) / 1000 : 0;
 }
 
-/// `kind` is "action" for an action item; a bookmark has none. The item itself is taken from the transcript later.
+/// `kind` is "action" for an action item; a bookmark has none.
 function addMarker(text, kind = "") {
   if (!recording) return false;
   recording.markers.push({ at_s: Math.round(nowInRecording() * 10) / 10, text, ...(kind ? { kind } : {}) });
@@ -1677,7 +1682,7 @@ function renderRecording(status) {
   pinned.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); mark(e.ctrlKey ? "action" : ""); } });
   const bookmark = el("button", { class: "mark-btn bookmark", type: "button", "aria-label": "Bookmark this moment", title: "Bookmark this moment (B, or Enter in the note)", onclick: () => mark("") },
     svg("bookmark", 18), el("span", { class: "label" }, "Bookmark"), el("kbd", {}, "B"));
-  const actionItem = el("button", { class: "mark-btn action-item", type: "button", "aria-label": "Add an action item", title: "Add an action item (A, or Ctrl + Enter in the note). It's written up from what was said here.", onclick: () => mark("action") },
+  const actionItem = el("button", { class: "mark-btn action-item", type: "button", "aria-label": "Add an action item", title: "Add an action item (A, or Ctrl + Enter in the note). Type what needs doing, or add it afterwards.", onclick: () => mark("action") },
     svg("action", 18), el("span", { class: "label" }, "Action item"), el("kbd", {}, "A"));
   const hint = meetingListening()
     ? "Say “Bookmark that”, “Action item” or “Hey Superteem, stop recording”"
@@ -2188,17 +2193,40 @@ function renderSession(session, processingError, suggestion) {
     if (await save("edit_marker", { index: m.index ?? null, atS: m.at_s, kind: m.kind ?? "", text, remove })) reload();
   };
   const markerLine = (m) => {
-    const note = markerNote(m, scriptLines);
-    const typed = m.text && m.text !== "Action item" ? m.text : "";
-    const body = el("div", { class: "marker-body", role: "button", tabindex: "0", title: `${markerLabel(m)}: click to change the note or delete it` },
-      markerIcon(m), note ? el("span", {}, note) : el("span", { class: "hint" }, markerLabel(m)),
+    const note = markerNote(m);
+    const typed = note;
+    const body = el("div", { class: "marker-body", role: "button", tabindex: "0", title: `${markerLabel(m)}: click to ${note ? "change the note" : "type a note"} or delete it` },
+      markerIcon(m), note ? el("span", {}, note) : el("span", { class: "hint" }, isAction(m) ? "Action item: tap to say what needs doing" : markerLabel(m)),
       m.heard ? el("span", { class: "edited", title: "Heard in the recording when it was processed" }, "heard") : null);
+    // An action item with no note can have a short one suggested, from what was said around it.
+    let suggest = null;
+    if (isAction(m) && !note) {
+      const key = `${id}/${m.at_s}`;
+      const busy = labelling.has(key);
+      suggest = el("button", { class: "pill with-icon marker-suggest", type: "button", disabled: busy,
+        title: "Have the language model write a short label from what was said here", "aria-label": "Suggest a label for this action item" },
+        busy ? el("span", { class: "spinner" }) : svg("sparkle", 14), busy ? "Writing…" : "Suggest");
+      suggest.addEventListener("click", async () => {
+        labelling.add(key);
+        suggest.disabled = true;
+        suggest.replaceChildren(el("span", { class: "spinner" }), "Writing…");
+        try {
+          await invoke("label_action_item", { id, atS: m.at_s });
+        } catch (e) {
+          labelling.delete(key);
+          suggest.disabled = false;
+          suggest.replaceChildren(svg("sparkle", 14), "Suggest");
+          showError(page, e);
+        }
+      });
+    }
     const line = el("div", { class: `line marker-line${isAction(m) ? " action" : ""}` },
-      el("button", { class: "time mono", title: "Play from here", onclick: () => playFrom(m.at_s) }, clock(m.at_s)), body);
+      el("button", { class: "time mono", title: "Play from here", onclick: () => playFrom(m.at_s) }, clock(m.at_s)),
+      el("div", { class: "marker-row" }, body, suggest));
     const edit = () => {
       if (line.classList.contains("editing")) return;
       line.classList.add("editing");
-      const input = el("input", { value: typed, placeholder: isAction(m) ? note || "What needs doing" : "Add a note to this bookmark",
+      const input = el("input", { value: typed, placeholder: isAction(m) ? "What needs doing" : "Add a note to this bookmark",
         "aria-label": `Note for the ${markerLabel(m).toLowerCase()} at ${clock(m.at_s)}` });
       let closed = false;
       const cancel = () => { closed = true; line.classList.remove("editing"); editor.replaceWith(body); };
@@ -2224,14 +2252,6 @@ function renderSession(session, processingError, suggestion) {
     return line;
   };
 
-  // Action items, written up from what was said where each was marked.
-  const actions = allMarkers.filter(isAction);
-  if (actions.length) {
-    page.append(el("h2", {}, `Action item${actions.length > 1 ? "s" : ""}`), el("ul", { class: "action-items" },
-      actions.map((m) => el("li", {},
-        el("button", { class: "time mono", title: "Play from here", onclick: () => playFrom(m.at_s) }, clock(m.at_s)),
-        el("span", {}, markerNote(m, scriptLines) || el("span", { class: "hint" }, "Nothing was said here to write up."))))));
-  }
   const lineById = new Map(session.segments.map((s) => [s.id, s]));
   for (const seg of showDoubles ? session.segments : scriptLines) {
     while (markers.length && markers[0].at_s <= seg.start_s) {
@@ -2457,7 +2477,7 @@ function renderSession(session, processingError, suggestion) {
         `${session.speakers.find((sp) => sp.key === s.speaker)?.name ?? ""} · ${clock(s.start_s)}`)));
       const bar = el("span", { class: "bar" }, greyed, used,
         allMarkers.map((m) => {
-          const note = markerNote(m, scriptLines);
+          const note = markerNote(m);
           const tick = el("i", { class: isAction(m) ? "action" : "", style: `left:${(100 * m.at_s) / duration}%`, title: `${markerLabel(m)} · ${clock(m.at_s)}${note ? ` · ${note}` : ""} · click to change or delete` });
           tick.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -2496,9 +2516,21 @@ function renderSession(session, processingError, suggestion) {
       }
       for (const { seg, line } of lineEls) line.classList.toggle("playing", playing && t >= seg.start_s && t < seg.end_s);
       applyMix(t);
+      // Playing from a line of the transcript opens the tracks too.
+      if (playing && tracksOpenFor !== id) setTracksOpen(true);
     };
+    // On a phone the tracks are a play button and the recording's length until something is played.
+    const setTracksOpen = (open) => {
+      tracksOpenFor = open ? id : null;
+      tracks.classList.toggle("open", open);
+      if (open) requestAnimationFrame(() => player && onTick(player.t, player.playing));
+    };
+    tracks.classList.toggle("open", tracksOpenFor === id);
+    const mini = el("span", { class: "tracks-mini" }, el("strong", {}, "Recording"), el("span", { class: "mono hint" }, clock(duration)));
+    const fold = el("button", { class: "icon-only tracks-fold", type: "button", title: "Hide the tracks", "aria-label": "Hide the tracks",
+      onclick: () => { player?.pause(); setTracksOpen(false); } }, svg("down", 16));
     player = makePlayer(session, duration, onTick);
-    playButton.addEventListener("click", () => player?.toggle());
+    playButton.addEventListener("click", () => { if (tracksOpenFor !== id) setTracksOpen(true); player?.toggle(); });
     // Clip starts, bookmarks and action items, for jumping to the previous or next in the timeline.
     // Every clip the transcript mix plays, on every track (each clip of a stitched line too), and the marks.
     const starts = [...scriptLines.flatMap((s) => clipSpans(s).map(([a]) => a)), ...allMarkers.map((m) => m.at_s)]
@@ -2517,11 +2549,11 @@ function renderSession(session, processingError, suggestion) {
     tracks.append(lanes, el("div", { class: "transport" },
       el("button", { class: "pill", "aria-label": "Previous clip or mark", title: "Start of the previous clip, bookmark or action item (←)", onclick: prevClip }, svg("skip-back", 16)),
       el("button", { class: "pill", "aria-label": "Back 5 seconds", title: "Back 5 seconds (Alt + ←)", onclick: () => player?.seek(player.t - 5) }, "−5"),
-      playButton,
+      playButton, mini,
       el("button", { class: "pill", "aria-label": "Forward 5 seconds", title: "Forward 5 seconds (Alt + →)", onclick: () => player?.seek(player.t + 5) }, "+5"),
       el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item (→)", onclick: nextClip }, svg("skip-forward", 16)),
       timeLabel, el("span", { class: "grow" }), mixLabel,
-      meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id, meta.created), "aria-label": "Import a recording" }, svg("export", 14), el("span", { class: "wide-only" }, "Import"))));
+      meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id, meta.created), "aria-label": "Import a recording" }, svg("export", 14), el("span", { class: "wide-only" }, "Import")), fold));
     player.prevClip = prevClip;
     player.nextClip = nextClip;
     requestAnimationFrame(() => player?.seek(keepTime));
@@ -2764,28 +2796,27 @@ function sessionMarkers(saved, phrases) {
   return [...all.filter((m) => !m.removed), ...heard].sort((a, b) => a.at_s - b.at_s);
 }
 
-/// What a marker says: the note typed with it, or for an action item, what was said where it was marked.
-function markerNote(m, segments) {
-  if (m.text && m.text !== "Action item") return m.text;
-  return isAction(m) ? actionItemText(m, segments) : "";
+/// What a marker says: the note typed with it, or suggested for it. An action item has none until then.
+function markerNote(m) {
+  return m.text && m.text !== "Action item" ? m.text : "";
 }
 
-/// The action an action item was about: the words after "action item" when it was said, otherwise the line
-/// being spoken when it was marked, or the one just before.
-function actionItemText(m, segments) {
-  const lines = segments.filter((s) => s.text?.trim()).sort((a, b) => a.start_s - b.start_s);
-  let i = lines.findIndex((s) => s.start_s <= m.at_s + 1 && s.end_s >= m.at_s - 1);
-  if (i < 0) i = lines.findLastIndex((s) => s.end_s < m.at_s && m.at_s - s.end_s < 15);
-  if (i < 0) return "";
-  let text = lines[i].text.trim();
-  const said = /\baction[\s-]*items?\b[\s,.:;-]*/i.exec(text);
-  if (said) {
-    text = text.slice(said.index + said[0].length).trim();
-    // "Action item." on its own line: the action is in the next one.
-    if (text.split(/\s+/).filter(Boolean).length < 3 && lines[i + 1]) text = `${text} ${lines[i + 1].text.trim()}`.trim();
-  }
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
+/// Action items having a label suggested, as "meeting id/seconds".
+const labelling = new Set();
+/// The meeting page's tracks are folded to a play button on a phone until something is played: the meeting they're open for.
+let tracksOpenFor = null;
+
+// A suggested label for an action item has been written, or couldn't be.
+listen("analysed", async (e) => {
+  const { id, template, error } = e.payload;
+  if (!template.startsWith("label:")) return;
+  labelling.delete(`${id}/${Number(template.slice(6))}`);
+  if (view.kind !== "session" || view.id !== id) return;
+  const fresh = await invoke("get_session", { id }).catch(() => null);
+  if (!fresh || view.kind !== "session" || view.id !== id) return;
+  renderSession(fresh, null);
+  if (error && error !== "Cancelled.") showError(main.querySelector(".page"), `Couldn't suggest a label: ${error}`);
+});
 
 /// The keyboard shortcuts, as shown on the Shortcuts page. Each is [keys, what it does].
 const SHORTCUTS = [
@@ -4980,7 +5011,7 @@ async function doCommand(id) {
     return refreshAgentControls();
   }
   if (id === "action") {
-    say(addMarker("", "action") ? `Action item marked at ${clock(nowInRecording())}. It's written up with the transcript.` : "Action items are marked in meetings. Nothing is recording.");
+    say(addMarker("", "action") ? `Action item marked at ${clock(nowInRecording())}.` : "Action items are marked in meetings. Nothing is recording.");
     if (recording) stepBackSoon();
     return refreshAgentControls();
   }
