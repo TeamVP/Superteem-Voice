@@ -95,29 +95,47 @@ fn carry_over_fixes(old: &[Segment], new: &mut [Segment]) {
     }
 }
 
-/// Names speakers the voice prints recognise. Earlier automatic names are cleared first, so a print made
-/// since the last run can take over; names and links the person chose are kept.
+/// Names speakers the voice prints recognise, and lists who the others might be when it isn't sure.
+/// Earlier automatic names are cleared first, so a print made since the last run can take over; names and
+/// links the person chose are kept. A track only called after its app, as "Microsoft Teams", is matched
+/// like any other: the name says what recorded the voice, not who spoke.
 fn name_from_prints(meta: &mut Meta, segments: &[Segment], line_voices: &BTreeMap<usize, stv_core::embed::Voice>) {
+    name_with_prints(meta, segments, line_voices, &voices::list());
+}
+
+fn name_with_prints(meta: &mut Meta, segments: &[Segment], line_voices: &BTreeMap<usize, stv_core::embed::Voice>, prints: &[voices::VoicePrint]) {
     let automatic: Vec<String> = meta.prints.iter().filter(|(_, l)| l.score.is_some()).map(|(k, _)| k.clone()).collect();
     for key in automatic {
         meta.prints.remove(&key);
-        meta.names.remove(&key);
+        match meta.track_name(&key) {
+            Some(track) => meta.names.insert(key, track),
+            None => meta.names.remove(&key),
+        };
     }
-    let prints = voices::list();
-    let linked: Vec<&String> = meta.prints.values().map(|l| &l.id).collect();
-    let open: Vec<voices::VoicePrint> = prints.iter().filter(|p| !linked.contains(&&p.id)).cloned().collect();
+    meta.suggested.clear();
+    // Someone already linked by hand is not anyone else in this meeting.
+    let linked: Vec<&str> =
+        meta.prints.values().filter_map(|l| prints.iter().find(|p| p.id == l.id)).map(|p| p.person()).collect();
+    let open: Vec<voices::VoicePrint> = prints.iter().filter(|p| !linked.contains(&p.person())).cloned().collect();
     let mut keys: Vec<&String> = segments.iter().map(|s| &s.speaker).filter(|k| **k != library::UNKNOWN).collect();
     keys.sort();
     keys.dedup();
     let speakers: BTreeMap<String, stv_core::embed::Voice> = keys
         .into_iter()
-        .filter(|k| !meta.prints.contains_key(*k) && !meta.names.contains_key(*k))
+        .filter(|k| !meta.prints.contains_key(*k) && !meta.named(k))
         .filter_map(|k| voices::speaker_voice(segments, line_voices, k).map(|v| (k.clone(), v)))
         .collect();
-    for (key, (id, score)) in voices::recognise(&speakers, &open) {
-        let name = prints.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default();
-        meta.names.insert(key.clone(), name);
-        meta.prints.insert(key, PrintLink { id, score: Some(score) });
+    for (key, found) in voices::recognise(&speakers, &open) {
+        match found {
+            voices::Match::Sure(id, score) => {
+                let name = prints.iter().find(|p| p.id == id).map(|p| p.name.clone()).unwrap_or_default();
+                meta.names.insert(key.clone(), name);
+                meta.prints.insert(key, PrintLink { id, score: Some(score) });
+            }
+            voices::Match::Ask(list) => {
+                meta.suggested.insert(key, list.into_iter().map(|(id, s)| PrintLink { id, score: Some(s) }).collect());
+            }
+        }
     }
 }
 
@@ -454,6 +472,46 @@ mod tests {
     }
 
     /// Writes PCM as a journal the way live capture does, with arrival times at real-time pace.
+    /// The meeting where a call app's track was never matched, because it was already called "Microsoft
+    /// Teams". Both tracks sound most like one print, so the app asks rather than guesses.
+    #[test]
+    fn a_call_apps_track_is_matched_and_unsure_matches_are_asked_about() {
+        let voice = |x: f32, seconds: f32| stv_core::embed::Voice { mean: vec![x, 0.0], var: vec![1.0, 1.0], frames: (seconds * 100.0) as u32 };
+        let print = |id: &str, x: f32| voices::VoicePrint {
+            id: id.into(), name: id.into(), created: 0, consent_at: 0, voice: voice(x, 30.0), samples: vec![], person: String::new(), label: String::new(),
+        };
+        let mut meta = Meta {
+            inputs: vec!["Microphone (Samson C01U Pro Mic)".into(), "Sound from Microsoft Teams (ms-teams.exe)".into()],
+            ..Default::default()
+        };
+        assert_eq!(meta.track_name("input2").as_deref(), Some("Microsoft Teams"));
+        meta.names.insert("input2".into(), "Microsoft Teams".into());
+        let seg = |id: usize, speaker: &str| Segment { id, speaker: speaker.into(), stream: speaker.into(), ..Default::default() };
+        let segments = vec![seg(0, "input2"), seg(1, "input1")];
+
+        // Clearly one person: the Teams track is named after them.
+        let prints = [print("bruce", 0.0), print("fg", 3.0)];
+        let line_voices = BTreeMap::from([(0, voice(2.95, 12.0)), (1, voice(0.05, 1.0))]);
+        name_with_prints(&mut meta, &segments, &line_voices, &prints);
+        assert_eq!(meta.name("input2"), "fg");
+        assert_eq!(meta.prints["input2"].id, "fg");
+        // A few words on the microphone are asked about, however alike.
+        assert_eq!(meta.suggested["input1"].iter().map(|l| l.id.as_str()).collect::<Vec<_>>(), ["bruce"]);
+
+        // Both sound like the same print: both are asked about, and the Teams track gets its app's name back.
+        let line_voices = BTreeMap::from([(0, voice(0.1, 12.0)), (1, voice(0.05, 1.0))]);
+        name_with_prints(&mut meta, &segments, &line_voices, &prints);
+        assert_eq!(meta.name("input2"), "Microsoft Teams");
+        assert!(meta.prints.is_empty());
+        assert_eq!(meta.suggested.len(), 2);
+
+        // A name the person chose is kept and not asked about.
+        meta.names.insert("input2".into(), "Liam".into());
+        name_with_prints(&mut meta, &segments, &line_voices, &prints);
+        assert_eq!(meta.name("input2"), "Liam");
+        assert!(!meta.suggested.contains_key("input2"));
+    }
+
     fn write_journal(path: &Path, pcm: &[i16]) {
         let mut journal = JournalWriter::create(path).unwrap();
         for (i, chunk) in pcm.chunks_exact(FRAME_SAMPLES).enumerate() {
@@ -686,6 +744,7 @@ mod tests {
                 Some(t) => println!("   {:>6.2}-{:>6.2} {:<7} greyed, doubles line {t}: {}", s.start_s, s.end_s, s.stream, s.text),
             }
         }
+        println!("recognised {:?}\nasking about {:?}", meta.prints, meta.suggested);
         // STV_EXAMPLE_KEEP keeps the processed copy there, to look at in the app or a browser.
         match std::env::var("STV_EXAMPLE_KEEP") {
             Ok(keep) => {

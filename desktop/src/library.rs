@@ -156,6 +156,10 @@ pub struct Meta {
     /// Speaker key to the voice print it was recognised as or linked to.
     #[serde(default)]
     pub prints: BTreeMap<String, PrintLink>,
+    /// Speaker key to the voice prints it might be, most likely first, when recognition wasn't sure
+    /// enough to name them and asks the person instead.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub suggested: BTreeMap<String, Vec<PrintLink>>,
     /// Moments marked while recording, with any note typed or spoken there.
     #[serde(default)]
     pub markers: Vec<Marker>,
@@ -230,6 +234,17 @@ impl Meta {
     pub fn set_langs(&mut self, languages: Vec<String>) {
         self.languages = languages;
         self.language.clear();
+    }
+
+    /// The name a track has before anyone is named: an app's track is called after the app, as
+    /// "Microsoft Teams". It says what recorded the voice, not who spoke.
+    pub fn track_name(&self, speaker: &str) -> Option<String> {
+        crate::recorder::device_of(speaker, &self.inputs).and_then(|d| crate::sources::track_label(&d))
+    }
+
+    /// Named by the person, rather than only called after the track.
+    pub fn named(&self, speaker: &str) -> bool {
+        self.names.get(speaker).is_some_and(|n| Some(n) != self.track_name(speaker).as_ref())
     }
 
     pub fn name(&self, speaker: &str) -> String {

@@ -477,6 +477,9 @@ dialog.check-details .actions { display: flex; justify-content: flex-end; margin
 .print-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 10px 14px; margin: 8px 0; }
 .print-row input { flex: 1 1 160px; font-weight: 600; border: none; background: transparent; outline: none; padding: 0; }
 .print-row .detail { color: var(--muted); font-size: 13px; }
+.print-row.person-row { margin-top: 18px; }
+.print-row.print-sub { margin: 4px 0 4px 24px; padding: 6px 14px; }
+.print-row.print-sub .label { font-weight: 500; flex: 1 1 160px; }
 .script { font-size: 20px; line-height: 1.7; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin: 14px 0; white-space: pre-wrap; }
 .mic-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 6px; }
 .mic-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); cursor: pointer; }

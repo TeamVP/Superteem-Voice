@@ -30,6 +30,15 @@ const LOUDER_DB: f32 = 4.0;
 const WEARER_SHARE: f32 = 0.4;
 /// Recognised as a voice print at this similarity.
 pub const RECOGNISE: f32 = 0.6;
+/// A speaker is named without asking only with this much clear speech; less sounds too unlike itself.
+const SURE_MIN_S: f32 = 4.0;
+/// ...and only when the best person beats everyone else by this much, both the speaker's other
+/// candidates and the meeting's other speakers who sound like the same person.
+const SURE_MARGIN: f32 = 0.1;
+/// People who sound at least this alike are offered when the app has to ask.
+const SHORTLIST_MIN: f32 = 0.2;
+/// How many people are offered when asking.
+const SHORTLIST_LEN: usize = 3;
 /// "Sounds like this line" when offering to move other lines.
 pub const SIMILAR_LINE: f32 = 0.6;
 /// Enough voiced speech to start a voice print.
@@ -49,6 +58,8 @@ pub struct Sample {
     pub at: u64,
 }
 
+/// One person can have several voice prints, as they sound different on a desk microphone, a headset and
+/// through a call app. Prints of one person share `person` and `name`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoicePrint {
     pub id: String,
@@ -58,12 +69,60 @@ pub struct VoicePrint {
     pub consent_at: u64,
     pub voice: Voice,
     pub samples: Vec<Sample>,
+    /// The person it belongs to; empty in prints made before people had several, which are their own.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub person: String,
+    /// What it was recorded on, such as "Microsoft Teams", to tell one person's prints apart.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+}
+
+impl VoicePrint {
+    pub fn person(&self) -> &str {
+        if self.person.is_empty() {
+            &self.id
+        } else {
+            &self.person
+        }
+    }
+}
+
+/// The best-matching print of each person, as (print, similarity), best first.
+pub fn by_person<'a>(voice: &Voice, prints: &'a [VoicePrint]) -> Vec<(&'a VoicePrint, f32)> {
+    let mut best: Vec<(&VoicePrint, f32)> = Vec::new();
+    for p in prints {
+        let s = embed::similarity(voice, &p.voice);
+        match best.iter_mut().find(|(b, _)| b.person() == p.person()) {
+            Some(b) if b.1 >= s => {}
+            Some(b) => *b = (p, s),
+            None => best.push((p, s)),
+        }
+    }
+    best.sort_by(|a, b| b.1.total_cmp(&a.1));
+    best
 }
 
 static LOCK: Mutex<()> = Mutex::new(());
 
 pub fn list() -> Vec<VoicePrint> {
-    library::read_json(&library::data_dir().join(PRINTS)).unwrap_or_default()
+    let mut prints: Vec<VoicePrint> = library::read_json(&library::data_dir().join(PRINTS)).unwrap_or_default();
+    group_by_name(&mut prints);
+    prints
+}
+
+/// Prints given the same name, and not yet put with anyone, are one person: someone saved from a
+/// meeting under the name of a print they already had is the same person heard another way.
+fn group_by_name(prints: &mut [VoicePrint]) {
+    let key = |p: &VoicePrint| p.name.trim().to_lowercase();
+    for i in 0..prints.len() {
+        if prints[i].person.is_empty() {
+            let first = prints.iter().filter(|p| p.person.is_empty() && key(p) == key(&prints[i])).min_by_key(|p| (p.created, p.id.clone()));
+            let first = first.map(|p| p.id.clone()).unwrap();
+            if first != prints[i].id {
+                prints[i].person = first;
+            }
+        }
+    }
 }
 
 pub fn edit<T>(change: impl FnOnce(&mut Vec<VoicePrint>) -> Result<T, String>) -> Result<T, String> {
@@ -75,9 +134,7 @@ pub fn edit<T>(change: impl FnOnce(&mut Vec<VoicePrint>) -> Result<T, String>) -
     Ok(out)
 }
 
-/// Adds speech to a voice print, or starts a new one when `id` is None. Returns its id.
-pub fn add_sample(id: Option<&str>, name: &str, voice: Voice, source: &str) -> Result<String, String> {
-    let needed = if id.is_some() { ADD_MIN_S } else { PRINT_MIN_S };
+fn enough(voice: &Voice, needed: f32) -> Result<(), String> {
     if voice.seconds() < needed {
         return Err(format!(
             "Only {:.0} seconds of clear speech; at least {:.0} are needed. Try reading more of the script.",
@@ -85,24 +142,101 @@ pub fn add_sample(id: Option<&str>, name: &str, voice: Voice, source: &str) -> R
             needed
         ));
     }
-    let sample = Sample { source: source.into(), seconds: voice.seconds(), at: library::now() };
-    edit(|prints| match id {
-        Some(id) => {
-            let print = prints.iter_mut().find(|p| p.id == id).ok_or("That voice print no longer exists.")?;
-            print.voice = embed::merge(&print.voice, &voice);
-            print.samples.push(sample);
-            Ok(print.id.clone())
-        }
-        None => {
-            let name = name.trim();
-            if name.is_empty() {
-                return Err("Give the voice print a name.".into());
+    Ok(())
+}
+
+fn sample(voice: &Voice, source: &str) -> Sample {
+    Sample { source: source.into(), seconds: voice.seconds(), at: library::now() }
+}
+
+/// Adds speech to a voice print, or starts a new one for a new person when `id` is None. Returns its id.
+pub fn add_sample(id: Option<&str>, name: &str, voice: Voice, source: &str) -> Result<String, String> {
+    let Some(id) = id else { return start_print(name, None, "", voice, source) };
+    enough(&voice, ADD_MIN_S)?;
+    edit(|prints| {
+        let print = prints.iter_mut().find(|p| p.id == id).ok_or("That voice print no longer exists.")?;
+        print.voice = embed::merge(&print.voice, &voice);
+        print.samples.push(sample(&voice, source));
+        Ok(print.id.clone())
+    })
+}
+
+/// Starts a voice print, for a new person or, with `person` (any of their prints' person), for someone
+/// who already has one and is named after them. Returns its id.
+pub fn start_print(name: &str, person: Option<&str>, label: &str, voice: Voice, source: &str) -> Result<String, String> {
+    enough(&voice, PRINT_MIN_S)?;
+    edit(|prints| {
+        let now = library::now();
+        let (person, name) = match person {
+            Some(person) => {
+                let other = prints.iter().find(|p| p.person() == person).ok_or("That person no longer has a voice print.")?;
+                (other.person().to_string(), other.name.clone())
             }
-            let now = library::now();
-            let id = (0..).map(|n| format!("vp-{now}-{n}")).find(|id| prints.iter().all(|p| &p.id != id)).unwrap();
-            prints.push(VoicePrint { id: id.clone(), name: name.into(), created: now, consent_at: now, voice, samples: vec![sample] });
-            Ok(id)
+            None => (String::new(), name.trim().to_string()),
+        };
+        if name.is_empty() {
+            return Err("Give the voice print a name.".into());
         }
+        let id = (0..).map(|n| format!("vp-{now}-{n}")).find(|id| prints.iter().all(|p| &p.id != id)).unwrap();
+        let samples = vec![sample(&voice, source)];
+        prints.push(VoicePrint { id: id.clone(), name, created: now, consent_at: now, voice, samples, person, label: label.trim().into() });
+        Ok(id)
+    })
+}
+
+/// Teaches the person behind `print_id` how they sounded in a meeting. The speech goes into whichever of
+/// their prints it sounds most like; when it sounds unlike all of them, as through a call app or another
+/// microphone, and there is enough of it, it starts another print for them labelled `label`, so neither
+/// way of sounding blurs the other. Returns the print it went into.
+pub fn learn(print_id: &str, voice: Voice, source: &str, label: &str) -> Result<String, String> {
+    let prints = list();
+    let person = prints.iter().find(|p| p.id == print_id).ok_or("That voice print no longer exists.")?.person().to_string();
+    let theirs: Vec<VoicePrint> = prints.into_iter().filter(|p| p.person() == person).collect();
+    let (best, score) = by_person(&voice, &theirs).first().map(|(p, s)| (p.id.clone(), *s)).unwrap();
+    if score < RECOGNISE && voice.seconds() >= PRINT_MIN_S {
+        start_print("", Some(&person), label, voice, source)
+    } else {
+        add_sample(Some(&best), "", voice, source)
+    }
+}
+
+/// Renames a person: every one of their prints.
+pub fn rename_person(print_id: &str, name: &str) -> Result<(), String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("A voice print needs a name.".into());
+    }
+    edit(|prints| {
+        let person = prints.iter().find(|p| p.id == print_id).ok_or("That voice print no longer exists.")?.person().to_string();
+        for p in prints.iter_mut().filter(|p| p.person() == person) {
+            p.name = name.clone();
+        }
+        Ok(())
+    })
+}
+
+/// Two people turned out to be one: every print of the person behind `print_id` joins the person behind
+/// `into`, and takes their name.
+pub fn merge_people(print_id: &str, into: &str) -> Result<(), String> {
+    edit(|prints| {
+        let from = prints.iter().find(|p| p.id == print_id).ok_or("That voice print no longer exists.")?.person().to_string();
+        let other = prints.iter().find(|p| p.id == into).ok_or("That voice print no longer exists.")?;
+        let (person, name) = (other.person().to_string(), other.name.clone());
+        for p in prints.iter_mut().filter(|p| p.person() == from) {
+            p.person = person.clone();
+            p.name = name.clone();
+        }
+        Ok(())
+    })
+}
+
+/// Takes one print away from its person, as a person of its own with the same name.
+pub fn separate(print_id: &str) -> Result<(), String> {
+    edit(|prints| {
+        let now = library::now();
+        let fresh = (0..).map(|n| format!("person-{now}-{n}")).find(|id| prints.iter().all(|p| p.person() != id)).unwrap();
+        prints.iter_mut().find(|p| p.id == print_id).ok_or("That voice print no longer exists.")?.person = fresh;
+        Ok(())
     })
 }
 
@@ -264,12 +398,20 @@ pub fn assign(lines: &[Line], streams: usize) -> Vec<String> {
         }
     }
 
-    // Short lines join the group they sound most like, when it is close enough.
+    // Short lines join the group they sound most like, when it is close enough. With several microphones,
+    // a line one wearer's microphone gave to them never moves to another wearer, as groups from different
+    // wearers are never merged either: a few words sound too unlike themselves to overrule the microphone.
     let named: Vec<(&Group, &String)> = groups.iter().zip(&labels).filter_map(|(g, l)| l.as_ref().map(|l| (g, l))).collect();
+    let is_wearer = |label: &str| lines.iter().any(|l| l.speaker == label && label != UNKNOWN);
     for (i, line) in lines.iter().enumerate() {
         let clustered = long.binary_search(&i).is_ok();
         let Some(voice) = line.voice.as_ref().filter(|_| !clustered) else { continue };
-        let best = named.iter().map(|(g, l)| (embed::similarity(voice, &g.voice), *l)).max_by(|a, b| a.0.total_cmp(&b.0));
+        let keeps_wearer = streams > 1 && is_wearer(&line.speaker);
+        let best = named
+            .iter()
+            .filter(|(_, l)| !(keeps_wearer && **l != line.speaker && is_wearer(l)))
+            .map(|(g, l)| (embed::similarity(voice, &g.voice), *l))
+            .max_by(|a, b| a.0.total_cmp(&b.0));
         if let Some((_, label)) = best.filter(|b| b.0 >= JOIN) {
             out[i] = label.clone();
         }
@@ -286,21 +428,52 @@ pub fn mark_overlaps(segments: &mut [Segment]) {
     }
 }
 
-/// Puts names to speakers from the voice prints: each print and each speaker is used once, best matches
-/// first. Returns speaker key to (print id, similarity).
-pub fn recognise(speakers: &BTreeMap<String, Voice>, prints: &[VoicePrint]) -> BTreeMap<String, (String, f32)> {
-    let mut pairs: Vec<(f32, &String, &VoicePrint)> = speakers
-        .iter()
-        .flat_map(|(key, voice)| prints.iter().map(move |p| (embed::similarity(voice, &p.voice), key, p)))
-        .filter(|(s, _, _)| *s >= RECOGNISE)
-        .collect();
+/// What the voice prints say about one speaker.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Match {
+    /// Clearly this person: their best-matching print and the similarity.
+    Sure(String, f32),
+    /// Not sure: the people it might be, as their best print and similarity, most likely first. The
+    /// person is asked to pick.
+    Ask(Vec<(String, f32)>),
+}
+
+/// Puts names to speakers from the voice prints, a person at a time: a person sounds as alike as their
+/// best-matching print. Each person names at most one speaker, best matches first. A speaker is named
+/// only when it is clear: enough speech, alike enough, and well ahead of both the other people it might be
+/// and the meeting's other speakers who sound like the same person. Otherwise the people it might be are
+/// offered, so the person can say. Speakers no print comes near are left out.
+pub fn recognise(speakers: &BTreeMap<String, Voice>, prints: &[VoicePrint]) -> BTreeMap<String, Match> {
+    let ranked: BTreeMap<&String, Vec<(&VoicePrint, f32)>> = speakers.iter().map(|(k, v)| (k, by_person(v, prints))).collect();
+    let score = |key: &String, person: &str| ranked[key].iter().find(|(p, _)| p.person() == person).map_or(0.0, |x| x.1);
+    let mut pairs: Vec<(f32, &String, &VoicePrint)> =
+        ranked.iter().flat_map(|(k, r)| r.iter().map(move |(p, s)| (*s, *k, *p))).filter(|(s, _, _)| *s >= RECOGNISE).collect();
     pairs.sort_by(|a, b| b.0.total_cmp(&a.0));
     let mut out = BTreeMap::new();
-    let mut used = Vec::new();
-    for (score, key, print) in pairs {
-        if !out.contains_key(key) && !used.contains(&&print.id) {
-            used.push(&print.id);
-            out.insert(key.clone(), (print.id.clone(), score));
+    let mut used: Vec<&str> = Vec::new();
+    for (s, key, print) in pairs {
+        if out.contains_key(key) || used.contains(&print.person()) {
+            continue;
+        }
+        let runner_up = ranked[key].iter().filter(|(p, _)| p.person() != print.person()).map(|x| x.1).fold(0.0, f32::max);
+        let rival = speakers.keys().filter(|k| *k != key).map(|k| score(k, print.person())).fold(0.0, f32::max);
+        if speakers[key].seconds() >= SURE_MIN_S && s - runner_up >= SURE_MARGIN && s - rival >= SURE_MARGIN {
+            used.push(print.person());
+            out.insert(key.clone(), Match::Sure(print.id.clone(), s));
+        }
+    }
+    for (key, people) in &ranked {
+        if out.contains_key(*key) {
+            continue;
+        }
+        let shortlist: Vec<(String, f32)> = people
+            .iter()
+            .filter(|(p, s)| *s >= SHORTLIST_MIN && !used.contains(&p.person()))
+            .take(SHORTLIST_LEN)
+            .map(|(p, s)| (p.id.clone(), *s))
+            .collect();
+        if !shortlist.is_empty() {
+            out.insert((*key).clone(), Match::Ask(shortlist));
         }
     }
     out
@@ -354,13 +527,62 @@ mod tests {
         assert_eq!(assign(&lines, 1), ["input1", "guest1", "guest1", UNKNOWN, UNKNOWN]);
     }
 
+    fn print(id: &str, person: &str, x: f32) -> VoicePrint {
+        VoicePrint { id: id.into(), name: id.into(), created: 0, consent_at: 0, voice: voice(x, 30.0).unwrap(), samples: vec![], person: person.into(), label: String::new() }
+    }
+
+    fn speakers(list: &[(&str, f32, f32)]) -> BTreeMap<String, Voice> {
+        list.iter().map(|(k, x, s)| (k.to_string(), voice(*x, *s).unwrap())).collect()
+    }
+
     #[test]
-    fn each_print_names_one_speaker() {
-        let print = |id: &str, x: f32| VoicePrint { id: id.into(), name: id.into(), created: 0, consent_at: 0, voice: voice(x, 30.0).unwrap(), samples: vec![] };
-        let speakers = BTreeMap::from([("input1".to_string(), voice(0.0, 10.0).unwrap()), ("guest1".to_string(), voice(0.1, 10.0).unwrap())]);
-        let found = recognise(&speakers, &[print("alice", 0.05), print("bob", 9.0)]);
-        assert_eq!(found.len(), 1);
-        assert!(found.values().all(|(id, _)| id == "alice"));
+    fn a_clear_match_is_named() {
+        let found = recognise(&speakers(&[("input1", 0.0, 10.0), ("input2", 5.0, 10.0)]), &[print("alice", "", 0.05), print("bob", "", 9.0)]);
+        assert!(matches!(&found["input1"], Match::Sure(id, _) if id == "alice"));
+        assert!(!found.contains_key("input2"), "nobody sounds like it");
+    }
+
+    #[test]
+    fn two_speakers_who_both_sound_like_one_person_are_asked_about() {
+        // As in a meeting where the call app's track and the microphone both sounded most like one print.
+        let found = recognise(&speakers(&[("input1", 0.0, 10.0), ("input2", 0.1, 10.0)]), &[print("alice", "", 0.05), print("bob", "", 1.0)]);
+        for key in ["input1", "input2"] {
+            let Match::Ask(list) = &found[key] else { panic!("{key} should be asked about") };
+            assert_eq!(list.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["alice", "bob"]);
+        }
+    }
+
+    #[test]
+    fn a_few_words_are_asked_about_however_alike() {
+        let found = recognise(&speakers(&[("input1", 0.0, 1.0)]), &[print("alice", "", 0.0), print("bob", "", 9.0)]);
+        assert_eq!(found["input1"], Match::Ask(vec![("alice".into(), 1.0)]));
+    }
+
+    #[test]
+    fn a_person_with_several_prints_matches_on_the_closest() {
+        // Alice's desk microphone print is far off; her call-app print is close.
+        let prints = [print("alice-desk", "alice", 3.0), print("alice-call", "alice", 0.0), print("bob", "", 1.0)];
+        let found = recognise(&speakers(&[("input2", 0.05, 10.0)]), &prints);
+        assert!(matches!(&found["input2"], Match::Sure(id, _) if id == "alice-call"));
+        // One person is one candidate, however many prints they have.
+        let found = recognise(&speakers(&[("input2", 0.4, 1.0)]), &prints);
+        let Match::Ask(list) = &found["input2"] else { panic!() };
+        assert_eq!(list.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["alice-call", "bob"]);
+    }
+
+    #[test]
+    fn prints_with_the_same_name_are_one_person_until_separated() {
+        let named = |id: &str, name: &str, created: u64| VoicePrint { name: name.into(), created, ..print(id, "", 0.0) };
+        let mut prints = vec![named("b2", "Bruce Joy", 2), named("b1", "bruce joy ", 1), named("liam", "Liam", 3), VoicePrint { person: "p-x".into(), ..named("b3", "Bruce Joy", 4) }];
+        group_by_name(&mut prints);
+        assert_eq!(prints.iter().map(|p| p.person()).collect::<Vec<_>>(), ["b1", "b1", "liam", "p-x"]);
+    }
+
+    #[test]
+    fn a_short_line_on_one_wearers_microphone_stays_theirs() {
+        // A few words on the microphone sound like the call app's speaker, but the microphone said who.
+        let lines = vec![line("input2", 0.0, 12.0), line("input1", 0.1, 0.9)];
+        assert_eq!(assign(&lines, 2), ["input2", "input1"]);
     }
 
     #[test]

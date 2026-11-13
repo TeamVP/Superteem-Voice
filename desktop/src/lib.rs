@@ -45,6 +45,8 @@ struct Enrolment {
     device: String,
     name: String,
     print: Option<String>,
+    /// Starts another print for this person rather than a new person.
+    person: Option<String>,
 }
 
 /// Recording someone saying a key phrase several times to train it.
@@ -436,6 +438,8 @@ struct SpeakerOption {
     key: String,
     name: String,
     print: Option<PrintInfo>,
+    /// Who it might be, most likely first, when recognition wasn't sure enough to name them.
+    suggested: Vec<PrintInfo>,
     /// Seconds of clear speech, which decides whether a voice print can be made from it.
     voiced_s: f32,
 }
@@ -470,6 +474,21 @@ struct PrintChoice {
     name: String,
 }
 
+/// One choice per person, however many voice prints they have: linking to any of them finds the person.
+fn people(mut prints: Vec<voices::VoicePrint>) -> Vec<PrintChoice> {
+    prints.sort_by_key(|p| p.created);
+    let mut seen: Vec<String> = Vec::new();
+    let mut out: Vec<PrintChoice> = Vec::new();
+    for p in prints {
+        if !seen.iter().any(|s| s == p.person()) {
+            seen.push(p.person().to_string());
+            out.push(PrintChoice { id: p.id, name: p.name });
+        }
+    }
+    out.sort_by_key(|p| p.name.to_lowercase());
+    out
+}
+
 #[tauri::command]
 fn get_session(state: State<AppState>, id: String) -> Result<SessionView, String> {
     let dir = library::session_dir(&id)?;
@@ -497,6 +516,13 @@ fn get_session(state: State<AppState>, id: String) -> Result<SessionView, String
                 prints.iter().find(|p| p.id == l.id).map(|p| PrintInfo { id: p.id.clone(), name: p.name.clone(), score: l.score })
             });
             let voiced_s = voices::speaker_voice(&segments, &line_voices, &key).map_or(0.0, |v| v.seconds());
+            let suggested = meta
+                .suggested
+                .get(&key)
+                .into_iter()
+                .flatten()
+                .filter_map(|l| prints.iter().find(|p| p.id == l.id).map(|p| PrintInfo { id: p.id.clone(), name: p.name.clone(), score: l.score }))
+                .collect();
             // An unnamed track is called after the input it came from.
             let mut name = meta.name(&key);
             if name == key {
@@ -504,7 +530,7 @@ fn get_session(state: State<AppState>, id: String) -> Result<SessionView, String
                     name = sources::track_label(&device).unwrap_or(device);
                 }
             }
-            SpeakerOption { name, print, voiced_s, key }
+            SpeakerOption { name, print, suggested, voiced_s, key }
         })
         .collect();
     let transcribed = segments.iter().any(|s| !s.text.is_empty());
@@ -513,7 +539,7 @@ fn get_session(state: State<AppState>, id: String) -> Result<SessionView, String
     Ok(SessionView {
         needs_processing: !busy && process::needs_processing(&dir),
         model_ready: transcribe::model_ready(),
-        voiceprints: prints.into_iter().map(|p| PrintChoice { id: p.id, name: p.name }).collect(),
+        voiceprints: people(prints),
         keyphrases: keyphrases::load_session(&dir),
         audio_bytes: library::audio_bytes(&dir),
         imports: imports::load(&dir),
@@ -567,6 +593,7 @@ fn rename_speaker(state: State<AppState>, id: String, key: String, name: String)
         if meta.prints.get(&key).is_some_and(|l| l.score.is_some()) {
             meta.prints.remove(&key);
         }
+        meta.suggested.remove(&key);
         if name.is_empty() {
             meta.names.remove(&key);
         } else {
@@ -780,6 +807,7 @@ fn merge_speakers(state: State<AppState>, id: String, from: String, into: String
         }
         meta.names.remove(&from);
         meta.prints.remove(&from);
+        meta.suggested.remove(&from);
         voices::mark_overlaps(segments);
         Ok(())
     })
@@ -790,23 +818,37 @@ fn merge_speakers(state: State<AppState>, id: String, from: String, into: String
 #[tauri::command]
 fn link_speaker(state: State<AppState>, id: String, key: String, print: Option<String>, learn: bool) -> Result<(), String> {
     edit_session(&state, &id, |meta, segments| {
-        let Some(print_id) = print else {
+        meta.suggested.remove(&key);
+        let Some(mut print_id) = print else {
             meta.prints.remove(&key);
             return Ok(());
         };
-        let found = voices::list().into_iter().find(|p| p.id == print_id).ok_or("That voice print no longer exists.")?;
+        let prints = voices::list();
+        let found = prints.iter().find(|p| p.id == print_id).ok_or("That voice print no longer exists.")?.clone();
         if learn {
             let dir = library::session_dir(&id)?;
             let voice = voices::speaker_voice(segments, &voices::load_line_voices(&dir), &key)
                 .ok_or("This speaker has no clear speech to learn from.")?;
-            voices::add_sample(Some(&print_id), &found.name, voice, &id)?;
+            print_id = voices::learn(&print_id, voice, &id, &recorded_on(meta, &key))?;
         }
-        // A print is one person, so another speaker linked to it is unlinked.
-        meta.prints.retain(|k, l| k == &key || l.id != print_id);
+        // A person is one speaker, so another speaker linked to any of their prints is unlinked, and they
+        // are no longer offered for anyone else.
+        let person = found.person().to_string();
+        let theirs = |l: &PrintLink| prints.iter().find(|p| p.id == l.id).is_some_and(|p| p.person() == person);
+        meta.prints.retain(|k, l| k == &key || !theirs(l));
+        for list in meta.suggested.values_mut() {
+            list.retain(|l| !theirs(l));
+        }
+        meta.suggested.retain(|_, list| !list.is_empty());
         meta.prints.insert(key.clone(), PrintLink { id: print_id, score: None });
         meta.names.insert(key, found.name);
         Ok(())
     })
+}
+
+/// What recorded a speaker, to label a print made from them: "Microsoft Teams", or the microphone.
+fn recorded_on(meta: &Meta, key: &str) -> String {
+    meta.track_name(key).or_else(|| meta.tracks.get(key).map(|t| t.label.clone())).unwrap_or_default()
 }
 
 /// Starts a voice print from what a speaker said in this session.
@@ -818,7 +860,8 @@ fn save_speaker_print(state: State<AppState>, id: String, key: String, name: Str
     edit_session(&state, &id, |meta, segments| {
         let dir = library::session_dir(&id)?;
         let voice = voices::speaker_voice(segments, &voices::load_line_voices(&dir), &key).ok_or("This speaker has no clear speech.")?;
-        let print_id = voices::add_sample(None, &name, voice, &id)?;
+        let print_id = voices::start_print(&name, None, &recorded_on(meta, &key), voice, &id)?;
+        meta.suggested.remove(&key);
         meta.prints.insert(key.clone(), PrintLink { id: print_id, score: None });
         meta.names.insert(key, name.trim().to_string());
         Ok(())
@@ -829,6 +872,10 @@ fn save_speaker_print(state: State<AppState>, id: String, key: String, name: Str
 struct PrintSummary {
     id: String,
     name: String,
+    /// Prints with the same person are one person's.
+    person: String,
+    /// What it was recorded on, when known.
+    label: String,
     created: u64,
     seconds: f32,
     samples: usize,
@@ -848,25 +895,33 @@ fn list_voiceprints() -> Vec<PrintSummary> {
             scripts: p.samples.iter().filter(|s| s.source == "script").count(),
             phrases: keyphrases::trained_count(&p.id),
             phrases_of: keyphrases::PHRASES.len(),
+            person: p.person().to_string(),
             id: p.id,
             name: p.name,
+            label: p.label,
             created: p.created,
         })
         .collect();
-    out.sort_by_key(|p| p.name.to_lowercase());
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.person.cmp(&b.person)).then(a.created.cmp(&b.created)));
     out
 }
 
+/// Renames the person a voice print belongs to, with all their prints.
 #[tauri::command]
 fn rename_voiceprint(id: String, name: String) -> Result<(), String> {
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return Err("A voice print needs a name.".into());
-    }
-    voices::edit(|prints| {
-        prints.iter_mut().find(|p| p.id == id).ok_or("That voice print no longer exists.")?.name = name;
-        Ok(())
-    })
+    voices::rename_person(&id, &name)
+}
+
+/// The person behind print `id` is the same as the one behind print `into`: all their prints join.
+#[tauri::command]
+fn merge_voiceprint_people(id: String, into: String) -> Result<(), String> {
+    voices::merge_people(&id, &into)
+}
+
+/// Print `id` is not the person it was grouped with.
+#[tauri::command]
+fn separate_voiceprint(id: String) -> Result<(), String> {
+    voices::separate(&id)
 }
 
 /// Sessions keep the names already given; new recordings no longer recognise the person.
@@ -887,12 +942,18 @@ async fn start_enrolment(
     device: String,
     name: String,
     print: Option<String>,
+    // Any print of the person to make another print for, as on another microphone.
+    person: Option<String>,
     consent: bool,
 ) -> Result<(), String> {
     if !consent {
         return Err("Confirm that this person agreed to have a voice print kept.".into());
     }
-    if print.is_none() && name.trim().is_empty() {
+    let person = match person {
+        Some(id) => Some(voices::list().into_iter().find(|p| p.id == id).ok_or("That voice print no longer exists.")?.person().to_string()),
+        None => None,
+    };
+    if print.is_none() && person.is_none() && name.trim().is_empty() {
         return Err("Give the voice print a name.".into());
     }
     if state.busy() {
@@ -908,7 +969,7 @@ async fn start_enrolment(
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let devices = vec![device.clone()];
     let recorder = blocking(move || recorder::start(dir, &devices, false)).await??;
-    *state.enrolling.lock().unwrap() = Some(Enrolment { recorder, device, name, print });
+    *state.enrolling.lock().unwrap() = Some(Enrolment { recorder, device, name, print, person });
     listen::set_paused(true);
     Ok(())
 }
@@ -927,7 +988,10 @@ async fn stop_enrolment<R: Runtime>(app: AppHandle<R>, save: bool) -> Result<Opt
             remember_outcomes(std::slice::from_ref(&e.device), &status);
         }
         let result = if save {
-            enrolment_voice(&dir).and_then(|v| voices::add_sample(e.print.as_deref(), &e.name, v, "script").map(Some))
+            enrolment_voice(&dir).and_then(|v| match &e.print {
+                Some(print) => voices::add_sample(Some(print), &e.name, v, "script").map(Some),
+                None => voices::start_print(&e.name, e.person.as_deref(), &e.device, v, "script").map(Some),
+            })
         } else {
             Ok(None)
         };
@@ -2920,6 +2984,8 @@ pub fn run() {
             link_speaker,
             save_speaker_print,
             list_voiceprints,
+            merge_voiceprint_people,
+            separate_voiceprint,
             rename_voiceprint,
             delete_voiceprint,
             start_enrolment,

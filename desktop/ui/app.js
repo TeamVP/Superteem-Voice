@@ -2531,7 +2531,7 @@ function renderSession(session, processingError, suggestion) {
       ? el("span", { class: "badge", title: sp.print.score == null ? "Linked to this voice print"
         : "Recognised from the voice print. Rename or use ⋯ if it is wrong." },
         sp.print.score == null ? "voice print" : `recognised ${Math.round(sp.print.score * 100)}%`)
-      : null;
+      : sp.suggested.length ? el("span", { class: "badge", title: "Not sure who this is. Pick them below." }, "who?") : null;
     const menu = speakerMenu(sp, usedSpeakers, (action) => speakerAction(action, sp));
     speakerBar.append(el("span", { class: "chip", style: `background:${colours.get(sp.key)}` }, input, badge, menu));
   }
@@ -2548,7 +2548,21 @@ function renderSession(session, processingError, suggestion) {
       helpButton.classList.toggle("on", !help.hidden);
     });
     speakerBar.append(helpButton);
-    page.append(speakerBar, speakerForm, help);
+    // Speakers the voice prints weren't sure about: the people it might be, to pick from.
+    const asks = usedSpeakers.filter((sp) => !sp.print && sp.suggested.length).map((sp) => {
+      const choices = sp.suggested.map((p) => {
+        const pick = el("button", { type: "button", title: `Sounds ${Math.round(p.score * 100)}% like ${p.name}'s voice print` },
+          `${p.name} · ${Math.round(p.score * 100)}%`);
+        pick.addEventListener("click", () => speakerAction(`link:${p.id}`, sp));
+        return pick;
+      });
+      const none = el("button", { type: "button", class: "link" }, "None of these");
+      none.addEventListener("click", async () => { if (await save("link_speaker", { key: sp.key, print: null, learn: false })) reload(); });
+      const few = sp.voiced_s < 4 ? ` from only ${Math.max(1, Math.round(sp.voiced_s))} s of speech` : "";
+      return el("div", { class: "inline-form" }, el("span", {}, el("strong", {}, `Who is ${sp.name}?`), ` Not sure${few}. It sounds most like:`),
+        choices, none);
+    });
+    page.append(speakerBar, ...asks, speakerForm, help);
   }
 
   /// Handles the ⋯ menu beside a speaker's name.
@@ -2569,11 +2583,12 @@ function renderSession(session, processingError, suggestion) {
         learn.addEventListener("click", async () => {
           try {
             await invoke("link_speaker", { id, key: sp.key, print, learn: true });
-            target.replaceChildren(el("div", { class: "inline-form" }, "Done. The voice print will recognise them better next time."));
+            target.replaceChildren(el("div", { class: "inline-form" }, "Done. They will be recognised better next time."));
           } catch (e) { showError(target, e); }
         });
         target.replaceChildren(el("div", { class: "inline-form" },
-          el("span", {}, `Linked. Also teach the voice print how they sounded here (${Math.round(sp.voiced_s)} s of speech)?`),
+          el("span", { title: "If they sound unlike their voice prints here, as through a call app or another microphone, this becomes another voice print for them." },
+            `Linked. Also learn how they sounded here (${Math.round(sp.voiced_s)} s of speech)?`),
           learn, el("button", { onclick: () => target.replaceChildren() }, "No")));
       }
     } else if (action === "new-print") {
@@ -3402,12 +3417,39 @@ async function showVoicePrints(error) {
       + "Only make one with the person's agreement."));
   if (error) page.append(el("div", { class: "error" }, String(error)));
   if (!prints.length) page.append(el("div", { class: "empty" }, "No voice prints yet."));
+  // One person can have several prints, as they sound different on each microphone and through call apps.
+  const people = [];
   for (const p of prints) {
-    const name = el("input", { value: p.name, title: "Rename", "aria-label": "Name" });
+    const person = people.find((x) => x.id === p.person);
+    if (person) person.prints.push(p); else people.push({ id: p.person, name: p.name, prints: [p] });
+  }
+  for (const person of people) {
+    const first = person.prints[0];
+    const name = el("input", { value: person.name, title: "Rename", "aria-label": "Name" });
     name.addEventListener("keydown", (e) => { if (e.key === "Enter") name.blur(); });
     name.addEventListener("change", async () => {
-      try { await invoke("rename_voiceprint", { id: p.id, name: name.value }); } catch (e) { showError(page, e); }
+      try { await invoke("rename_voiceprint", { id: first.id, name: name.value }); showVoicePrints(); } catch (e) { showError(page, e); }
     });
+    const others = people.filter((x) => x !== person);
+    const same = el("select", { class: "plain", "aria-label": `${person.name} is the same person as` },
+      el("option", { value: "" }, "Same person as…"), others.map((o) => el("option", { value: o.prints[0].id }, o.name)));
+    same.addEventListener("change", async () => {
+      if (!same.value) return;
+      try { await invoke("merge_voiceprint_people", { id: first.id, into: same.value }); showVoicePrints(); } catch (e) { showError(page, e); }
+    });
+    page.append(el("div", { class: "print-row person-row" }, name,
+      el("span", { class: "detail" }, person.prints.length > 1 ? `${person.prints.length} voice prints` : ""),
+      el("button", { onclick: () => showEnrol(null, first) }, "Add a voice print"),
+      others.length ? same : null));
+    for (const p of person.prints) page.append(printRow(p, person.prints.length > 1));
+  }
+  page.append(el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showEnrol(null) }, "New voice print")),
+    el("p", { class: "legend" }, "You can also make a voice print from a speaker in any meeting, from the ⋯ menu beside their name. "
+      + "Someone can have several, as they sound different on each microphone and through call apps; each is matched separately."));
+  main.replaceChildren(page);
+
+  /// One voice print of a person: what it was recorded on and from what, with its own buttons.
+  function printRow(p, shared) {
     const remove = el("button", { class: "link danger" }, "Delete");
     remove.addEventListener("click", async () => {
       if (!remove.dataset.armed) {
@@ -3420,25 +3462,28 @@ async function showVoicePrints(error) {
     });
     const sources = [p.scripts ? `${p.scripts} script reading${p.scripts > 1 ? "s" : ""}` : null,
       p.samples - p.scripts ? `${p.samples - p.scripts} meeting${p.samples - p.scripts > 1 ? "s" : ""}` : null].filter(Boolean);
-    page.append(el("div", { class: "print-row" }, name,
+    const separate = shared ? el("button", { class: "link", title: "This voice print is someone else with the same name" }, "Not them") : null;
+    separate?.addEventListener("click", async () => {
+      try { await invoke("separate_voiceprint", { id: p.id }); showVoicePrints(); } catch (e) { showError(page, e); }
+    });
+    return el("div", { class: "print-row print-sub" },
+      el("span", { class: "label" }, p.label || "Voice print"),
       el("span", { class: "detail" }, `${Math.round(p.seconds)} s of speech from ${sources.join(" and ")}`),
-      el("button", { onclick: () => showEnrol(p) }, "Record more"), remove));
+      el("button", { onclick: () => showEnrol(p) }, "Record more"), separate, remove);
   }
-  page.append(el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showEnrol(null) }, "New voice print")),
-    el("p", { class: "legend" }, "You can also make a voice print from a speaker in any meeting, from the ⋯ menu beside their name."));
-  main.replaceChildren(page);
 }
 
 /// Sets up a script reading for a new voice print, or more speech for `print`.
-async function showEnrol(print) {
+/// With `forPerson` (one of their prints), another voice print for someone, as on another microphone.
+async function showEnrol(print, forPerson = null) {
   leave();
   showPage();
   view = { kind: "prints" };
   const [{ devices, default: preferred }, fresh] = await Promise.all([invoke("list_devices"), invoke("get_prefs")]);
   prefs = fresh;
-  const page = el("div", { class: "page" }, el("h1", {}, print ? `Record more of ${print.name}` : "New voice print"));
+  const page = el("div", { class: "page" }, el("h1", {}, print ? `Record more of ${print.name}` : forPerson ? `Another voice print for ${forPerson.name}` : "New voice print"));
   const name = el("input", { type: "text", class: "plain", placeholder: "Their name", "aria-label": "Their name" });
-  if (!print) page.append(el("h2", {}, "Name"), name);
+  if (!print && !forPerson) page.append(el("h2", {}, "Name"), name);
 
   page.append(el("h2", {}, "Microphone"));
   const input = el("select", { class: "plain", "aria-label": "Microphone" }, devices.map((d) => el("option", { value: d,
@@ -3466,7 +3511,7 @@ async function showEnrol(print) {
       saveScript.addEventListener("click", async () => {
         if (!title.value.trim() || !text.value.trim()) return showError(editor, "Give the script a name and some text.");
         await invoke("save_prefs", { scripts: [...prefs.scripts, { title: title.value.trim(), text: text.value.trim() }] });
-        showEnrol(print);
+        showEnrol(print, forPerson);
       });
       editor.append(el("div", { class: "inline-form" }, title, text, saveScript));
       return;
@@ -3478,7 +3523,7 @@ async function showEnrol(print) {
       const drop = el("button", { class: "link danger" }, "Delete this script");
       drop.addEventListener("click", async () => {
         await invoke("save_prefs", { scripts: prefs.scripts.filter((x) => x.title !== s.title || x.text !== s.text) });
-        showEnrol(print);
+        showEnrol(print, forPerson);
       });
       editor.append(drop);
     }
@@ -3494,8 +3539,8 @@ async function showEnrol(print) {
   start.addEventListener("click", async () => {
     if (choice.value === "new") return showError(page, "Save the script first.");
     try {
-      await invoke("start_enrolment", { device: input.value, name: name.value, print: print?.id ?? null, consent: consent.checked });
-      enrolment = { print, name: print?.name ?? name.value.trim(), script: scripts[choice.value].text };
+      await invoke("start_enrolment", { device: input.value, name: name.value, print: print?.id ?? null, person: forPerson?.id ?? null, consent: consent.checked });
+      enrolment = { print, name: print?.name ?? forPerson?.name ?? name.value.trim(), script: scripts[choice.value].text };
       showEnrolRecording();
     } catch (e) {
       showError(page, e);
