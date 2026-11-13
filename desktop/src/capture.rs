@@ -112,9 +112,9 @@ pub fn run_input(shared: Arc<Shared>, device_name: String, label: String) {
 /// every 10 ms or so, even in a silent room.
 const STALL: Duration = Duration::from_secs(2);
 
-/// An open microphone stream. Dropping it closes the microphone.
-struct Input {
-    _stream: cpal::Stream,
+/// An open microphone, app or output stream. Dropping it closes it.
+pub(crate) struct Input {
+    _keep: Box<dyn std::any::Any>,
     blocks: mpsc::Receiver<Vec<f32>>,
     failure: Arc<Mutex<Option<String>>>,
     rate: u32,
@@ -125,9 +125,44 @@ fn find_input(name: &str) -> Option<cpal::Device> {
     cpal::default_host().input_devices().ok()?.find(|d| d.name().is_ok_and(|n| n == name))
 }
 
+fn find_output(name: &str) -> Option<cpal::Device> {
+    cpal::default_host().output_devices().ok()?.find(|d| d.name().is_ok_and(|n| n == name))
+}
+
+/// Opens a microphone, an app's sound or an output's sound by the name it is chosen by.
+pub(crate) fn open_named(name: &str) -> Result<Input, String> {
+    use crate::sources;
+    if let Some(program) = sources::app_program(name) {
+        return open_app(name, program);
+    }
+    if let Some(device) = sources::output_device(name) {
+        return open_stream(find_output(device).ok_or("that output isn't connected")?, true, name);
+    }
+    open_input(find_input(name).ok_or("device not found")?)
+}
+
+#[cfg(windows)]
+fn open_app(name: &str, program: &str) -> Result<Input, String> {
+    let (tx, blocks) = mpsc::channel::<Vec<f32>>();
+    let failure = Arc::new(Mutex::new(None::<String>));
+    let (capture, rate) = crate::sources::open_app(program, tx, failure.clone())?;
+    Ok(Input { _keep: Box::new(capture), blocks, failure, rate, name: name.into() })
+}
+
+#[cfg(not(windows))]
+fn open_app(_name: &str, _program: &str) -> Result<Input, String> {
+    Err("Recording other apps' sound needs Windows.".into())
+}
+
 fn open_input(device: cpal::Device) -> Result<Input, String> {
     let name = device.name().map_err(|e| e.to_string())?;
-    let config = device.default_input_config().map_err(|e| e.to_string())?;
+    open_stream(device, false, &name)
+}
+
+/// An input stream; on an output device Windows records what it plays (loopback).
+fn open_stream(device: cpal::Device, output: bool, name: &str) -> Result<Input, String> {
+    let name = name.to_string();
+    let config = if output { device.default_output_config() } else { device.default_input_config() }.map_err(|e| e.to_string())?;
     let channels = config.channels() as usize;
     let (tx, blocks) = mpsc::channel::<Vec<f32>>();
     let failure = Arc::new(Mutex::new(None::<String>));
@@ -153,7 +188,7 @@ fn open_input(device: cpal::Device) -> Result<Input, String> {
     }
     .map_err(|e| e.to_string())?;
     stream.play().map_err(|e| e.to_string())?;
-    Ok(Input { _stream: stream, blocks, failure, rate: config.sample_rate().0, name })
+    Ok(Input { _keep: Box::new(stream), blocks, failure, rate: config.sample_rate().0, name })
 }
 
 /// Waits for a microphone to come back after the one being recorded was lost, for example when a
@@ -161,23 +196,38 @@ fn open_input(device: cpal::Device) -> Result<Input, String> {
 /// Prefers the chosen microphone and otherwise takes whatever Windows uses by default now.
 /// Returns None once a stop is requested.
 fn reconnect(shared: &Shared, device_name: &str, label: &str, reason: &str) -> Option<Input> {
+    let source = crate::sources::is_source(device_name);
     shared.update(label, |s| {
-        s.state = "reconnecting".into();
-        s.detail = format!("Lost {device_name} ({reason}), trying again");
+        // An app that isn't running yet is waited for, not reported as lost.
+        s.state = if source { "waiting" } else { "reconnecting" }.into();
+        s.detail = if source { format!("Waiting: {reason}") } else { format!("Lost {device_name} ({reason}), trying again") };
     });
     while !shared.stopped() {
         thread::sleep(Duration::from_secs(1));
-        let device = find_input(device_name).or_else(|| cpal::default_host().default_input_device());
-        match device.ok_or_else(|| "no microphone connected".to_string()).and_then(open_input) {
+        // An app or output is waited for itself; a microphone falls back to the default one.
+        let opened = if crate::sources::is_source(device_name) {
+            open_named(device_name)
+        } else {
+            let device = find_input(device_name).or_else(|| cpal::default_host().default_input_device());
+            device.ok_or_else(|| "no microphone connected".to_string()).and_then(open_input)
+        };
+        match opened {
             Ok(input) => return Some(input),
-            Err(message) => shared.update(label, |s| s.detail = format!("Waiting for a microphone: {message}")),
+            Err(message) => shared.update(label, |s| s.detail = format!("Waiting: {message}")),
         }
     }
     None
 }
 
 fn record_input(shared: &Shared, device_name: &str, label: &str) -> Result<(), String> {
-    let mut input = open_input(find_input(device_name).ok_or("device not found")?)?;
+    // Sound from apps and outputs arrives only while something plays, so silence is not a fault and
+    // gaps are filled from the clock rather than treated as a lost device.
+    let source = crate::sources::is_source(device_name);
+    let mut input = match open_named(device_name) {
+        Ok(input) => input,
+        Err(message) if source => reconnect(shared, device_name, label, &message).ok_or(message)?,
+        Err(message) => return Err(message),
+    };
     let mut journal = JournalWriter::create(&shared.dir.join(format!("{label}.stvj"))).map_err(|e| e.to_string())?;
     let mut resampler = Resampler::new(input.rate);
     let mut pending = Vec::new();
@@ -185,7 +235,8 @@ fn record_input(shared: &Shared, device_name: &str, label: &str) -> Result<(), S
     // Frames are placed by sample position, so a gap while reconnecting moves the position on and
     // becomes silence in the meeting rather than pulling later speech earlier.
     let mut sample = 0u32;
-    let mut origin_us: Option<u64> = None;
+    // An app may be silent when recording starts, so its sound is placed from the recording's own start.
+    let mut origin_us: Option<u64> = source.then_some(0);
     let mut last_sync = Instant::now();
     let mut last_block = Instant::now();
     let mut connected = true;
@@ -202,9 +253,21 @@ fn record_input(shared: &Shared, device_name: &str, label: &str) -> Result<(), S
             match input.blocks.recv_timeout(Duration::from_millis(200)) {
                 Ok(block) => {
                     last_block = Instant::now();
+                    if source {
+                        // After a quiet spell, start this sound where the clock says it belongs.
+                        if let Some(origin) = origin_us {
+                            let block_us = block.len() as u64 * 1_000_000 / input.rate as u64;
+                            let due = position_at(shared.now_us().saturating_sub(block_us), origin);
+                            let have = sample.wrapping_add(pending.len() as u32);
+                            if due > have.saturating_add(RATE / 4) {
+                                pending.clear();
+                                sample = due;
+                            }
+                        }
+                    }
                     resampler.push(&block, &mut pending);
                 }
-                Err(RecvTimeoutError::Timeout) if last_block.elapsed() < STALL => continue,
+                Err(RecvTimeoutError::Timeout) if source || last_block.elapsed() < STALL => continue,
                 Err(RecvTimeoutError::Timeout) => lost = Some("it stopped sending sound".into()),
                 Err(RecvTimeoutError::Disconnected) => lost = Some("the stream closed".into()),
             }

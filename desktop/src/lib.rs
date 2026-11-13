@@ -22,6 +22,7 @@ pub mod process;
 pub mod recorder;
 pub mod script;
 pub mod shell;
+pub mod sources;
 pub mod transcribe;
 pub mod translations;
 pub mod tts;
@@ -196,6 +197,13 @@ fn platform() -> &'static str {
 #[tauri::command]
 async fn list_devices() -> Result<recorder::Inputs, String> {
     blocking(recorder::inputs).await?
+}
+
+/// Apps playing sound now and the output devices, to record beside the microphones. Asked for often,
+/// so an app appears as soon as it starts playing.
+#[tauri::command]
+async fn list_sound_sources() -> Result<Vec<sources::Source>, String> {
+    blocking(sources::list).await
 }
 
 #[tauri::command]
@@ -2767,6 +2775,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             platform,
             list_devices,
+            list_sound_sources,
             model_ready,
             download_model,
             start_recording,

@@ -17,6 +17,8 @@ const WAKE = /(?:^\W*|\b(?:hey|hi|hay|okay|ok)[\s,.!]+)super[\s-]?t(?:ee|ea|he|i
 
 let view = { kind: "home" };
 let pollTimer = null;
+/// Refreshes the list of apps playing sound on the meeting page.
+let sourceTimer = null;
 let stopping = false;
 let player = null;
 let platform = "windows";
@@ -353,6 +355,7 @@ function leave() {
   cancelDictation();
   stopPlayback();
   clearInterval(pollTimer);
+  clearInterval(sourceTimer);
   flushNote();
   unpinTopBar();
   document.body.classList.remove("note-chat-open", "note-chat-page", "note-chat-float");
@@ -1445,14 +1448,20 @@ async function showMeeting() {
   }
 
   const start = el("button", { class: "primary pill", disabled: true }, "Start recording");
+  let sources = null;
   const update = () => {
-    start.disabled = !(pins.checked || boxes.some((b) => b.box.checked));
+    start.disabled = !(pins.checked || boxes.some((b) => b.box.checked) || sources?.chosen().length);
   };
+  if (platform === "windows") {
+    sources = soundSources(update);
+    page.append(sources.section);
+  }
   [pins, ...boxes.map((b) => b.box)].forEach((b) => b.addEventListener("change", update));
   update();
   start.addEventListener("click", async () => {
     try {
-      await startMeeting(boxes.filter((b) => b.box.checked).map((b) => b.name), pins.checked);
+      const chosen = boxes.filter((b) => b.box.checked).map((b) => b.name).concat(sources?.chosen() ?? []);
+      await startMeeting(chosen, pins.checked);
     } catch (e) {
       showError(page, e);
     }
@@ -1493,6 +1502,61 @@ async function showMeeting() {
   }, 150);
 }
 
+/// Sound from another app or an output device rather than a microphone (sources.rs names them).
+const isSoundSource = (name) => name.startsWith("Sound from ") || name.startsWith("Everything playing on ");
+
+/// "Sound from other apps" on the meeting page: apps appear as soon as they start playing (a Teams call,
+/// a video), each with a meter, and ticked ones are recorded as tracks of their own. Windows only.
+function soundSources(update) {
+  const ticked = new Set((prefs.inputs ?? []).filter(isSoundSource));
+  const rows = new Map();
+  const list = el("div", { class: "mic-list" });
+  const empty = el("div", { class: "empty" }, "Looking for apps playing sound…");
+  const others = el("details", { class: "hidden-mics" }, el("summary", {}, "Everything on an output device"));
+  const othersList = el("div", { class: "mic-list" });
+  others.append(othersList);
+  const section = el("div", {},
+    el("div", { class: "section-head" }, el("h2", {}, "Sound from other apps")),
+    el("div", { class: "legend" }, "Record what other people say in a call: tick Teams, Zoom or your browser and their sound is recorded as its own track, beside your microphone. Apps appear here as soon as they play sound. Use a headset, or the call is also picked up by your microphone. Let people know they're being recorded."),
+    list, empty, others);
+  const row = (s) => {
+    const box = el("input", { type: "checkbox", "aria-label": s.label });
+    box.checked = ticked.has(s.name);
+    box.addEventListener("change", () => { box.checked ? ticked.add(s.name) : ticked.delete(s.name); update(); });
+    const meter = el("div", { style: "width:0%" });
+    const state = el("span", { class: "mic-state" });
+    const r = { box, meter, state, el: el("label", { class: "mic-row" }, box, el("span", { class: "mic-name" }, s.label, el("span", { class: "meter" }, meter)), state) };
+    rows.set(s.name, r);
+    (s.kind === "app" ? list : othersList).append(r.el);
+    return r;
+  };
+  // Ticked last time but not playing yet: listed so it stays ticked, and recorded once it starts.
+  for (const name of ticked) {
+    if (name.startsWith("Sound from ")) row({ name, label: name.slice("Sound from ".length).replace(/ \([^)]*\)$/, ""), kind: "app" });
+  }
+  const refresh = async () => {
+    const sources = await invoke("list_sound_sources").catch(() => null);
+    if (!sources) return;
+    const seen = new Set(sources.map((s) => s.name));
+    for (const s of sources) {
+      const r = rows.get(s.name) ?? row(s);
+      r.meter.style.width = `${Math.round(Math.min(1, s.level * 1.5) * 100)}%`;
+      r.el.className = "mic-row" + (s.active ? " working" : "");
+      if (s.active) r.state.replaceChildren(svg("check", 14), " Playing");
+      else r.state.textContent = s.kind === "app" ? "Quiet" : "";
+    }
+    for (const [name, r] of rows) {
+      if (!seen.has(name)) { r.el.className = "mic-row absent"; r.state.textContent = r.box.checked ? "Recorded once it plays" : "Not playing"; }
+    }
+    empty.hidden = list.children.length > 0;
+    if (empty.textContent.startsWith("Looking")) empty.textContent = "No apps are playing sound. Start the call and it appears here.";
+  };
+  refresh();
+  clearInterval(sourceTimer);
+  sourceTimer = setInterval(refresh, 400);
+  return { section, chosen: () => [...ticked].filter((n) => rows.has(n)) };
+}
+
 /// Microphones heard working before, from a test, a voice print or a recording, that aren't hidden.
 function knownMics(connected) {
   const worked = new Set(prefs.working_mics ?? []);
@@ -1500,7 +1564,7 @@ function knownMics(connected) {
   for (const [name, r] of Object.entries(prefs.mics ?? {})) if (r.ok && r.last_ok >= r.last_failed) worked.add(name);
   const hidden = new Set(prefs.hidden_mics ?? []);
   // Connected ones first, so the usable tracks are at the top.
-  return [...worked].filter((m) => !hidden.has(m) && m !== "Superteem pins")
+  return [...worked].filter((m) => !hidden.has(m) && m !== "Superteem pins" && !isSoundSource(m))
     .sort((a, b) => connected.includes(b) - connected.includes(a));
 }
 
@@ -1588,6 +1652,7 @@ function stopProbe() {
 
 async function startMeeting(devices, pins) {
   clearInterval(pollTimer);
+  clearInterval(sourceTimer);
   probing = false;
   await invoke("start_recording", { devices, pins });
   // Consent is asked now that the recording is running: { at_s, how, words } once given.
