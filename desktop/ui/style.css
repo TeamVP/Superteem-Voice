@@ -381,6 +381,19 @@ kbd { font: 600 11px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; paddi
 /* Muted by the transcript mix rather than by hand. */
 .track .mute.auto { border-style: dashed; }
 .track .mute.auto.on { background: var(--key-2); border-color: var(--key-light); }
+.track .boost { position: relative; min-height: 22px; height: 22px; min-width: 34px; padding: 0 4px; font-size: 11px; font-weight: 600; border-radius: 4px; color: var(--muted); }
+.track .boost.on { background: var(--key); border-color: var(--key); color: #fff; }
+/* Compressed: a small dot in the corner. */
+.track .boost .boost-c { position: absolute; top: 2px; right: 2px; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.boost-pop { position: fixed; z-index: 50; width: 300px; max-width: calc(100vw - 16px); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.boost-pop .boost-row { display: flex; align-items: center; gap: 10px; }
+.boost-pop .boost-row input[type="range"] { flex: 1; accent-color: var(--key); }
+.boost-pop .boost-row .mono { width: 52px; text-align: right; }
+.boost-pop .field.check { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; margin: 0; }
+.boost-pop .field.check input { margin-top: 3px; accent-color: var(--key); }
+.boost-pop .field.check span { display: flex; flex-direction: column; gap: 2px; font-weight: 600; }
+.boost-pop .field.check small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.boost-pop .boost-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .mix-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; gap: 2px; }
 .mix-switch .pill { border: none; min-height: 28px; padding: 3px 12px; font-size: 13px; background: transparent; color: var(--muted); }
 .mix-switch .pill.on { background: var(--key); color: #fff; }
@@ -419,6 +432,9 @@ dialog.track-dialog .row-pick select { flex: 1 1 140px; min-width: 0; font-size:
 .transport .play { width: 44px; height: 44px; border-radius: 22px; border: none; background: var(--key); color: #fff; padding: 0; display: flex; align-items: center; justify-content: center; }
 .transport .play:hover { background: var(--key-1); }
 .transport .grow { flex: 1; }
+.transport .speed { min-height: 30px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.transport .speed.on { background: var(--key); border-color: var(--key); color: #fff; }
+.transport .speed option { color: var(--text, initial); background: var(--panel); }
 
 /* Transcript editor. */
 .speakers { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; align-items: center; }

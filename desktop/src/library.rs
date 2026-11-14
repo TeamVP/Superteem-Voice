@@ -205,7 +205,23 @@ pub struct Meta {
     /// transcribed again, so a move can be heard at once.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub audio_offsets: BTreeMap<String, f64>,
+    /// How each track is lifted when it's played back, by stream: for one that was recorded too quietly.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub track_levels: BTreeMap<String, TrackLevel>,
 }
+
+/// A track lifted for playback: louder by `boost_db`, and with `compress` its loud and quiet parts brought
+/// closer together and its peaks held back, so it can be lifted further without distorting.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct TrackLevel {
+    #[serde(default)]
+    pub boost_db: f64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub compress: bool,
+}
+
+/// The most a track can be lifted, in decibels.
+pub const MAX_BOOST_DB: f64 = 24.0;
 
 /// Workflow states a note or meeting can be in. Empty is the default: no status yet.
 pub const STATUSES: [&str; 5] = ["", "in_progress", "ready", "exported", "done"];
@@ -517,6 +533,7 @@ pub fn delete_track(dir: &Path, stream: &str) -> Result<(), String> {
     meta.prints.remove(stream);
     meta.suggested.remove(stream);
     meta.track_offsets.remove(stream);
+    meta.track_levels.remove(stream);
     meta.locked.retain(|k| k != stream);
     // A meeting not yet processed has no details or transcript to change.
     if has_meta(dir) {

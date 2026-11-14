@@ -1224,6 +1224,21 @@ fn save_prefs(
     .map(|_| ())
 }
 
+/// Lifts a track for playback: `boost_db` louder (0 to 24), and with `compress` evened out and its peaks
+/// held back, so it can be lifted further without distorting. Nothing changes in the transcript.
+#[tauri::command]
+fn set_track_level(state: State<AppState>, id: String, name: String, boost_db: f64, compress: bool) -> Result<(), String> {
+    let boost_db = (boost_db.clamp(0.0, library::MAX_BOOST_DB) * 2.0).round() / 2.0;
+    edit_session(&state, &id, |meta, _| {
+        if boost_db == 0.0 && !compress {
+            meta.track_levels.remove(&name);
+        } else {
+            meta.track_levels.insert(name.clone(), library::TrackLevel { boost_db, compress });
+        }
+        Ok(())
+    })
+}
+
 #[tauri::command]
 fn save_markers(state: State<AppState>, id: String, markers: Vec<library::Marker>) -> Result<(), String> {
     edit_session(&state, &id, |meta, _| {
@@ -3078,7 +3093,12 @@ fn remove_track(state: State<AppState>, id: String, name: String) -> Result<(), 
     let _guard = state.edit.lock().unwrap();
     let dir = library::session_dir(&id)?;
     if imports::load(&dir).iter().any(|i| i.name == name) {
-        return imports::remove(&dir, &name);
+        imports::remove(&dir, &name)?;
+        let mut meta = library::load_meta(&dir);
+        if meta.track_levels.remove(&name).is_some() {
+            library::write_json(&dir.join(library::META), &meta)?;
+        }
+        return Ok(());
     }
     if state.recording.lock().unwrap().as_ref().is_some_and(|r| r.dir() == dir) {
         return Err("This meeting is being recorded.".into());
@@ -3286,6 +3306,7 @@ pub fn run() {
             model_info,
             open_models_folder,
             save_markers,
+            set_track_level,
             edit_marker,
             label_action_item,
             keep_segment,
