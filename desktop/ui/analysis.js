@@ -1557,18 +1557,56 @@ function paragraphOf(node, root) {
   return null;
 }
 
+/// The most lines of a paragraph marked at once as it's read aloud.
+const READING_LINES = 6;
+
+/// The lines a block's text is laid out in, top to bottom: { top, bottom } each, in the window's coordinates.
+function linesOf(block) {
+  const r = document.createRange();
+  r.selectNodeContents(block);
+  const rects = [...r.getClientRects()].filter((c) => c.height && c.width).sort((a, b) => a.top - b.top);
+  const lines = [];
+  for (const c of rects) {
+    const line = lines.at(-1);
+    // Boxes on the same line overlap it more than not; one lower down starts the next.
+    if (line && c.top < line.bottom - Math.min(c.height, line.bottom - line.top) / 2) {
+      line.top = Math.min(line.top, c.top);
+      line.bottom = Math.max(line.bottom, c.bottom);
+    } else lines.push({ top: c.top, bottom: c.bottom });
+  }
+  return lines;
+}
+
 /// An `onPiece` for readAloudButton that keeps what's being read in the middle of the window, while following
 /// is on. `surfaceFor(k)` gives the surface of chapter k (see domSurface); the reading's start says which
 /// chapter and where it began ({ chapter, at }), and each piece's `part` how many chapters on from there it is.
 /// It also marks the paragraph being read, subtly (see .reading-para), whether or not it follows.
 /// `onAt(k, at)`, if given, is told where in chapter k each piece begins, and onAt(null) once reading stops.
 function readingFollower(surfaceFor, onAt = null) {
-  let run = null, chapter = -1, cursor = 0, last = 0, lit = null;
-  const light = (block) => {
-    if (block === lit) return;
-    lit?.classList.remove("reading-para");
-    lit = block;
-    lit?.classList.add("reading-para");
+  let run = null, chapter = -1, cursor = 0, last = 0, lit = null, band = null;
+  // A paragraph of more lines than READING_LINES is marked a window of that many lines at a time, which moves
+  // down it as it's read (see .reading-band), so the eye can keep up with the voice.
+  const light = (block, range = null) => {
+    if (block !== lit) {
+      lit?.classList.remove("reading-para", "reading-band");
+      lit = block;
+      band = null;
+      lit?.classList.add("reading-para");
+    }
+    if (!lit || !range) return;
+    const lines = linesOf(lit);
+    if (lines.length <= READING_LINES) { lit.classList.remove("reading-band"); band = null; return; }
+    const lineAt = (y) => Math.max(0, lines.findIndex((l) => y < l.bottom - 1));
+    const rects = [...range.getClientRects()].filter((r) => r.height);
+    if (!rects.length) return;
+    const first = lineAt(rects[0].top + 1), lastLine = lineAt(rects.at(-1).bottom - 1);
+    // The window stays put while what's being said is inside it; otherwise it starts at the line that begins.
+    if (band == null || first < band || lastLine >= band + READING_LINES) band = first;
+    band = Math.max(0, Math.min(band, lines.length - READING_LINES));
+    const top = lit.getBoundingClientRect().top;
+    lit.style.setProperty("--band-top", `${lines[band].top - top}px`);
+    lit.style.setProperty("--band-height", `${lines[band + READING_LINES - 1].bottom - lines[band].top}px`);
+    lit.classList.add("reading-band");
   };
   return (piece) => {
     const now = reading;
@@ -1595,7 +1633,7 @@ function readingFollower(surfaceFor, onAt = null) {
     cursor = i + piece.text.length;
     onAt?.(k, i);
     const range = surface.range(i, cursor);
-    light(paragraphOf(range.startContainer, surface.root));
+    light(paragraphOf(range.startContainer, surface.root), range);
     if (followsReading() && Date.now() - scrolledByHand > 5000) scrollToMiddle(range);
   };
 }
