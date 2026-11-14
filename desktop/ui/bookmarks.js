@@ -54,8 +54,13 @@ function domSurface(root) {
     let text = "";
     const segs = [];
     let block = null;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      // A line break inside a paragraph (verse) is kept, so its lines aren't run together when read aloud.
+      if (n.nodeType === Node.ELEMENT_NODE) {
+        if (n.tagName === "BR" && segs.length && !n.closest("[data-noread]")) text += LINE_BREAK;
+        continue;
+      }
       // Footnote numbers and notes aren't part of the text read aloud or bookmarked.
       if (n.parentElement?.closest("[data-noread]")) continue;
       let b = n.parentElement;

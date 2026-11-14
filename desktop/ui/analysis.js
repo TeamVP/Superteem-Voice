@@ -804,37 +804,138 @@ const HEADING = "\u2063";
 /// pronunciations are used for it.
 const CHAPTER = "\u2064";
 
-/// Pauses, in milliseconds at normal speed: after a sentence, after a paragraph (a line), and around a
-/// heading; `line` is added on top wherever the text breaks a line (the end of a paragraph or heading, or a
-/// blank line). All of them stretch and shrink with the reading speed (see readAloud).
-const PAUSE = { phrase: 150, sentence: 350, paragraph: 700, heading: 800, line: 120 };
+/// A line break inside a paragraph (a <br>, as in verse): a short pause, where a new paragraph has a longer one.
+const LINE_BREAK = " ";
 
-/// The text as pieces to say, each with the pause before and after it: a heading on its own; otherwise a
-/// sentence at a time, and a very long one at its commas.
+/// Pauses, in milliseconds at normal speed, on top of the voice's own. They stretch and shrink with the
+/// reading speed (see readAloud). Commas are left to the voice, which pauses at them as it says the clause;
+/// everything stronger than a comma ends a piece, so it has a pause of its own:
+///   comma      only where a clause is too long to say in one go, and is split at a comma
+///   paren      either side of a long aside in brackets
+///   dash       at a dash ( — – -- or a spaced hyphen)
+///   colon, semicolon
+///   sentence   after . ! ? (and their Chinese forms)
+///   ellipsis   after … or ... part way through a line
+///   line       a line break inside a paragraph: a line of verse, or an address
+///   list       between the items of a list
+///   paragraph  between paragraphs
+///   section    a blank line: a paragraph and a bit more
+///   heading    before and after a heading: one marked (HEADING) or written in Markdown (#)
+///   title      a short line with no punctuation at its end, before a longer one: a heading as plain text
+///   chapter    before and after a chapter's title, reading on through a book
+const PAUSE = {
+  comma: 120, paren: 200, dash: 260, colon: 320, semicolon: 320, sentence: 420, ellipsis: 450,
+  line: 380, list: 420, paragraph: 750, section: 1000,
+  heading: { before: 1000, after: 650 }, title: { before: 900, after: 550 }, chapter: { before: 1400, after: 800 },
+};
+
+/// A list item's marker: - * • or 1. 1) at the start of a line.
+const LIST_ITEM = /^(?:[-*•]|\d{1,3}[.)])\s+/;
+/// Words a full stop shortens, which don't end a sentence: "Mr. Smith", "e.g. this".
+const ABBREVIATIONS = new Set(["mr", "mrs", "ms", "dr", "st", "jr", "sr", "prof", "rev", "gen", "col", "capt", "lt", "sgt", "mt", "ft",
+  "vs", "etc", "e.g", "i.e", "cf", "viz", "no", "nos", "vol", "vols", "ch", "chap", "p", "pp", "fig", "approx", "dept", "est", "inc", "ltd", "co"]);
+
+/// Whether a line is short and unpunctuated at its end, as a heading written as plain text is.
+const bareLine = (s) => !!s && s.length <= 70 && wordCount(s) <= 10 && !LIST_ITEM.test(s) && !s.includes(LINE_BREAK)
+  && !/[.!?…:;,。！？：；，]["'”’)\]]*$/.test(s);
+
+/// A line's sentences: [{ text, end }], `end` being "sentence" or "ellipsis" (or "" for the last, with no
+/// mark). A full stop after a shortened word, an initial ("J. R.") or a dotted abbreviation doesn't end one.
+function speechSentences(line) {
+  const out = [];
+  const ends = /(\.{3}|…|[.!?]+)(["'”’)\]]*)(?:\s+|$)|([。！？])(["'”’)\]]*)/g;
+  let from = 0;
+  for (let m; (m = ends.exec(line));) {
+    const mark = m[1] ?? m[3];
+    const to = m.index + mark.length + (m[2] ?? m[4] ?? "").length;
+    if (mark === ".") {
+      const word = line.slice(from, m.index).match(/([\p{L}.]+)$/u)?.[1] ?? "";
+      // (Or a dotted one, "a.m." or "U.S.": those seldom end one.)
+      if (ABBREVIATIONS.has(word.toLowerCase()) || /^\p{Lu}$/u.test(word) || /^(?:\p{L}\.)+\p{L}$/u.test(word)) continue;
+    }
+    // An ellipsis before a word that carries on the sentence is a pause, not its end.
+    const ellipsis = mark === "..." || mark === "…";
+    const text = line.slice(from, to).trim();
+    if (text) out.push({ text, end: ellipsis ? "ellipsis" : "sentence" });
+    from = ends.lastIndex;
+  }
+  const rest = line.slice(from).trim();
+  if (rest) out.push({ text: rest, end: "" });
+  return out;
+}
+
+/// A sentence's clauses, split where it has a pause stronger than a comma: [{ text, say, pause }]. `text`
+/// is as written (so it can be found in the page); `say` is what the voice is given, ending in a comma where
+/// the dash or bracket it ended at was taken away, so the voice carries on rather than ending the sentence.
+function speechClauses(sentence) {
+  const out = [];
+  const marks = /([;；])\s*|(:\s+|：\s*)|\s*(?:—|--)\s*|\s+[–-]\s+|\s+(?=\([^)]{20,}\))|(?<=\([^)]{20,}\))\s+/g;
+  let from = 0;
+  const add = (text, pause, keep) => {
+    text = text.trim();
+    if (!text) return;
+    const say = keep || /[,，;；:：]$/.test(text) ? text : `${text},`;
+    out.push({ text, say, pause });
+  };
+  for (let m; (m = marks.exec(sentence));) {
+    if (m[0] === "") { marks.lastIndex++; continue; }
+    if (m[1]) add(sentence.slice(from, m.index + 1), PAUSE.semicolon, true);
+    else if (m[2]) add(sentence.slice(from, m.index + 1), PAUSE.colon, true);
+    else if (/[—–-]/.test(m[0])) add(sentence.slice(from, m.index), PAUSE.dash);
+    else add(sentence.slice(from, m.index), PAUSE.paren, sentence[m.index - 1] === ")");
+    from = m.index + m[0].length;
+  }
+  add(sentence.slice(from), 0, true);
+  // A clause still too long to say in one go is split at its comma nearest the middle, and again.
+  const split = (c) => {
+    if (c.text.length <= 300) return [c];
+    const commas = [...c.text.matchAll(/[,，]\s+/g)].map((m) => m.index + 1);
+    if (!commas.length) return [c];
+    const at = commas.reduce((best, i) => (Math.abs(i - c.text.length / 2) < Math.abs(best - c.text.length / 2) ? i : best));
+    const head = c.text.slice(0, at).trim(), tail = c.text.slice(at).trim();
+    return [...split({ text: head, say: head, pause: PAUSE.comma }), ...split({ text: tail, say: c.say.endsWith(",") && !c.text.endsWith(",") ? `${tail},` : tail, pause: c.pause })];
+  };
+  return out.flatMap(split);
+}
+
+/// The text as pieces to say, each with the pause before and after it (see PAUSE): a heading on its own;
+/// otherwise a clause at a time, ending at a sentence's end, a semicolon, colon, dash or long bracket, a line
+/// break or a paragraph's end.
 function speechPieces(text) {
   const pieces = [];
-  const lines = (text ?? "").replace(/\r/g, "").split("\n");
+  const lines = (text ?? "").replace(/\r/g, "").split("\n").map((l) => l.trim());
+  const atLeast = (ms) => { if (pieces.length) pieces.at(-1).after = Math.max(pieces.at(-1).after, ms); };
+  const near = (i, step) => { for (let j = i + step; j >= 0 && j < lines.length; j += step) if (lines[j]) return lines[j]; return null; };
   let part = 0;
   for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i].trim();
-    if (!raw) { if (pieces.length) pieces.at(-1).after = Math.max(pieces.at(-1).after, PAUSE.paragraph + PAUSE.line); continue; }
-    // A line marked as one, or written as one in Markdown.
+    const raw = lines[i];
+    if (!raw) { atLeast(PAUSE.section); continue; }
     // A chapter's title, once something has been read, starts the next chapter.
-    if (raw.startsWith(CHAPTER) && pieces.length) part += 1;
-    if (raw.startsWith(HEADING) || raw.startsWith(CHAPTER) || /^#{1,6}\s/.test(raw)) {
+    const chapter = raw.startsWith(CHAPTER);
+    if (chapter && pieces.length) part += 1;
+    // A line marked as a heading, or written as one in Markdown, or a short unpunctuated line between longer
+    // ones, as a heading in plain text is (a run of short ones is a list or verse instead).
+    const marked = chapter || raw.startsWith(HEADING) || /^#{1,6}\s/.test(raw);
+    const next = near(i, 1);
+    if (marked || (bareLine(raw) && next && !bareLine(next) && !bareLine(near(i, -1)))) {
       const heading = raw.replace(HEADING, "").replace(CHAPTER, "").replace(/^#{1,6}\s+/, "").trim();
-      if (heading) pieces.push({ text: heading, before: PAUSE.heading + PAUSE.line, after: PAUSE.heading + PAUSE.line, part });
+      const p = chapter ? PAUSE.chapter : marked ? PAUSE.heading : PAUSE.title;
+      if (heading) pieces.push({ text: heading, before: p.before, after: p.after, part });
       continue;
     }
-    // Sentences end at . ! ? and their Chinese forms, which have no space after them.
-    const sentences = raw.split(/(?<=[.!?…])\s+|(?<=[。！？])/).map((s) => s.trim()).filter(Boolean);
-    sentences.forEach((sentence, n) => {
-      const last = n === sentences.length - 1;
-      const parts = sentence.length > 280 ? sentence.split(/(?<=[,;，；])\s*/).filter(Boolean) : [sentence];
-      parts.forEach((bit, m) => {
-        const end = m === parts.length - 1;
-        pieces.push({ text: bit, before: 0, after: !end ? PAUSE.phrase : last ? PAUSE.paragraph + PAUSE.line : PAUSE.sentence, part });
-      });
+    const item = LIST_ITEM.test(raw);
+    const rows = raw.replace(LIST_ITEM, "").split(LINE_BREAK).map((r) => r.trim()).filter(Boolean);
+    rows.forEach((row, r) => {
+      for (const s of speechSentences(row)) {
+        const clauses = speechClauses(s.text);
+        clauses.forEach((c, n) => {
+          // A line that ends without a mark (verse often does) pauses as a line or paragraph does.
+          const pause = n < clauses.length - 1 ? c.pause : s.end === "ellipsis" ? PAUSE.ellipsis : s.end ? PAUSE.sentence : 0;
+          pieces.push({ text: c.text, ...(c.say !== c.text && { say: c.say }), before: 0, after: pause, part });
+        });
+      }
+      // The end of a line of verse, of a list's item, or of a paragraph.
+      atLeast(r < rows.length - 1 ? PAUSE.line : item && next && LIST_ITEM.test(next) ? PAUSE.list : PAUSE.paragraph);
     });
   }
   return pieces;
@@ -867,11 +968,11 @@ function pause(ms, mine) {
 async function readAloud(button, text, lang, { pieces: given, onPiece, voice: prefer, pronounce, speed, start, onEnd } = {}) {
   const pieces = given ?? speechPieces(text);
   if (!pieces.length) return;
-  // What the voice is given: the piece, with the book's own pronunciations, or with those of the chapter it's
+  // What the voice is given: the piece (its `say`, when that differs from what's written), with the book's own pronunciations, or with those of the chapter it's
   // in when there's a list, one for each chapter. onPiece still gets the words as written.
   const byPart = Array.isArray(pronounce) ? pronounce.map(respeller) : null;
   const whole = byPart ? null : respeller(pronounce);
-  const said = (piece) => (byPart ? byPart[Math.min(piece.part ?? 0, byPart.length - 1)] ?? ((t) => t) : whole)(piece.text);
+  const said = (piece) => (byPart ? byPart[Math.min(piece.part ?? 0, byPart.length - 1)] ?? ((t) => t) : whole)(piece.say ?? piece.text);
   // How fast: the speed given, looked at for each piece so a change while reading is heard from the next,
   // else the one in Settings.
   const rate = () => Math.min(READ_SPEED.max, Math.max(READ_SPEED.min, Number(typeof speed === "function" ? speed() : speed) || prefs.read_speed || 1));
