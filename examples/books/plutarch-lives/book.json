@@ -1,0 +1,1149 @@
+{
+  "format": "superteem-book",
+  "format_version": 1,
+  "id": "plutarch-lives",
+  "version": 10,
+  "title": "Plutarch's Lives",
+  "author": "Plutarch",
+  "translator": "John Dryden and others (1683–86), revised by Arthur Hugh Clough (1859)",
+  "description": "Paired lives of famous Greeks and Romans, from Theseus and Romulus to Dion and Brutus, each pair usually followed by a comparison of the two, and four single lives at the end.",
+  "language": "en",
+  "licence": "public-domain",
+  "source": "https://www.gutenberg.org/ebooks/674",
+  "published": "https://library.superteem.com/books/plutarch-lives/v10",
+  "editable": false,
+  "voice": {
+    "suggested": "vits-piper-en_GB-alan-medium",
+    "why": "A measured British narrator, suited to a long classical text."
+  },
+  "commentary": "commentary.md",
+  "pronounce": "pronounce.json",
+  "cover": "media/cover.jpg",
+  "links": [
+    {
+      "url": "https://www.gutenberg.org/ebooks/674",
+      "title": "Plutarch's Lives at Project Gutenberg",
+      "about": "The ebook this text comes from, free to read and download.",
+      "checked": "2026-11-14",
+      "archive": ""
+    }
+  ],
+  "changes": [
+    {
+      "version": 1,
+      "date": "2026-11-13",
+      "summary": "Added to the library, with each life as a chapter under its book."
+    },
+    {
+      "version": 2,
+      "date": "2026-11-13",
+      "summary": "Built into the app, so it appears on every device, Android included."
+    },
+    {
+      "version": 3,
+      "date": "2026-11-14",
+      "summary": "Suggests a voice to read it, and how to say the names the voices get wrong."
+    },
+    {
+      "version": 4,
+      "date": "2026-11-14",
+      "summary": "Names respelled from what the voice actually says, and left alone where it already says them well."
+    },
+    {
+      "version": 5,
+      "date": "2026-11-14",
+      "summary": "Commentary on the book and on Theseus, and Theseus's own pronunciations."
+    },
+    {
+      "version": 6,
+      "date": "2026-11-14",
+      "summary": "Says who wrote and translated it, where the text came from and that it's in the public domain. The preface names its author."
+    },
+    {
+      "version": 7,
+      "date": "2026-11-14",
+      "summary": "Links to its source at Project Gutenberg, which opens in your browser after saying it leaves the app."
+    },
+    {
+      "version": 8,
+      "date": "2026-11-14",
+      "summary": "Themistocles and Caesar gain commentary, with when each lived in our own calendar and what else was happening in the world, and their own pronunciations of the names in them. Where a chapter says a name its own way, that's used in place of the book's."
+    },
+    {
+      "version": 9,
+      "date": "2026-11-14",
+      "summary": "Easier, more natural ways of saying the names in Themistocles and Caesar, and Themistocles said as Thur-mistic-klees."
+    },
+    {
+      "version": 10,
+      "date": "2026-11-15",
+      "summary": "A cover, and pictures: timelines in the commentaries on Themistocles and Caesar, all in the book's gallery."
+    }
+  ],
+  "contents": [
+    {
+      "title": "Preface",
+      "chapters": [
+        {
+          "id": "plutarch-00-preface",
+          "title": "Preface",
+          "label": "",
+          "path": "chapters/00-preface",
+          "words": 72,
+          "author": "A. H. Clough"
+        }
+      ]
+    },
+    {
+      "title": "Book 1",
+      "chapters": [
+        {
+          "id": "plutarch-01-01-theseus",
+          "title": "Theseus",
+          "label": "Chapter 1",
+          "path": "chapters/01-01-theseus",
+          "words": 11958,
+          "commentary": true,
+          "pronounce": 5
+        },
+        {
+          "id": "plutarch-01-02-romulus",
+          "title": "Romulus",
+          "label": "Chapter 2",
+          "path": "chapters/01-02-romulus",
+          "words": 12504
+        },
+        {
+          "id": "plutarch-01-03-comparison-theseus-romulus",
+          "title": "Comparison of Romulus with Theseus",
+          "label": "Chapter 3",
+          "path": "chapters/01-03-comparison-theseus-romulus",
+          "words": 1514
+        }
+      ]
+    },
+    {
+      "title": "Book 2",
+      "chapters": [
+        {
+          "id": "plutarch-02-01-lycurgus",
+          "title": "Lycurgus",
+          "label": "Chapter 1",
+          "path": "chapters/02-01-lycurgus",
+          "words": 14218
+        },
+        {
+          "id": "plutarch-02-02-numa-pompilius",
+          "title": "Numa Pompilius",
+          "label": "Chapter 2",
+          "path": "chapters/02-02-numa-pompilius",
+          "words": 10608
+        },
+        {
+          "id": "plutarch-02-03-comparison-lycurgus-numa",
+          "title": "Comparison of Numa with Lycurgus",
+          "label": "Chapter 3",
+          "path": "chapters/02-03-comparison-lycurgus-numa",
+          "words": 2348
+        }
+      ]
+    },
+    {
+      "title": "Book 3",
+      "chapters": [
+        {
+          "id": "plutarch-03-01-solon",
+          "title": "Solon",
+          "label": "Chapter 1",
+          "path": "chapters/03-01-solon",
+          "words": 10681
+        },
+        {
+          "id": "plutarch-03-02-poplicola",
+          "title": "Poplicola",
+          "label": "Chapter 2",
+          "path": "chapters/03-02-poplicola",
+          "words": 7355
+        },
+        {
+          "id": "plutarch-03-03-comparison-solon-poplicola",
+          "title": "Comparison of Poplicola with Solon",
+          "label": "Chapter 3",
+          "path": "chapters/03-03-comparison-solon-poplicola",
+          "words": 1238
+        }
+      ]
+    },
+    {
+      "title": "Book 4",
+      "chapters": [
+        {
+          "id": "plutarch-04-01-themistocles",
+          "title": "Themistocles",
+          "label": "Chapter 1",
+          "path": "chapters/04-01-themistocles",
+          "words": 12013,
+          "commentary": true,
+          "pronounce": 126
+        },
+        {
+          "id": "plutarch-04-02-camillus",
+          "title": "Camillus",
+          "label": "Chapter 2",
+          "path": "chapters/04-02-camillus",
+          "words": 15913
+        }
+      ]
+    },
+    {
+      "title": "Book 5",
+      "chapters": [
+        {
+          "id": "plutarch-05-01-pericles",
+          "title": "Pericles",
+          "label": "Chapter 1",
+          "path": "chapters/05-01-pericles",
+          "words": 16914
+        },
+        {
+          "id": "plutarch-05-02-fabius",
+          "title": "Fabius",
+          "label": "Chapter 2",
+          "path": "chapters/05-02-fabius",
+          "words": 10994
+        },
+        {
+          "id": "plutarch-05-03-comparison-pericles-fabius",
+          "title": "Comparison of Pericles with Fabius",
+          "label": "Chapter 3",
+          "path": "chapters/05-03-comparison-pericles-fabius",
+          "words": 978
+        }
+      ]
+    },
+    {
+      "title": "Book 6",
+      "chapters": [
+        {
+          "id": "plutarch-06-01-alcibiades",
+          "title": "Alcibiades",
+          "label": "Chapter 1",
+          "path": "chapters/06-01-alcibiades",
+          "words": 16216
+        },
+        {
+          "id": "plutarch-06-02-coriolanus",
+          "title": "Coriolanus",
+          "label": "Chapter 2",
+          "path": "chapters/06-02-coriolanus",
+          "words": 15766
+        },
+        {
+          "id": "plutarch-06-03-comparison-alcibiades-coriolanus",
+          "title": "Comparison of Alcibiades with Coriolanus",
+          "label": "Chapter 3",
+          "path": "chapters/06-03-comparison-alcibiades-coriolanus",
+          "words": 1623
+        }
+      ]
+    },
+    {
+      "title": "Book 7",
+      "chapters": [
+        {
+          "id": "plutarch-07-01-timoleon",
+          "title": "Timoleon",
+          "label": "Chapter 1",
+          "path": "chapters/07-01-timoleon",
+          "words": 15625
+        },
+        {
+          "id": "plutarch-07-02-aemilius-paulus",
+          "title": "Aemilius Paulus",
+          "label": "Chapter 2",
+          "path": "chapters/07-02-aemilius-paulus",
+          "words": 14265
+        },
+        {
+          "id": "plutarch-07-03-comparison-timoleon-aemilius-paulus",
+          "title": "Comparison of Timoleon with Aemilius Paulus",
+          "label": "Chapter 3",
+          "path": "chapters/07-03-comparison-timoleon-aemilius-paulus",
+          "words": 757
+        }
+      ]
+    },
+    {
+      "title": "Book 8",
+      "chapters": [
+        {
+          "id": "plutarch-08-01-pelopidas",
+          "title": "Pelopidas",
+          "label": "Chapter 1",
+          "path": "chapters/08-01-pelopidas",
+          "words": 11710
+        },
+        {
+          "id": "plutarch-08-02-marcellus",
+          "title": "Marcellus",
+          "label": "Chapter 2",
+          "path": "chapters/08-02-marcellus",
+          "words": 12006
+        },
+        {
+          "id": "plutarch-08-03-comparison-pelopidas-marcellus",
+          "title": "Comparison of Pelopidas with Marcellus",
+          "label": "Chapter 3",
+          "path": "chapters/08-03-comparison-pelopidas-marcellus",
+          "words": 1202
+        }
+      ]
+    },
+    {
+      "title": "Book 9",
+      "chapters": [
+        {
+          "id": "plutarch-09-01-aristides",
+          "title": "Aristides",
+          "label": "Chapter 1",
+          "path": "chapters/09-01-aristides",
+          "words": 11223
+        },
+        {
+          "id": "plutarch-09-02-marcus-cato",
+          "title": "Marcus Cato",
+          "label": "Chapter 2",
+          "path": "chapters/09-02-marcus-cato",
+          "words": 11995
+        },
+        {
+          "id": "plutarch-09-03-comparison-aristides-marcus-cato",
+          "title": "Comparison of Aristides with Marcus Cato",
+          "label": "Chapter 3",
+          "path": "chapters/09-03-comparison-aristides-marcus-cato",
+          "words": 1992
+        }
+      ]
+    },
+    {
+      "title": "Book 10",
+      "chapters": [
+        {
+          "id": "plutarch-10-01-philopoemen",
+          "title": "Philopoemen",
+          "label": "Chapter 1",
+          "path": "chapters/10-01-philopoemen",
+          "words": 7689
+        },
+        {
+          "id": "plutarch-10-02-flamininus",
+          "title": "Flamininus",
+          "label": "Chapter 2",
+          "path": "chapters/10-02-flamininus",
+          "words": 9191
+        },
+        {
+          "id": "plutarch-10-03-comparison-philopoemen-flamininus",
+          "title": "Comparison of Philopoemen with Flamininus",
+          "label": "Chapter 3",
+          "path": "chapters/10-03-comparison-philopoemen-flamininus",
+          "words": 874
+        }
+      ]
+    },
+    {
+      "title": "Book 11",
+      "chapters": [
+        {
+          "id": "plutarch-11-01-pyrrhus",
+          "title": "Pyrrhus",
+          "label": "Chapter 1",
+          "path": "chapters/11-01-pyrrhus",
+          "words": 15301
+        },
+        {
+          "id": "plutarch-11-02-caius-marius",
+          "title": "Caius Marius",
+          "label": "Chapter 2",
+          "path": "chapters/11-02-caius-marius",
+          "words": 17995
+        }
+      ]
+    },
+    {
+      "title": "Book 12",
+      "chapters": [
+        {
+          "id": "plutarch-12-01-lysander",
+          "title": "Lysander",
+          "label": "Chapter 1",
+          "path": "chapters/12-01-lysander",
+          "words": 11611
+        },
+        {
+          "id": "plutarch-12-02-sylla",
+          "title": "Sylla",
+          "label": "Chapter 2",
+          "path": "chapters/12-02-sylla",
+          "words": 16059
+        },
+        {
+          "id": "plutarch-12-03-comparison-lysander-sylla",
+          "title": "Comparison of Lysander with Sylla",
+          "label": "Chapter 3",
+          "path": "chapters/12-03-comparison-lysander-sylla",
+          "words": 1705
+        }
+      ]
+    },
+    {
+      "title": "Book 13",
+      "chapters": [
+        {
+          "id": "plutarch-13-01-cimon",
+          "title": "Cimon",
+          "label": "Chapter 1",
+          "path": "chapters/13-01-cimon",
+          "words": 8664
+        },
+        {
+          "id": "plutarch-13-02-lucullus",
+          "title": "Lucullus",
+          "label": "Chapter 2",
+          "path": "chapters/13-02-lucullus",
+          "words": 18178
+        },
+        {
+          "id": "plutarch-13-03-comparison-cimon-lucullus",
+          "title": "Comparison of Lucullus with Cimon",
+          "label": "Chapter 3",
+          "path": "chapters/13-03-comparison-cimon-lucullus",
+          "words": 1242
+        }
+      ]
+    },
+    {
+      "title": "Book 14",
+      "chapters": [
+        {
+          "id": "plutarch-14-01-nicias",
+          "title": "Nicias",
+          "label": "Chapter 1",
+          "path": "chapters/14-01-nicias",
+          "words": 13076
+        },
+        {
+          "id": "plutarch-14-02-crassus",
+          "title": "Crassus",
+          "label": "Chapter 2",
+          "path": "chapters/14-02-crassus",
+          "words": 14427
+        },
+        {
+          "id": "plutarch-14-03-comparison-nicias-crassus",
+          "title": "Comparison of Crassus with Nicias",
+          "label": "Chapter 3",
+          "path": "chapters/14-03-comparison-nicias-crassus",
+          "words": 1756
+        }
+      ]
+    },
+    {
+      "title": "Book 15",
+      "chapters": [
+        {
+          "id": "plutarch-15-01-eumenes",
+          "title": "Eumenes",
+          "label": "Chapter 1",
+          "path": "chapters/15-01-eumenes",
+          "words": 7666
+        },
+        {
+          "id": "plutarch-15-02-sertorius",
+          "title": "Sertorius",
+          "label": "Chapter 2",
+          "path": "chapters/15-02-sertorius",
+          "words": 11066
+        },
+        {
+          "id": "plutarch-15-03-comparison-eumenes-sertorius",
+          "title": "Comparison of Sertorius with Eumenes",
+          "label": "Chapter 3",
+          "path": "chapters/15-03-comparison-eumenes-sertorius",
+          "words": 682
+        }
+      ]
+    },
+    {
+      "title": "Book 16",
+      "chapters": [
+        {
+          "id": "plutarch-16-01-agesilaus",
+          "title": "Agesilaus",
+          "label": "Chapter 1",
+          "path": "chapters/16-01-agesilaus",
+          "words": 15749
+        },
+        {
+          "id": "plutarch-16-02-pompey",
+          "title": "Pompey",
+          "label": "Chapter 2",
+          "path": "chapters/16-02-pompey",
+          "words": 33805
+        },
+        {
+          "id": "plutarch-16-03-comparison-agesilaus-pompey",
+          "title": "Comparison of Pompey and Agesilaus",
+          "label": "Chapter 3",
+          "path": "chapters/16-03-comparison-agesilaus-pompey",
+          "words": 1967
+        }
+      ]
+    },
+    {
+      "title": "Book 17",
+      "chapters": [
+        {
+          "id": "plutarch-17-01-alexander",
+          "title": "Alexander",
+          "label": "Chapter 1",
+          "path": "chapters/17-01-alexander",
+          "words": 31474
+        },
+        {
+          "id": "plutarch-17-02-caesar",
+          "title": "Caesar",
+          "label": "Chapter 2",
+          "path": "chapters/17-02-caesar",
+          "words": 24081,
+          "commentary": true,
+          "pronounce": 114
+        }
+      ]
+    },
+    {
+      "title": "Book 18",
+      "chapters": [
+        {
+          "id": "plutarch-18-01-phocion",
+          "title": "Phocion",
+          "label": "Chapter 1",
+          "path": "chapters/18-01-phocion",
+          "words": 12789
+        },
+        {
+          "id": "plutarch-18-02-cato-the-younger",
+          "title": "Cato the Younger",
+          "label": "Chapter 2",
+          "path": "chapters/18-02-cato-the-younger",
+          "words": 24694
+        }
+      ]
+    },
+    {
+      "title": "Book 19",
+      "chapters": [
+        {
+          "id": "plutarch-19-01-agis",
+          "title": "Agis",
+          "label": "Chapter 1",
+          "path": "chapters/19-01-agis",
+          "words": 6982
+        },
+        {
+          "id": "plutarch-19-02-cleomenes",
+          "title": "Cleomenes",
+          "label": "Chapter 2",
+          "path": "chapters/19-02-cleomenes",
+          "words": 12344
+        },
+        {
+          "id": "plutarch-19-03-tiberius-gracchus",
+          "title": "Tiberius Gracchus",
+          "label": "Chapter 3",
+          "path": "chapters/19-03-tiberius-gracchus",
+          "words": 7966
+        },
+        {
+          "id": "plutarch-19-04-caius-gracchus",
+          "title": "Caius Gracchus",
+          "label": "Chapter 4",
+          "path": "chapters/19-04-caius-gracchus",
+          "words": 6769
+        },
+        {
+          "id": "plutarch-19-05-comparison-agis-cleomenes-gracchi",
+          "title": "Comparison of Tiberius and Caius Gracchus with Agis and Cleomenes",
+          "label": "Chapter 5",
+          "path": "chapters/19-05-comparison-agis-cleomenes-gracchi",
+          "words": 1546
+        }
+      ]
+    },
+    {
+      "title": "Book 20",
+      "chapters": [
+        {
+          "id": "plutarch-20-01-demosthenes",
+          "title": "Demosthenes",
+          "label": "Chapter 1",
+          "path": "chapters/20-01-demosthenes",
+          "words": 10638
+        },
+        {
+          "id": "plutarch-20-02-cicero",
+          "title": "Cicero",
+          "label": "Chapter 2",
+          "path": "chapters/20-02-cicero",
+          "words": 16914
+        },
+        {
+          "id": "plutarch-20-03-comparison-demosthenes-cicero",
+          "title": "Comparison of Demosthenes and Cicero",
+          "label": "Chapter 3",
+          "path": "chapters/20-03-comparison-demosthenes-cicero",
+          "words": 1428
+        }
+      ]
+    },
+    {
+      "title": "Book 21",
+      "chapters": [
+        {
+          "id": "plutarch-21-01-demetrius",
+          "title": "Demetrius",
+          "label": "Chapter 1",
+          "path": "chapters/21-01-demetrius",
+          "words": 18635
+        },
+        {
+          "id": "plutarch-21-02-antony",
+          "title": "Antony",
+          "label": "Chapter 2",
+          "path": "chapters/21-02-antony",
+          "words": 27914
+        },
+        {
+          "id": "plutarch-21-03-comparison-demetrius-antony",
+          "title": "Comparison of Demetrius and Antony",
+          "label": "Chapter 3",
+          "path": "chapters/21-03-comparison-demetrius-antony",
+          "words": 1169
+        }
+      ]
+    },
+    {
+      "title": "Book 22",
+      "chapters": [
+        {
+          "id": "plutarch-22-01-dion",
+          "title": "Dion",
+          "label": "Chapter 1",
+          "path": "chapters/22-01-dion",
+          "words": 17856
+        },
+        {
+          "id": "plutarch-22-02-marcus-brutus",
+          "title": "Marcus Brutus",
+          "label": "Chapter 2",
+          "path": "chapters/22-02-marcus-brutus",
+          "words": 19493
+        },
+        {
+          "id": "plutarch-22-03-comparison-dion-marcus-brutus",
+          "title": "Comparison of Dion and Brutus",
+          "label": "Chapter 3",
+          "path": "chapters/22-03-comparison-dion-marcus-brutus",
+          "words": 1331
+        }
+      ]
+    },
+    {
+      "title": "Book 24",
+      "chapters": [
+        {
+          "id": "plutarch-24-01-artaxerxes",
+          "title": "Artaxerxes",
+          "label": "Chapter 1",
+          "path": "chapters/24-01-artaxerxes",
+          "words": 11321
+        },
+        {
+          "id": "plutarch-24-02-aratus",
+          "title": "Aratus",
+          "label": "Chapter 2",
+          "path": "chapters/24-02-aratus",
+          "words": 17205
+        },
+        {
+          "id": "plutarch-24-03-galba",
+          "title": "Galba",
+          "label": "Chapter 3",
+          "path": "chapters/24-03-galba",
+          "words": 9173
+        },
+        {
+          "id": "plutarch-24-04-otho",
+          "title": "Otho",
+          "label": "Chapter 4",
+          "path": "chapters/24-04-otho",
+          "words": 6105
+        }
+      ]
+    }
+  ],
+  "media": [
+    {
+      "path": "media/cover.jpg",
+      "alt": "The cover: Plutarch's Lives, translated by John Dryden, revised by Arthur Hugh Clough",
+      "caption": "",
+      "credit": "Made for this edition by Superteem",
+      "licence": "CC0-1.0",
+      "source": "",
+      "used_in": [
+        "book"
+      ]
+    },
+    {
+      "path": "media/timelines/plutarchs-world.png",
+      "alt": "Timeline from 540 BC to AD 140: Themistocles born about 524 BC, Salamis 480 BC, Caesar born 100 BC, Augustus 27 BC, Plutarch born about AD 46 and writing about AD 100",
+      "caption": "Themistocles, Caesar and Plutarch on one line: Plutarch is as far from Themistocles as we are from the first printed books",
+      "credit": "Made for this edition by Superteem",
+      "licence": "CC0-1.0",
+      "source": "",
+      "used_in": [
+        "plutarch-04-01-themistocles",
+        "plutarch-17-02-caesar"
+      ]
+    },
+    {
+      "path": "media/timelines/themistocles.png",
+      "alt": "Timeline of Themistocles: born about 524 BC, archon 493, Marathon 490, the fleet built 483, Salamis 480, Plataea 479, ostracised about 471, died about 459 BC",
+      "caption": "The life of Themistocles",
+      "credit": "Made for this edition by Superteem",
+      "licence": "CC0-1.0",
+      "source": "",
+      "used_in": [
+        "plutarch-04-01-themistocles"
+      ]
+    },
+    {
+      "path": "media/timelines/caesar.png",
+      "alt": "Timeline of Julius Caesar: born 100 BC, taken by pirates about 75, chief priest 63, consul 59, Gaul from 58, the Rubicon 49, Pharsalus 48, the calendar reformed 46, killed 44 BC",
+      "caption": "The life of Julius Caesar",
+      "credit": "Made for this edition by Superteem",
+      "licence": "CC0-1.0",
+      "source": "",
+      "used_in": [
+        "plutarch-17-02-caesar"
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "chapters/00-preface/text.md",
+      "bytes": 457,
+      "sha256": "cc8e81d12e5ea5951a518895bb99c3a5d6608c340b436985c17c7b1a766e7d82"
+    },
+    {
+      "path": "chapters/01-01-theseus/commentary.md",
+      "bytes": 795,
+      "sha256": "e4a86fb161d0bfe5582e1f9291fd75d3e1f6cb7e7ceaed1a978a8c45c0e179d1"
+    },
+    {
+      "path": "chapters/01-01-theseus/pronounce.json",
+      "bytes": 156,
+      "sha256": "7ad4c589711f2d8869ea2f78aad09d99aaa6a6873ee1e3abff02efa1a539710a"
+    },
+    {
+      "path": "chapters/01-01-theseus/text.md",
+      "bytes": 67718,
+      "sha256": "bd814159ac2f60678f2853a65fa31a92cf73952ac3dc7b07a94300e807c6faee"
+    },
+    {
+      "path": "chapters/01-02-romulus/text.md",
+      "bytes": 71902,
+      "sha256": "cf83fb8d36ad5c3739cecec0a6aa0ad0956b65f3d0a169bfff7e750907615f26"
+    },
+    {
+      "path": "chapters/01-03-comparison-theseus-romulus/text.md",
+      "bytes": 8691,
+      "sha256": "4d075f237f25199a973e33cb3ceec9f5c3174664b4831a036547b81e24c1d313"
+    },
+    {
+      "path": "chapters/02-01-lycurgus/text.md",
+      "bytes": 80642,
+      "sha256": "8a4d2083bd0860c751c295ffc9c616b8e73f842a6c3a88b9a7e5821e6e9aa4d4"
+    },
+    {
+      "path": "chapters/02-02-numa-pompilius/text.md",
+      "bytes": 60517,
+      "sha256": "ca447f22018c655b70a72e20f5b579474686e926ff7f206147b48af3599b172f"
+    },
+    {
+      "path": "chapters/02-03-comparison-lycurgus-numa/text.md",
+      "bytes": 13642,
+      "sha256": "70e2f5f59b508ac0b29a220d71fc793594cd7a0c62b966396da8377f3a186fac"
+    },
+    {
+      "path": "chapters/03-01-solon/text.md",
+      "bytes": 60929,
+      "sha256": "165a82af016ad87cc8b02ea2183d56df32d565264b4495477aa4b75b580a11c5"
+    },
+    {
+      "path": "chapters/03-02-poplicola/text.md",
+      "bytes": 43065,
+      "sha256": "2a044b416ef3a55a23f27e94b965df1b07b0283276ee9fd20529a606d7c81706"
+    },
+    {
+      "path": "chapters/03-03-comparison-solon-poplicola/text.md",
+      "bytes": 7432,
+      "sha256": "c02e220ec460c023c3c79c144393eacfe8888545dc4a15c13835d09192d6d282"
+    },
+    {
+      "path": "chapters/04-01-themistocles/commentary.md",
+      "bytes": 5379,
+      "sha256": "07038d8363b2a713b8404efa99e733658dbf40b1e1692a113b1a10c25fb00916"
+    },
+    {
+      "path": "chapters/04-01-themistocles/pronounce.json",
+      "bytes": 3605,
+      "sha256": "586ebd60afe40734cc1113461020970835ffc2f435c975d0eeaf0c769f9556f9"
+    },
+    {
+      "path": "chapters/04-01-themistocles/text.md",
+      "bytes": 68926,
+      "sha256": "137d4939fb8156debce91fe8a2af201d3b8cf3e7dec3d61d86aa48f16f19134c"
+    },
+    {
+      "path": "chapters/04-02-camillus/text.md",
+      "bytes": 90790,
+      "sha256": "0af27e5acbf80e18ee9178d9720dd45032c2aae90d28a56b9eb6396be7fd8d9c"
+    },
+    {
+      "path": "chapters/05-01-pericles/text.md",
+      "bytes": 96875,
+      "sha256": "2ca48ae6de6d01aac7ecde2ebdef5c855b0b509dbf3a82775b86810f4c33f426"
+    },
+    {
+      "path": "chapters/05-02-fabius/text.md",
+      "bytes": 62410,
+      "sha256": "b91db97b6efec1cf4895384fe2e2844fb83a07730c5c9027cd0cc3bee923bd29"
+    },
+    {
+      "path": "chapters/05-03-comparison-pericles-fabius/text.md",
+      "bytes": 5648,
+      "sha256": "f2efdd14b9953f3bfcdaa881ccf7ee43ea9ddf9ca65b9b1db1ff358ccc178b45"
+    },
+    {
+      "path": "chapters/06-01-alcibiades/text.md",
+      "bytes": 93706,
+      "sha256": "893b009033af57eead4e2656be0b43944bdeb5b40a7a50d906972bdc302c3241"
+    },
+    {
+      "path": "chapters/06-02-coriolanus/text.md",
+      "bytes": 90311,
+      "sha256": "1670ef1feb45bac5b9e0944cd2a2789787c914bfc7c592dd43d0db016c29ea39"
+    },
+    {
+      "path": "chapters/06-03-comparison-alcibiades-coriolanus/text.md",
+      "bytes": 9543,
+      "sha256": "d748738b1dd1e3dd596cba1b6f157465ea5a15ae39ce33ae335fbf6cd1c9df25"
+    },
+    {
+      "path": "chapters/07-01-timoleon/text.md",
+      "bytes": 90381,
+      "sha256": "154d4654030f0d74725150b739683ea2167df315f76015cfb1793bc0cf42687c"
+    },
+    {
+      "path": "chapters/07-02-aemilius-paulus/text.md",
+      "bytes": 80967,
+      "sha256": "1615e6cf23b6038fee19a820b53e9673d4eefb16aed036c873da46723da2ec1b"
+    },
+    {
+      "path": "chapters/07-03-comparison-timoleon-aemilius-paulus/text.md",
+      "bytes": 4421,
+      "sha256": "939fd71adfa5b1e070a628bde5e2f7d9ef13a3e2046d023cb353c5371dfba3ae"
+    },
+    {
+      "path": "chapters/08-01-pelopidas/text.md",
+      "bytes": 68782,
+      "sha256": "9f1bf09b59a6736abc4196cd93b64e41bcc10cff61f7687c739fd314a0ff52d0"
+    },
+    {
+      "path": "chapters/08-02-marcellus/text.md",
+      "bytes": 69625,
+      "sha256": "4128c441d4927d762fddff94d3ac77aa2213b377417b2875c00c2419c5e90087"
+    },
+    {
+      "path": "chapters/08-03-comparison-pelopidas-marcellus/text.md",
+      "bytes": 6969,
+      "sha256": "eade08c6c9ace286805234c5f5ee4207d5a5b9e94b507c3fc00f9ac30a0593e3"
+    },
+    {
+      "path": "chapters/09-01-aristides/text.md",
+      "bytes": 66110,
+      "sha256": "826d2f329c4290c5ebdeba105f7517a503e7697cd6492725107c639bbc3e6cd0"
+    },
+    {
+      "path": "chapters/09-02-marcus-cato/text.md",
+      "bytes": 66907,
+      "sha256": "80e358bf904e75991108031206b5a1a87472ccabab68c2908f131044c8d16133"
+    },
+    {
+      "path": "chapters/09-03-comparison-aristides-marcus-cato/text.md",
+      "bytes": 11439,
+      "sha256": "fc4ed622890ac832502bd6fbe3be2e80a8fb98eb16d4adf6ab4ab3dfe0f2a5d9"
+    },
+    {
+      "path": "chapters/10-01-philopoemen/text.md",
+      "bytes": 44841,
+      "sha256": "25500ef729237f6d20d67edd0f9c2960ada77ec8fad22bedff54c5048b5ba06d"
+    },
+    {
+      "path": "chapters/10-02-flamininus/text.md",
+      "bytes": 52762,
+      "sha256": "04c59ab0ccf574cea7be72dd2fae73c06d9511884e00381cb18a7a791dfad22f"
+    },
+    {
+      "path": "chapters/10-03-comparison-philopoemen-flamininus/text.md",
+      "bytes": 5062,
+      "sha256": "79c7899fbec2fe106d069c72a36c9fdb536dfcbf073b9d6d781c57363dc29b00"
+    },
+    {
+      "path": "chapters/11-01-pyrrhus/text.md",
+      "bytes": 87682,
+      "sha256": "e1b1e71076bda65f967c989222b6a8e001536668a3ac079f2a37d1ec54f55e8d"
+    },
+    {
+      "path": "chapters/11-02-caius-marius/text.md",
+      "bytes": 103540,
+      "sha256": "2e2dc76fd39ee5878dfc43f58aee159be46ce7432b2e20e17e5f9a6196c2ce29"
+    },
+    {
+      "path": "chapters/12-01-lysander/text.md",
+      "bytes": 66534,
+      "sha256": "854e7eba0a019fdf9d18c16fde84fe994529c11b5d51441f26fec83d67e201da"
+    },
+    {
+      "path": "chapters/12-02-sylla/text.md",
+      "bytes": 92857,
+      "sha256": "a4e9400e927181825b6db3415022c60600dc56d76a002c5cb1335c88cec452c3"
+    },
+    {
+      "path": "chapters/12-03-comparison-lysander-sylla/text.md",
+      "bytes": 9880,
+      "sha256": "8735fae5e194a09f0862d98c210c31db54d3c856069cc4f3fa5fd47f8371b56b"
+    },
+    {
+      "path": "chapters/13-01-cimon/text.md",
+      "bytes": 50128,
+      "sha256": "aa7e9cc53876075b145ac7a4d346d21f6a9633b2db91b9f2f21c3177b8a73e14"
+    },
+    {
+      "path": "chapters/13-02-lucullus/text.md",
+      "bytes": 104452,
+      "sha256": "91d1d2dd367b925881483651da9d8efad135018bc2b78c6821d8efdf11be6029"
+    },
+    {
+      "path": "chapters/13-03-comparison-cimon-lucullus/text.md",
+      "bytes": 7176,
+      "sha256": "84c947128b75d6eb66d1ed7990e121738a47db031a3835c711960e9b02b589b8"
+    },
+    {
+      "path": "chapters/14-01-nicias/text.md",
+      "bytes": 75129,
+      "sha256": "af9df7400db5badb1ab9553548696a34194eb9a1acd33a97e21805d563dd6fe1"
+    },
+    {
+      "path": "chapters/14-02-crassus/text.md",
+      "bytes": 81560,
+      "sha256": "d63d247c3858593391a0285c49be4011df6504936713f5fcdbeba55417f4e808"
+    },
+    {
+      "path": "chapters/14-03-comparison-nicias-crassus/text.md",
+      "bytes": 10146,
+      "sha256": "54d0035bbf2b420cde9061757d66a419bb070663944593128461ec208aa21123"
+    },
+    {
+      "path": "chapters/15-01-eumenes/text.md",
+      "bytes": 44353,
+      "sha256": "2f7a79da6bb733471c0d9bbc360b41846c4a00185425b795a393652184086331"
+    },
+    {
+      "path": "chapters/15-02-sertorius/text.md",
+      "bytes": 63506,
+      "sha256": "7c1627264b1200968b8c144ef8fe47af1333b75603a26bac274199fd09bc5c37"
+    },
+    {
+      "path": "chapters/15-03-comparison-eumenes-sertorius/text.md",
+      "bytes": 3947,
+      "sha256": "252eb1540b45d5a7be75578da637ebf99811025fd5c32a5c3717213425a451b5"
+    },
+    {
+      "path": "chapters/16-01-agesilaus/text.md",
+      "bytes": 90209,
+      "sha256": "fb3a0ff78c8a34fde3f23e06abb619c89863a4d9acb1d15135ddcfea5f7235dc"
+    },
+    {
+      "path": "chapters/16-02-pompey/text.md",
+      "bytes": 192078,
+      "sha256": "79301a0c6cd164dfb23917145a37d9e5c63b2436aebc6f3c3768da642eaf2c5e"
+    },
+    {
+      "path": "chapters/16-03-comparison-agesilaus-pompey/text.md",
+      "bytes": 11287,
+      "sha256": "d6c94ac3d849210d70de0b3658b746dab59b45ee857b82e1f99d609bcc1baee0"
+    },
+    {
+      "path": "chapters/17-01-alexander/text.md",
+      "bytes": 177660,
+      "sha256": "cdc82d1c2abbc965bf7c9556f6b7c43271bb28ed4ca7b64bc720e28c9824d568"
+    },
+    {
+      "path": "chapters/17-02-caesar/commentary.md",
+      "bytes": 6158,
+      "sha256": "4ab4522d6810e29261ce18c4d5d60cf6b3193d83fe21ea86a84b5d6b5aba3f2b"
+    },
+    {
+      "path": "chapters/17-02-caesar/pronounce.json",
+      "bytes": 3103,
+      "sha256": "36328f960fc90876e91b8010b518cd7702abad4fb896dbbb9dc6648137e2814f"
+    },
+    {
+      "path": "chapters/17-02-caesar/text.md",
+      "bytes": 134934,
+      "sha256": "619c78d7bebca637ce48fb94ce5ff6dc34ba5db0abbeb380c8e40bc3ec1b657d"
+    },
+    {
+      "path": "chapters/18-01-phocion/text.md",
+      "bytes": 74271,
+      "sha256": "70ac0ce34442131aeeed7084bfb3c48c2aff7eecc5f4148df63a6a0bd71f2b38"
+    },
+    {
+      "path": "chapters/18-02-cato-the-younger/text.md",
+      "bytes": 138752,
+      "sha256": "b2ef46ebd64afee771e4f5ad9be7dd6eb96bb94c765d7ed49533e879720cca07"
+    },
+    {
+      "path": "chapters/19-01-agis/text.md",
+      "bytes": 39719,
+      "sha256": "7298e13f2d1ae29fb2c333e30832e9b8f021fa656df04e5e458a92926cbdea24"
+    },
+    {
+      "path": "chapters/19-02-cleomenes/text.md",
+      "bytes": 71402,
+      "sha256": "7874323b5ce226cb63d8676f7fc2c48db2cb23e3b6d28b27cd9d6d259e703d72"
+    },
+    {
+      "path": "chapters/19-03-tiberius-gracchus/text.md",
+      "bytes": 46303,
+      "sha256": "3fd52f65a3de060f5e987b7dee6f33357755af50a1530ffc779a1dc7fa8a84c4"
+    },
+    {
+      "path": "chapters/19-04-caius-gracchus/text.md",
+      "bytes": 39283,
+      "sha256": "447bfb843b3efdb9b8a22b6cdc06fa922482303f54c114e4978843c05f36eda4"
+    },
+    {
+      "path": "chapters/19-05-comparison-agis-cleomenes-gracchi/text.md",
+      "bytes": 9080,
+      "sha256": "efef4dfd06e08b0413aed80a80da655c2ad9fc0d41e393322ba266c37155c381"
+    },
+    {
+      "path": "chapters/20-01-demosthenes/text.md",
+      "bytes": 60714,
+      "sha256": "4b7d364b08c424dd0e07da9a156c5e3439ab385c6790cd9c31b3e61e250c223d"
+    },
+    {
+      "path": "chapters/20-02-cicero/text.md",
+      "bytes": 97193,
+      "sha256": "1c639e21e6a8a02df3648546ce57438c25295ee1fc77a931823e8709babea197"
+    },
+    {
+      "path": "chapters/20-03-comparison-demosthenes-cicero/text.md",
+      "bytes": 8439,
+      "sha256": "47136807453b6ccb9f482ffbe45f14377f9332171d13e3f03982e7fd233a19bb"
+    },
+    {
+      "path": "chapters/21-01-demetrius/text.md",
+      "bytes": 107278,
+      "sha256": "ef50826c26ae02cc02a31014116b6df14e95d0fa23a49f4896ba1d1db45255dd"
+    },
+    {
+      "path": "chapters/21-02-antony/text.md",
+      "bytes": 157107,
+      "sha256": "035b307399dbf55d4aaa3640077cce8c35552fc731fe6dfeb8c36edc8183e797"
+    },
+    {
+      "path": "chapters/21-03-comparison-demetrius-antony/text.md",
+      "bytes": 6793,
+      "sha256": "1caebd089f123da04c92485791a8a228f88128483788d2dbc02e765cf7cf3618"
+    },
+    {
+      "path": "chapters/22-01-dion/text.md",
+      "bytes": 103104,
+      "sha256": "1c9cb979f479700b67834f13b58d1fcbd98a322e6a6a46c86f3c92f95be2d53e"
+    },
+    {
+      "path": "chapters/22-02-marcus-brutus/text.md",
+      "bytes": 108920,
+      "sha256": "1e6c611efd90754ff28f83832635521a43f1722f96c8d4f035d2378fe53c56c8"
+    },
+    {
+      "path": "chapters/22-03-comparison-dion-marcus-brutus/text.md",
+      "bytes": 7539,
+      "sha256": "b737275cfa96744ca867fbe4e70fa3faa9ecdec555ad9c68bc51e3e529d7f167"
+    },
+    {
+      "path": "chapters/24-01-artaxerxes/text.md",
+      "bytes": 62979,
+      "sha256": "4d49e8b7f4f4337f5bfa6845c2bb3354a8234adabfc4d82333b3f607ffd46e08"
+    },
+    {
+      "path": "chapters/24-02-aratus/text.md",
+      "bytes": 97858,
+      "sha256": "92b8f7c36307e346fbb9fef58b6318cbb2b51fe1079e003c153ed44427807d8f"
+    },
+    {
+      "path": "chapters/24-03-galba/text.md",
+      "bytes": 52304,
+      "sha256": "812bda9aa6305877cdba52e74669f79125d5c4e28ba8db84c99caa6447d198ba"
+    },
+    {
+      "path": "chapters/24-04-otho/text.md",
+      "bytes": 34701,
+      "sha256": "97c136881647e29cf69e5e36daf07ff07b0847fc4e6c4ed1eb9289db0d1aafbc"
+    },
+    {
+      "path": "commentary.md",
+      "bytes": 804,
+      "sha256": "fb70e7bf5b18bbf7e117bf2e4b7de03dc74c04d6909abec69f357e0626125ffb"
+    },
+    {
+      "path": "media/cover.jpg",
+      "bytes": 86285,
+      "sha256": "3ea848615d48dbf82a5649f85237d8c677e32b090d0e686dc76372f87006de6c"
+    },
+    {
+      "path": "media/timelines/caesar.png",
+      "bytes": 86156,
+      "sha256": "1717d1a358b96a0b2e301137c870e85a6ff69721ed52738c71b1a8fe94440c55"
+    },
+    {
+      "path": "media/timelines/plutarchs-world.png",
+      "bytes": 58961,
+      "sha256": "a110c5dff0957023de149a49462e02a0e9465f3bebe10264fc27dd3fb3e793ca"
+    },
+    {
+      "path": "media/timelines/themistocles.png",
+      "bytes": 83931,
+      "sha256": "330457a64bd74192cf193e035778d20b324ee1ebc604089a20ef248b903f05ad"
+    },
+    {
+      "path": "pronounce.json",
+      "bytes": 5073,
+      "sha256": "ccc78475e4d857f07d9004c515d89f6e30b9b7ed2175723fb8fd9ad793dc198e"
+    }
+  ]
+}
