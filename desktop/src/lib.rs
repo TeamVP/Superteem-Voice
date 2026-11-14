@@ -1446,6 +1446,22 @@ fn set_book_details(id: String, details: books::BookDetails) -> Result<(), Strin
     books::set_details(&id, details)
 }
 
+/// Opens a web page or an email outside the app, in the system's browser or mail app. The page asks the
+/// person first, saying it leaves the app; this only checks the address is one that can go.
+#[tauri::command]
+async fn open_external(url: String) -> Result<(), String> {
+    if !books::outside_address(&url) {
+        return Err("That link can't be opened.".into());
+    }
+    blocking(move || recorder::open_url(&url)).await?
+}
+
+/// What's wrong with a book's own files: each missing, or not the one it lists.
+#[tauri::command]
+fn book_file_problems(id: String) -> Result<Vec<String>, String> {
+    books::file_problems(&id)
+}
+
 /// Where reading aloud last stopped in a book, or null.
 #[tauri::command]
 fn book_listen_place(id: String) -> Option<books::ListenPlace> {
@@ -3222,6 +3238,8 @@ pub fn run() {
             set_book_extras,
             set_note_extras,
             set_book_details,
+            open_external,
+            book_file_problems,
             set_book_listen_place,
             search_book,
             book_for_note,

@@ -92,6 +92,80 @@ pub struct Book {
     /// What changed in each version, newest last.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub changes: Vec<BookChange>,
+    /// The book's own files (images, audio, scans), kept in its folder and shown only from there. Chapters
+    /// show one as `attachment:book/<name>`. Each is listed with its fingerprint, so a published version can't
+    /// change under a reader.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<BookFile>,
+    /// The web pages the book may link to. In a book kept for reading, a link to anything else is shown as
+    /// plain text; these open only in the system's browser, after saying they leave the app.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<BookLink>,
+}
+
+/// One of a book's own files.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BookFile {
+    /// Its name in the book's folder ("attica-map.jpg").
+    pub name: String,
+    /// What it is, as a media type ("image/jpeg").
+    pub kind: String,
+    pub size: u64,
+    /// Its SHA-256, in hex.
+    pub sha256: String,
+    /// What it shows, for someone who can't see it.
+    pub alt: String,
+    pub caption: String,
+    /// Who made it.
+    pub credit: String,
+    /// As a book's `licence`.
+    pub licence: String,
+}
+
+/// A web page outside the library that a book links to.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BookLink {
+    /// The address, exactly as the chapters write it. Only https:// (or mailto:).
+    pub url: String,
+    pub title: String,
+    /// What's there, in a sentence.
+    pub about: String,
+    /// When the librarian last checked it said what it should ("2026-11-14"); empty when never.
+    pub checked: String,
+    /// A copy kept elsewhere (an archive's address), for when the page changes or goes; empty for none.
+    pub archive: String,
+}
+
+/// Whether an address may be opened outside the app: a web page (https://, or http:// with a warning) or an
+/// email (mailto:), whole, with nothing in it that could be taken for anything else.
+pub fn outside_address(url: &str) -> bool {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"));
+    let host_ok = match rest {
+        Some(r) => r.split(['/', '?', '#']).next().is_some_and(|h| !h.is_empty() && !h.contains('@')),
+        None => url.strip_prefix("mailto:").is_some_and(|m| m.contains('@')),
+    };
+    host_ok && url.len() <= 2048 && !url.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '"' | '<' | '>' | '\\' | '^' | '`' | '{' | '}' | '|'))
+}
+
+/// What's wrong with a book's files: each listed file that's missing, or whose size or fingerprint differs
+/// from its listing. Empty when all is as listed.
+pub fn file_problems(id: &str) -> Result<Vec<String>, String> {
+    use sha2::Digest;
+    let book = load(id)?;
+    let mut problems = Vec::new();
+    for f in &book.files {
+        let Ok(bytes) = file_path(id, &f.name).and_then(|p| std::fs::read(p).map_err(|e| e.to_string())) else {
+            problems.push(format!("{} is missing.", f.name));
+            continue;
+        };
+        let hash: String = sha2::Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+        if bytes.len() as u64 != f.size || !hash.eq_ignore_ascii_case(&f.sha256) {
+            problems.push(format!("{} isn't the file the book lists.", f.name));
+        }
+    }
+    Ok(problems)
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -600,7 +674,7 @@ fn install_bundled(now: u64) -> Result<(), String> {
 }
 
 /// The example book's version, which is its `version`: what changed in each is in its `changes`.
-const EXAMPLE_BOOK: u32 = 6;
+const EXAMPLE_BOOK: u32 = 7;
 const EXAMPLE_ID: &str = "plutarch-lives";
 
 fn example_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf> {
@@ -648,6 +722,24 @@ mod tests {
         assert!(!book.author.is_empty() && !book.source.is_empty() && book.licence == "public-domain");
         let preface: notes::Note = library::read_json(&dir.join("notes").join("plutarch-00-preface.json")).unwrap();
         assert_eq!(preface.author, "A. H. Clough");
+    }
+
+    #[test]
+    fn only_whole_web_and_email_addresses_go_outside() {
+        for good in ["https://www.gutenberg.org/ebooks/674", "http://example.com", "mailto:someone@example.com", "https://a.b/c?d=e#f"] {
+            assert!(outside_address(good), "{good}");
+        }
+        for bad in ["javascript:alert(1)", "file:///C:/x", "data:text/html,x", "https://", "https://a b", "https://x\"y", "ftp://x", "https://user@evil", "stvnote://localhost/x", "mailto:nobody"] {
+            assert!(!outside_address(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_example_books_links_can_go_outside() {
+        let dir = example_dir(None).expect("the example book is beside the crate");
+        let book: Book = library::read_json(&dir.join(format!("{EXAMPLE_ID}.json"))).unwrap();
+        assert!(book.links.iter().any(|l| l.url == book.source), "its source is a link it may open");
+        assert!(book.links.iter().all(|l| outside_address(&l.url) && l.url.starts_with("https://")));
     }
 
     #[test]

@@ -1612,6 +1612,21 @@ dialog.sheet.extras-dialog { max-width: 560px; }
 @keyframes fn-flash { from { background: var(--highlight); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .fn-flash { animation: none; } }
 
+/* Links: one that leaves the app is marked with an arrow and asks first; one the library hasn't checked, in a
+   book kept for reading, is plain text. */
+.out-mark { display: inline-block; margin-left: 2px; font-size: 0.8em; color: var(--muted); text-decoration: none; }
+a.out-link, button.out-link { cursor: pointer; }
+.link-blocked { text-decoration: underline dotted var(--muted); text-underline-offset: 3px; cursor: help; }
+.about-links ul { margin: 6px 0 0; padding-left: 1.2em; }
+.about-links li { margin: 0 0 6px; }
+.about-links small { display: block; color: var(--muted); font-size: 12px; }
+dialog.sheet.leave-dialog { max-width: 480px; }
+.leave-site { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; font-size: 22px; font-weight: 700; overflow-wrap: anywhere; }
+.leave-site svg { transform: rotate(45deg); color: var(--key); flex: none; }
+.leave-title { margin: 0 0 6px; color: var(--soft); }
+.leave-url { margin: 0 0 12px; padding: 6px 10px; border-radius: 8px; background: var(--raised); font: 13px ui-monospace, "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; user-select: all; }
+.leave-actions { flex-wrap: wrap; gap: 8px; align-items: center; }
+
 /* Above a book's contents: where reading aloud last stopped, to carry on from. */
 .listen-resume { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
 .listen-resume[hidden] { display: none; }

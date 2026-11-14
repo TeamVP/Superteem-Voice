@@ -7,7 +7,7 @@
   "language": "en",
   "source": "https://www.gutenberg.org/ebooks/674",
   "licence": "public-domain",
-  "version": 6,
+  "version": 7,
   "changes": [
     {
       "version": 1,
@@ -38,6 +38,20 @@
       "version": 6,
       "date": "2026-11-14",
       "summary": "Says who wrote and translated it, where the text came from and that it's in the public domain. The preface names its author."
+    },
+    {
+      "version": 7,
+      "date": "2026-11-14",
+      "summary": "Links to its source at Project Gutenberg, which opens in your browser after saying it leaves the app."
+    }
+  ],
+  "links": [
+    {
+      "url": "https://www.gutenberg.org/ebooks/674",
+      "title": "Plutarch's Lives at Project Gutenberg",
+      "about": "The ebook this text comes from, free to read and download.",
+      "checked": "2026-11-14",
+      "archive": ""
     }
   ],
   "voice": "vits-piper-en_GB-alan-medium",

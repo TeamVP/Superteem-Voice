@@ -781,12 +781,12 @@ function markdownInto(node, markdown, fileUrl = () => "") {
 }
 
 /// Commentary on a book or a note (Markdown): hidden until its link is pressed, then shown in a panel where
-/// `panel` is put, at the top of the book or the note. Never read aloud with the text. Gives { link, panel },
-/// both null when there is none.
-function commentary(markdown, about) {
+/// `panel` is put, at the top of the book or the note. Never read aloud with the text. Its links keep to the
+/// boundary of `book`, the book it's in (see guardLinks). Gives { link, panel }, both null when there is none.
+function commentary(markdown, about, book = null) {
   if (!markdown?.trim()) return { link: null, panel: null };
   return toggledPanel({ label: "Commentary", hide: "Hide commentary", about: `Commentary on ${about}`, head: "Commentary",
-    content: markdownInto(el("div", { class: "commentary-body" }), markdown) });
+    content: guardLinks(markdownInto(el("div", { class: "commentary-body" }), markdown), { book }) });
 }
 
 /// Licences a book can say it has, as people know them.
@@ -809,20 +809,24 @@ const dayText = (date) => {
 /// What a book says about itself: its cover, who wrote and translated it, its language, licence and source,
 /// and each version's changes. Gives { link, panel }, both null when it says nothing.
 function aboutBook(book) {
-  const source = book.source && (/^https?:\/\//.test(book.source)
-    ? el("button", { class: "link inline", type: "button", onclick: () => invoke("open_link", { url: book.source }).catch(() => micToast("That link can't be opened.")) }, book.source)
-    : book.source);
+  const listed = (url) => (book.links ?? []).find((l) => l.url === url) ?? null;
+  const outLink = (url, text) => el("button", { class: "link inline out-link", type: "button", title: "Leaves Superteem: opens in your browser",
+    onclick: () => followLink(url, { link: listed(url) }) }, text, el("span", { class: "out-mark", "aria-hidden": "true" }, "↗"));
+  const source = book.source && (["web", "mail"].includes(linkKind(book.source)) ? outLink(book.source, book.source) : book.source);
+  const others = (book.links ?? []).filter((l) => l.url !== book.source && ["web", "mail"].includes(linkKind(l.url)));
   const rows = [
     ["Author", book.author], ["Translation", book.translator], ["Language", book.language && languageName(book.language)],
     ["Licence", book.licence && licenceName(book.licence)], ["Source", source], ["Version", book.version ? String(book.version) : ""],
   ].filter(([, v]) => v);
   const changes = [...(book.changes ?? [])].sort((a, b) => b.version - a.version);
   const cover = bookCover(book);
-  if (!rows.length && !book.description && !changes.length && !cover) return { link: null, panel: null };
+  if (!rows.length && !book.description && !changes.length && !cover && !others.length) return { link: null, panel: null };
   const content = el("div", { class: "commentary-body about-book" },
     cover ? el("img", { class: "about-cover", src: cover, alt: `The cover of ${book.title || "this book"}` }) : null,
     book.description ? el("p", {}, book.description) : null,
     rows.length ? el("dl", { class: "about-facts" }, ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])) : null,
+    others.length ? el("div", { class: "about-links" }, el("strong", {}, "Outside the library"),
+      el("ul", {}, ...others.map((l) => el("li", {}, outLink(l.url, l.title || l.url), l.about ? el("small", {}, l.about) : null)))) : null,
     changes.length ? el("details", { class: "about-changes" }, el("summary", {}, "What's changed"),
       el("ol", {}, ...changes.map((c) => el("li", {}, el("strong", {}, `Version ${c.version}`), c.date ? ` · ${dayText(c.date)}` : "", el("br"), c.summary)))) : null);
   return toggledPanel({ label: "About this book", hide: "Hide about", about: `About ${book.title || "this book"}`, head: "About this book", content });
@@ -834,7 +838,7 @@ const chapterBy = (author, book) => (author && author !== book.author ? el("p", 
 /// A chapter's text into `body`: Markdown or plain text, with footnotes as Markdown writes them, [^1] in the
 /// text and a line "[^1]: what it says" anywhere. Each becomes a small number that goes to the notes at the
 /// end of the chapter, and back. Neither is read aloud or bookmarked (they're marked data-noread).
-function chapterInto(body, text, format, noteId) {
+function chapterInto(body, text, format, noteId, bookId = "") {
   const defs = new Map();
   const src = (text ?? "").replace(/^\[\^([^\]\s]+)\]:[ \t]*(.*(?:\n(?:[ \t]{2,}|\t)\S.*)*)\n?/gm, (_, id, said) => {
     defs.set(id, said.replace(/\n[ \t]+/g, " ").trim());
@@ -846,7 +850,11 @@ function chapterInto(body, text, format, noteId) {
     if (!order.includes(id)) order.push(id);
     return `${id}`;
   }) : src;
-  if (format === "md") markdownInto(body, marked, (file) => `${noteFileBase()}${noteId}/${encodeURIComponent(file)}`);
+  // A book's own file is attachment:book/<name>; any other is the note's.
+  const fileUrl = (file) => (bookId && file.startsWith("book/")
+    ? `${noteFileBase()}_book/${encodeURIComponent(bookId)}/${encodeURIComponent(file.slice(5))}`
+    : `${noteFileBase()}${noteId}/${encodeURIComponent(file)}`);
+  if (format === "md") markdownInto(body, marked, fileUrl);
   else body.append(...marked.split(/\n{2,}/).filter((p) => p.trim()).map((p) => el("p", {}, p)));
   if (!defs.size) return body;
   for (const id of defs.keys()) if (!order.includes(id)) order.push(id);
@@ -1041,6 +1049,129 @@ const pronounceCount = (words) => {
   return n ? `Pronunciation (${n})` : "Pronunciation";
 };
 
+// ---------- Links: inside the library, and leaving it
+
+/// The library's own address: a link to a book there opens it here, inside the app.
+const LIBRARY_HOST = "library.superteem.com";
+
+/// What a link is: "anchor" (a place on this page), "file" (a note's kept file), "library" (a book in the
+/// library), "web" or "mail" (outside the app), or "bad" (anything else, which is never followed).
+function linkKind(href) {
+  if (!href) return "bad";
+  if (href.startsWith("#")) return "anchor";
+  if (href.startsWith("attachment:")) return "file";
+  let u;
+  try { u = new URL(href); } catch { return "bad"; }
+  if (u.protocol === "https:" && u.hostname === LIBRARY_HOST) return "library";
+  if ((u.protocol === "https:" || u.protocol === "http:") && u.hostname && !u.username) return "web";
+  if (u.protocol === "mailto:" && u.pathname.includes("@")) return "mail";
+  return "bad";
+}
+
+/// Says a link leaves the app, and where to, before anything is opened: the site's name large, the whole
+/// address, and when the library last checked it. Gives "open", "archive" or null (stay). Stay is the
+/// default, so Enter or Escape keeps the person here.
+function leaveDialog(href, link = null) {
+  return new Promise((done) => {
+    let result = null;
+    let u = null;
+    try { u = new URL(href); } catch {}
+    const mail = u?.protocol === "mailto:";
+    const site = mail ? decodeURIComponent(u.pathname) : (u?.hostname ?? href).replace(/^www\./, "");
+    const finish = (value) => { result = value; dialog.close(); };
+    const stay = el("button", { class: "primary pill", type: "button", onclick: () => dialog.close() }, "Stay here");
+    const copied = el("span", { class: "hint", "aria-live": "polite" });
+    const dialog = el("dialog", { class: "sheet leave-dialog", "aria-label": "This link leaves Superteem" },
+      el("h2", {}, mail ? "This writes an email outside Superteem" : "This link leaves Superteem"),
+      el("p", { class: "leave-site" }, svg("up", 16), site),
+      link?.title ? el("p", { class: "leave-title" }, link.title) : null,
+      el("p", { class: "leave-url" }, href),
+      el("p", { class: "hint" }, mail
+        ? "Your email app opens with this address. Nothing is sent until you send it."
+        : [
+          link?.checked ? `The library checked this page on ${dayText(link.checked)}, but what's there now may have changed, and it isn't part of the library.`
+            : "The library hasn't checked this page. What's there isn't part of the library.",
+          u?.protocol === "http:" ? " This site doesn't use a secure connection." : "",
+          " It opens in your browser, not in Superteem.",
+        ].join("")),
+      el("div", { class: "actions leave-actions" },
+        el("button", { class: "link", type: "button", onclick: async () => {
+          try { await navigator.clipboard.writeText(href); copied.textContent = "Copied."; } catch { copied.textContent = "It couldn't be copied."; }
+        } }, "Copy link"), copied,
+        el("span", { class: "grow" }),
+        link?.archive ? el("button", { class: "pill", type: "button", onclick: () => finish("archive") }, "Open the saved copy") : null,
+        el("button", { class: "pill", type: "button", onclick: () => finish("open") }, mail ? "Open email app" : "Open in browser"),
+        stay));
+    dialog.addEventListener("close", () => { dialog.remove(); done(result); });
+    document.body.append(dialog);
+    dialog.showModal();
+    stay.focus();
+  });
+}
+
+/// Follows a link the way its kind says: a place on the page, a book in the library, a note's kept file, or,
+/// after leaveDialog, a page in the system's browser. `root` is the text it was in; `link`, the library's
+/// record of the address, when it has one.
+async function followLink(href, { root = null, noteId = "", link = null } = {}) {
+  const kind = linkKind(href);
+  if (kind === "anchor") {
+    const id = decodeURIComponent(href.slice(1));
+    const target = id && [...(root ?? document).querySelectorAll("[id]")].find((n) => n.id === id);
+    target?.scrollIntoView({ block: "center" });
+    return;
+  }
+  if (kind === "file") return invoke("open_note_link", { id: noteId, href }).catch((e) => micToast(String(e)));
+  if (kind === "library") {
+    const [section, bookId, chapter] = new URL(href).pathname.split("/").filter(Boolean);
+    if (section !== "books" || !bookId) return micToast("That part of the library isn't in the app yet.");
+    const here = await invoke("get_book", { id: bookId }).catch(() => null);
+    if (!here) return micToast("That book isn't in your library yet.");
+    return openBook(bookId, { chapter: chapter ?? null });
+  }
+  if (kind === "web" || kind === "mail") {
+    const choice = await leaveDialog(href, link);
+    if (!choice) return;
+    const url = choice === "archive" ? link.archive : href;
+    return invoke("open_external", { url }).catch((e) => micToast(String(e)));
+  }
+  micToast("That link can't be opened.");
+}
+
+/// Keeps every link in text shown for reading inside the app's boundary. A link out of the app is marked as
+/// one, and pressing it asks first (see followLink); nothing opens inside the app's own window. In a book kept
+/// for reading, only the addresses the book lists (its `links`, and its source) work: any other is shown as
+/// plain text, since the library hasn't checked it. `book` is the book the text is in, if any.
+function guardLinks(root, { book = null, noteId = "" } = {}) {
+  if (!root) return root;
+  const listed = new Map((book?.links ?? []).map((l) => [l.url, l]));
+  if (book?.source && !listed.has(book.source)) listed.set(book.source, { url: book.source, title: "Where this book's text came from" });
+  const strict = book?.editable === false;
+  const asText = (a, why) => a.replaceWith(el("span", { class: "link-blocked", title: why }, a.textContent));
+  for (const a of [...root.querySelectorAll("a[href]")]) {
+    const href = a.getAttribute("href");
+    const kind = linkKind(href);
+    a.removeAttribute("target");
+    if (kind === "bad") { asText(a, "This link can't be opened."); continue; }
+    if (kind !== "web" && kind !== "mail") { if (kind === "library") a.classList.add("lib-link"); continue; }
+    if (strict && !listed.has(href)) { asText(a, "The library hasn't checked this link, so it can't be opened from here."); continue; }
+    a.classList.add("out-link");
+    let site = href;
+    try { site = new URL(href).hostname.replace(/^www\./, "") || href; } catch {}
+    a.title = `Leaves Superteem: ${site}`;
+    a.append(el("span", { class: "out-mark", "aria-hidden": "true", "data-noread": "" }, "↗"));
+  }
+  const press = (e) => {
+    const a = e.target.closest?.("a[href]");
+    if (!a || !root.contains(a)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "click") followLink(a.getAttribute("href"), { root, noteId, link: listed.get(a.getAttribute("href")) ?? null });
+  };
+  root.addEventListener("click", press);
+  root.addEventListener("auxclick", press);
+  return root;
+}
+
 /// A chapter as the contents list names it: "Book 1 · Chapter 2 · Romulus".
 const chapterName = (c) => [c.part, c.label, c.title].filter(Boolean).join(" · ");
 /// A sentence cut short to show.
@@ -1081,7 +1212,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     if (view !== mine) return;
     const chapter = contents[index];
     const kicker = [chapter.part, chapter.label].filter(Boolean).join(" · ");
-    const body = chapterInto(el("div", { class: "book-chapter-body" }), note.body, note.format, note.id);
+    const body = guardLinks(chapterInto(el("div", { class: "book-chapter-body" }), note.body, note.format, note.id, book.id), { book, noteId: note.id });
     const turn = () => el("div", { class: "book-turn" },
       el("button", { class: "pill", disabled: index === 0, onclick: () => openBook(book.id, { chapter: contents[index - 1].id }) }, "Previous"),
       el("span", { class: "book-kicker" }, `${index + 1} of ${contents.length}`),
@@ -1149,7 +1280,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     const mark = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or where you clicked", "aria-label": "Bookmark" }, svg("bookmark", 16));
     mark.addEventListener("mousedown", (e) => e.preventDefault());
     mark.addEventListener("click", () => marks?.create());
-    const notes = commentary(note.commentary, note.title || chapter.title);
+    const notes = commentary(note.commentary, note.title || chapter.title, book);
     const bar = el("div", { class: "book-contents-bar" },
       el("span", { class: "book-bar-links" }, el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"), notes.link),
       el("span", { class: "top-actions" }, mark, speak));
@@ -1190,7 +1321,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
   });
   const list = el("div", { class: "group book-notes" }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "This book has no chapters.")));
   const search = bookSearch(book.id, list, (hit, snippet) => openBook(book.id, { chapter: hit.id, find: snippet }));
-  const notes = commentary(book.commentary, book.title || "this book");
+  const notes = commentary(book.commentary, book.title || "this book", book);
   const about = aboutBook(book);
   const cover = bookCover(book);
   const page = el("div", { class: "page book book-read" },
@@ -1338,7 +1469,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
   const modes = el("div", { class: "book-mode", role: "group", "aria-label": "View" },
     el("button", { class: "pill" + (reading ? "" : " on"), "aria-pressed": String(!reading), onclick: () => reopen({ reading: false }) }, "Notes"),
     el("button", { class: "pill" + (reading ? " on" : ""), "aria-pressed": String(reading), onclick: () => reopen({ reading: true }) }, "Read"));
-  const bookNotes = commentary(book.commentary, book.title || "this book");
+  const bookNotes = commentary(book.commentary, book.title || "this book", book);
   const about = () => title.value.trim() || "this book";
   const saveExtras = async (change) => {
     try {
@@ -1454,10 +1585,10 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
         part = c.part;
         page.append(el("h2", { class: "book-part" }, c.part));
       }
-      const body = chapterInto(el("div", { class: "book-chapter-body" }), c.body, c.format, c.id);
+      const body = guardLinks(chapterInto(el("div", { class: "book-chapter-body" }), c.body, c.format, c.id, id), { book, noteId: c.id });
       const heading = c.label ? `${c.label}. ${c.title}` : c.title;
       const holder = el("div", { class: "book-chapter-holder" }, body);
-      const notes = commentary(c.commentary, c.title);
+      const notes = commentary(c.commentary, c.title, book);
       page.append(el("section", { class: "book-chapter" },
         el("h2", {}, el("button", { class: "link", onclick: () => openNote(c.id) }, heading)), chapterBy(c.author, book),
         notes.link ? el("div", { class: "book-links" }, notes.link) : "", notes.panel ?? "", holder));
@@ -1645,7 +1776,8 @@ function renderNote(data, dictate) {
   const mine = note;
   const noteFiles = `${platform === "windows" || platform === "android" ? "http://stvnote.localhost/" : "stvnote://localhost/"}`;
   const fileUrl = (file) => `${noteFiles}${mine.id ?? ""}/${encodeURIComponent(file)}`;
-  const openLink = (href) => invoke("open_note_link", { id: mine.id ?? "", href }).catch((e) => micToast(String(e)));
+  // Web pages and email go through the same warning as a book's links; a kept file opens as before.
+  const openLink = (href) => followLink(href, { noteId: mine.id ?? "" });
   const editorHolder = el("div", { class: "note-editor" });
   const ed = NoteEditor.create({
     element: editorHolder,
