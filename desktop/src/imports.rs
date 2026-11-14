@@ -58,6 +58,9 @@ pub struct Import {
     /// The bookmarks and action items made in that session, on its own timeline (seconds into it).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<library::Marker>,
+    /// What it was called when it was added, such as "Ann · Phone": kept when the track is renamed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
 }
 
 impl Import {
@@ -103,6 +106,26 @@ pub enum Place {
 
 pub fn load(dir: &Path) -> Vec<Import> {
     library::read_json(&dir.join(FILE)).unwrap_or_default()
+}
+
+/// Gives the track `name`, and every track recorded with it, these bookmarks and action items, which are at
+/// meeting times: kept on its own timeline, so they move with it.
+pub fn add_markers(dir: &Path, name: &str, markers: &[library::Marker]) -> Result<(), String> {
+    let mut imports = load(dir);
+    let group = group_of(&imports, name);
+    if group.is_empty() {
+        return Err("That track is no longer in this meeting.".into());
+    }
+    for k in group {
+        let import = &mut imports[k];
+        let rate = if import.rate > 0.0 { import.rate } else { 1.0 };
+        for m in markers {
+            let own_s = ((m.at_s - import.offset_s) / rate * 10.0).round() / 10.0;
+            import.markers.push(library::Marker { at_s: own_s, ..m.clone() });
+        }
+        import.markers.sort_by(|a, b| a.at_s.total_cmp(&b.at_s));
+    }
+    save(dir, &imports)
 }
 
 fn save(dir: &Path, imports: &[Import]) -> Result<(), String> {
@@ -257,6 +280,7 @@ pub fn add(dir: &Path, label: &str, pcm: &[i16], place: Place) -> Result<Import,
         seconds: pcm.len() as f64 / RATE as f64,
         from_session: None,
         markers: Vec::new(),
+        label: label.trim().chars().take(60).collect(),
     });
     save(dir, &imports)?;
     let mut meta: Meta = library::load_meta(dir);

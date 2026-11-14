@@ -1278,6 +1278,23 @@ fn save_markers(state: State<AppState>, id: String, markers: Vec<library::Marker
     })
 }
 
+/// Keeps bookmarks and action items that only a track about to be removed has, at meeting times: on the
+/// imported track `to` (and the others recorded with it), or, without one, as the meeting's own.
+#[tauri::command]
+fn keep_markers(state: State<AppState>, id: String, markers: Vec<library::Marker>, to: Option<String>) -> Result<(), String> {
+    match to {
+        Some(name) => {
+            let _guard = state.edit.lock().unwrap();
+            imports::add_markers(&library::session_dir(&id)?, &name, &markers)
+        }
+        None => edit_session(&state, &id, |meta, _| {
+            meta.markers.extend(markers.into_iter().map(|m| library::Marker { removed: false, ..m }));
+            meta.markers.sort_by(|a, b| a.at_s.total_cmp(&b.at_s));
+            Ok(())
+        }),
+    }
+}
+
 /// Changes the note on a marker, or deletes it. `index` is its place among the saved markers; without one,
 /// it is a phrase heard in the recording at `at_s`, which is saved as a marker of its own to change it.
 #[tauri::command]
@@ -3378,6 +3395,7 @@ pub fn run() {
             model_info,
             open_models_folder,
             save_markers,
+            keep_markers,
             set_track_level,
             set_mix_edits,
             edit_marker,

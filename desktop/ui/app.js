@@ -54,6 +54,8 @@ const icon = {
   keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"></path>',
   play: '<path d="M7 4l13 8-13 8z" fill="currentColor" stroke="none"></path>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" stroke="none"></rect>',
+  // Arrows out to both sides: the whole width again.
+  fit: '<path d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"></path>',
   "skip-back": '<path d="M18 5l-10 7 10 7z" fill="currentColor" stroke="none"></path><path d="M6 5v14"></path>',
   "skip-forward": '<path d="M6 5l10 7-10 7z" fill="currentColor" stroke="none"></path><path d="M18 5v14"></path>',
   pause: '<rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"></rect><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"></rect>',
@@ -3476,11 +3478,95 @@ function renderSession(session, processingError, suggestion) {
   const reprocess = el("button", { class: "icon-only more-action", type: "button", title: "Transcribe again: run speaker detection and transcription again", "aria-label": "Transcribe again" },
     svg("refresh", 18), el("span", { class: "menu-text" }, "Transcribe again"));
   reprocess.addEventListener("click", () => processAgain(id));
-  // A track's own settings, opened from its name: who is on it, whether everything on it is them, and
-  // where it starts. A move takes effect when the meeting is transcribed again.
+  // A track's own settings, opened from its name: where its sound came from, who is on it, whether
+  // everything on it is them, and where it starts. A move takes effect when the meeting is transcribed again.
+  // The bin at the bottom deletes it.
+  const laneName = (stream) => session.speakers.find((s) => s.key === stream)?.name
+    ?? streamName(stream, session.meta.inputs?.length ? session.meta.inputs : prefs.inputs);
+  // Where a track's sound came from, as it was chosen when the meeting began, or added.
+  const trackSource = (stream) => {
+    const imported = session.imports?.find((i) => i.name === stream);
+    if (imported) return imported.label || "Imported recording";
+    const t = meta.tracks?.[stream];
+    return t?.label || t?.source || streamName(stream, meta.inputs ?? []);
+  };
+  const TRACK_KINDS = { app: "App sound", output: "Everything on an output", microphone: "Microphone", pin: "Voice Pin" };
+  // Bookmarks and action items only this track has, at meeting times: those made in an imported recording
+  // when no other track recorded with it stays, and "Bookmark that" heard only on it and not yet saved.
+  const onlyOnTrack = (stream) => {
+    const imported = session.imports?.find((i) => i.name === stream);
+    const lost = [];
+    if (imported?.markers?.length) {
+      const stays = imported.from_session && session.imports.some((i) => i.name !== stream && i.from_session === imported.from_session);
+      if (!stays) {
+        for (const m of imported.markers.filter((m) => !m.removed)) {
+          lost.push({ at_s: Math.round((imported.offset_s + m.at_s * (imported.rate || 1)) * 10) / 10, text: m.text ?? "", kind: m.kind ?? "" });
+        }
+      }
+    }
+    const saved = meta.markers ?? [];
+    const phrases = (session.keyphrases ?? []).filter((h) => !h.rejected && h.phrase in PHRASE_KINDS);
+    for (const h of phrases.filter((h) => h.stream === stream)) {
+      const m = { at_s: Math.round(h.start_s * 10) / 10, text: "", kind: PHRASE_KINDS[h.phrase] };
+      const near = (o) => isAction(o) === isAction(m) && Math.abs(o.at_s - m.at_s) < SAME_MARK_S;
+      if (saved.some(near) || lost.some(near)) continue;
+      if (phrases.some((o) => o.stream !== stream && near({ at_s: o.start_s, kind: PHRASE_KINDS[o.phrase] }))) continue;
+      lost.push(m);
+    }
+    return lost.sort((a, b) => a.at_s - b.at_s);
+  };
+  // Everything known about a track, in a second sheet over its settings.
+  const trackInfoDialog = (stream) => {
+    const imported = session.imports?.find((i) => i.name === stream);
+    const t = meta.tracks?.[stream];
+    const lines = scriptLines.filter((s) => s.stream === stream).length;
+    const offset = imported ? imported.offset_s : meta.track_offsets?.[stream] ?? 0;
+    const rows = [];
+    const row = (label, value) => { if (value != null && value !== "") rows.push(el("dt", {}, label), el("dd", {}, value)); };
+    if (imported) {
+      row("Source", imported.label || "Imported recording");
+      row("Came from", imported.from_session ? "Another person's recording of this meeting" : "A recording added to this meeting");
+      const together = imported.from_session ? session.imports.filter((i) => i.from_session === imported.from_session).length : 1;
+      if (together > 1) row("Recorded with", `${together - 1} other track${together === 2 ? "" : "s"} here`);
+      row("Length", clock(imported.seconds));
+      if (imported.started_at && meta.created) row("Started at", `${dayClock(imported.started_at)} by the time of day`);
+      row("Placed by", { time: "The time of day it started", sound: "Matching its sound to the other tracks", hand: "Typed in by hand" }[imported.placed_by] ?? imported.placed_by);
+      if (imported.matched) row("Sound matched", `${imported.matched[0]} of ${imported.matched[1]} half-minute stretches`);
+      if (imported.confidence != null) row("Match", `${imported.confidence.toFixed(1)}× surer than the next best place`);
+      if (Math.abs((imported.rate || 1) - 1) > 1e-6) {
+        const drift = ((imported.rate || 1) - 1) * 3600;
+        row("Clock", `Ran ${Math.abs(drift).toFixed(1)} s an hour ${drift > 0 ? "slow" : "fast"}; corrected`);
+      }
+      const marks = (imported.markers ?? []).filter((m) => !m.removed);
+      if (marks.length) row("Marked in it", `${marks.filter((m) => !isAction(m)).length} bookmarks, ${marks.filter(isAction).length} action items`);
+    } else {
+      row("Source", t?.label || streamName(stream, meta.inputs ?? []));
+      if (t) {
+        row("Kind", TRACK_KINDS[t.kind] ?? t.kind);
+        if (t.source && t.source !== t.label) row("Chosen as", t.source);
+        if (t.program) row("Program", t.program);
+        row("Length", clock(t.frames * 0.02));
+        row("Dropouts", t.lost ? `${(t.lost * 0.02).toFixed(1)} s of sound lost while recording` : "None");
+        row("Loudest", t.peak === 0 ? "Silent: it heard nothing" : t.peak ? `${Math.round(20 * Math.log10(t.peak))} dB` : "");
+      }
+    }
+    row("Starts at", offset ? `${signedClock(offset)} into the meeting` : "With the meeting");
+    row("Everything on it", (meta.locked ?? []).includes(stream) ? "Is this person" : "Is matched to people by their voices");
+    row("In the transcript", `${lines} line${lines === 1 ? "" : "s"} taken from it`);
+    const notes = t?.notes ?? [];
+    const info = el("dialog", { class: "sheet track-info", "aria-label": `About ${trackSource(stream)}` },
+      el("h2", {}, trackSource(stream)),
+      el("dl", {}, rows),
+      notes.length ? el("div", { class: "field" }, el("span", {}, "While recording"), el("ul", { class: "notes" }, notes.map((n) => el("li", {}, n)))) : null,
+      el("div", { class: "actions" }, el("button", { class: "pill", type: "button", onclick: () => info.close() }, "Close")));
+    info.addEventListener("close", () => info.remove());
+    document.body.append(info);
+    info.showModal();
+  };
   const trackDialog = (stream, name) => {
     const speaker = session.speakers.find((s) => s.key === stream);
     const imported = session.imports?.find((i) => i.name === stream);
+    const t = meta.tracks?.[stream];
     const group = imported?.from_session ? session.imports.filter((i) => i.from_session === imported.from_session) : [];
     const offset = imported ? imported.offset_s : meta.track_offsets?.[stream] ?? 0;
     const locked = (meta.locked ?? []).includes(stream);
@@ -3532,35 +3618,124 @@ function renderSession(session, processingError, suggestion) {
         el("small", {}, "Their bookmark is the same moment as yours, such as one everyone made at once.")),
         el("div", { class: "row-pick" }, theirSelect, el("span", { class: "hint" }, "is"), mineSelect, go));
     }
+    // An imported track can also be found by its sound, or by the time of day it started.
+    let finder = null;
+    let dayInput = null;
+    if (imported) {
+      const match = (near) => async () => {
+        try {
+          await invoke("sync_track", { id, name: imported.name, near });
+          dialog.close();
+          processAgain(id);
+        } catch (e) { fail(e); }
+      };
+      dayInput = el("input", { type: "text", class: "mono", size: "10", value: dayClock(meta.created + imported.offset_s), "aria-label": "Started at, time of day" });
+      finder = el("div", { class: "field" }, el("span", {}, "Find where it goes",
+        el("small", {}, "Match its sound to the other tracks, near where it is now (and find clocks that ran apart) or anywhere when the time of day is far out. Transcribes the meeting again.")),
+        el("div", { class: "row-pick" },
+          el("button", { class: "pill", type: "button", onclick: match(true) }, "Fine-tune by its sound"),
+          el("button", { class: "pill", type: "button", onclick: match(false) }, "Match it anywhere")));
+    }
     const whose = group.length > 1 ? ` Moves all ${group.length} tracks recorded with it.` : "";
     const saveButton = el("button", { class: "primary pill", type: "button" }, "Save");
-    const dialog = el("dialog", { class: "sheet track-dialog", "aria-label": `Track ${name}` },
-      el("h2", {}, name),
-      el("p", { class: "hint source" }, imported ? `Imported · ${placedText(imported, meta.created)}` : trackDetails(name, meta.tracks?.[stream]).split("\n").slice(0, 2).join(" · ")),
+    // Deleting: a recorded track only while there's another and nothing is being processed.
+    const canDelete = imported || (streams.length > 1 && !session.busy);
+    const trash = el("button", { class: "icon-only track-delete", type: "button", disabled: !canDelete, "aria-label": "Delete this track",
+      title: canDelete ? "Delete this track" : session.busy ? "The meeting is being processed; delete the track once it's done" : "The meeting's only track can't be deleted" }, svg("trash", 18));
+    const kind = imported ? `Imported · ${placedText(imported, meta.created)}` : [t ? TRACK_KINDS[t.kind] ?? t.kind : "", t?.program && t.program !== t.label ? t.program : "",
+      t?.peak === 0 ? "Silent" : ""].filter(Boolean).join(" · ");
+    const more = el("button", { class: "link inline", type: "button", onclick: () => trackInfoDialog(stream) }, "Details");
+    const settings = el("div", { class: "track-settings" },
+      el("p", { class: "hint source" }, kind ? `${kind} · ` : "", more),
       el("label", { class: "field" }, el("span", {}, "Name", el("small", {}, "Who is on this track, or what it recorded.")), nameInput),
       el("label", { class: "field" }, el("span", {}, "Voice print", el("small", {}, "Links the person, so the voice print names them.")), print),
       el("label", { class: "field check" }, lock, el("span", {}, "Everything on this track is this person",
         el("small", {}, "For when each person has their own microphone or call track. Lines you moved by hand stay put."))),
       el("label", { class: "field" }, el("span", {}, "Starts at",
         el("small", {}, `minutes:seconds into the meeting; − if it starts before. You hear a move straight away; its lines in the transcript follow when you transcribe again.${whose}`)), start),
-      lineUp, status,
-      el("div", { class: "actions" }, el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"), saveButton));
+      dayInput ? el("label", { class: "field" }, el("span", {}, "Started at, time of day",
+        el("small", {}, "hours:minutes:seconds by the clock of the device that recorded it. Transcribes the meeting again.")), dayInput) : null,
+      finder, lineUp, status,
+      el("div", { class: "actions" }, trash, el("span", { class: "grow" }), el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"), saveButton));
+    // Asked in the sheet itself, in place of the settings; a second step when bookmarks would go with it.
+    const confirm = el("div", { class: "track-confirm", role: "alertdialog", hidden: true });
+    const dialog = el("dialog", { class: "sheet track-dialog", "aria-label": `Track ${name}` }, el("h2", {}, trackSource(stream)), settings, confirm);
+    const back = () => { confirm.hidden = true; confirm.replaceChildren(); settings.hidden = false; };
+    const ask = (...children) => { settings.hidden = true; confirm.hidden = false; confirm.replaceChildren(...children); };
+    const removeTrack = async (button, keep, to) => {
+      button.disabled = true;
+      try {
+        if (keep?.length) await invoke("keep_markers", { id, markers: keep, to: to || null });
+        stopPlayback();
+        await invoke("remove_track", { id, name: stream });
+        dialog.close();
+        if (imported) processAgain(id); else await reload();
+      } catch (e) {
+        button.disabled = false;
+        showError(confirm, e);
+      }
+    };
+    const askMarkers = (lost) => {
+      const bookmarks = lost.filter((m) => !isAction(m)).length;
+      const actions = lost.length - bookmarks;
+      const what = [bookmarks ? `${bookmarks} bookmark${bookmarks === 1 ? "" : "s"}` : "", actions ? `${actions} action item${actions === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ");
+      // Where they can go: the meeting's own marks, shown on its recorded tracks, or another imported track.
+      const recorded = streams.filter((s) => s !== stream && !session.imports?.some((i) => i.name === s));
+      const others = (session.imports ?? []).filter((i) => i.name !== stream && (!imported?.from_session || i.from_session !== imported.from_session));
+      const target = el("select", { "aria-label": "Move them to" },
+        recorded.length ? el("option", { value: "" }, "The meeting (shown on every recorded track)") : null,
+        others.map((i) => el("option", { value: i.name }, `${laneName(i.name)} (imported)`)));
+      const keepButton = el("button", { class: "primary pill", type: "button", disabled: !target.options.length }, "Move them and delete");
+      const dropButton = el("button", { class: "primary danger-fill", type: "button" }, `Delete them too`);
+      keepButton.addEventListener("click", () => removeTrack(keepButton, lost, target.value));
+      dropButton.addEventListener("click", () => removeTrack(dropButton, null));
+      const shown = lost.slice(0, 6).map((m) => el("li", {}, markerIcon(m, 14), ` ${clock(m.at_s)}${markerNote(m) ? ` · ${markerNote(m)}` : ""}`));
+      if (lost.length > shown.length) shown.push(el("li", { class: "hint" }, `and ${lost.length - shown.length} more`));
+      ask(el("p", {}, el("strong", {}, `${what[0].toUpperCase()}${what.slice(1)} ${lost.length === 1 ? "is" : "are"} only on this track`),
+        ` and will be deleted with it, unless you move ${lost.length === 1 ? "it" : "them"} to another track first.`),
+        el("ul", { class: "marks" }, shown),
+        target.options.length ? el("label", { class: "field" }, el("span", {}, "Move them to"), target) : null,
+        el("div", { class: "actions" }, el("button", { class: "pill", type: "button", onclick: back }, "Back"), el("span", { class: "grow" }), dropButton, keepButton));
+      (target.options.length ? keepButton : dropButton).focus();
+    };
+    trash.addEventListener("click", () => {
+      const heard = scriptLines.filter((s) => s.stream === stream).length;
+      const edited = session.segments.filter((s) => s.stream === stream && s.edited).length;
+      const lines = imported ? " Its lines leave the transcript, which is transcribed again straight away."
+        : heard ? ` After transcribing again, the ${heard} line${heard === 1 ? "" : "s"} taken from it will come from the other tracks, where they heard it.` : "";
+      const lost = edited ? ` Your edits to ${edited} of its line${edited === 1 ? "" : "s"} will be lost.` : "";
+      const where = isPhone() || imported ? " This can't be undone." : ` Its audio goes to the ${binName()}.`;
+      const marks = onlyOnTrack(stream);
+      const go = el("button", { class: "primary danger-fill", type: "button" }, marks.length ? "Delete…" : "Delete track");
+      go.addEventListener("click", () => (marks.length ? askMarkers(marks) : removeTrack(go, null)));
+      ask(el("p", {}, `Delete ${name} from this meeting?${lines}${lost}${where}`),
+        el("div", { class: "actions" }, el("span", { class: "grow" }), el("button", { class: "pill", type: "button", onclick: back }, "Cancel"), go));
+      go.focus();
+    });
     saveButton.addEventListener("click", async () => {
       const at = parseStart(start.value);
       if (at == null) return fail("Type where it starts as minutes:seconds, such as 0:01.5 or -0:00.4.");
+      const dayChanged = dayInput && dayInput.value.trim() !== dayClock(meta.created + imported.offset_s);
+      const started = dayChanged ? parseDayClock(dayInput.value, meta.created) : null;
+      if (dayChanged && started == null) return fail("Type the time of day as hours:minutes:seconds, such as 14:30:05.");
       saveButton.disabled = true;
       try {
         if (print.value !== original) await invoke("link_speaker", { id, key: stream, print: print.value || null, learn: false });
         const typed = nameInput.value.trim();
         const printName = print.value ? print.selectedOptions[0].textContent : null;
         if (typed && typed !== (speaker?.name ?? name) && typed !== printName) await invoke("rename_speaker", { id, key: stream, name: typed });
-        const moved = Math.abs(at - offset) > 0.004 && !lined;
+        const moved = Math.abs(at - offset) > 0.004 && !lined && !dayChanged;
         if (moved || lock.checked !== locked) {
           await invoke("set_track", { id, name: stream, offsetS: moved ? at : null, lock: lock.checked !== locked ? lock.checked : null });
         }
         lined = false;
         dialog.close();
-        reload();
+        if (dayChanged) {
+          await invoke("set_track_start", { id, name: imported.name, startedAt: started });
+          processAgain(id);
+        } else {
+          reload();
+        }
       } catch (e) {
         saveButton.disabled = false;
         fail(e);
@@ -3570,37 +3745,6 @@ function renderSession(session, processingError, suggestion) {
     document.body.append(dialog);
     dialog.showModal();
     nameInput.focus();
-  };
-  const recordedTrackMenu = (stream, name) => {
-    const heard = scriptLines.filter((s) => s.stream === stream).length;
-    const edited = session.segments.filter((s) => s.stream === stream && s.edited).length;
-    const silent = meta.tracks?.[stream]?.peak === 0;
-    return menuButton(svg("more", 14), [
-      "This track",
-      [isPhone() ? "Delete this track" : "Remove this track",
-        silent ? "It heard nothing · transcribes the meeting again without it" : "Transcribes the meeting again without it",
-        () => {
-          // Asked in the tracks panel, where the menu was, so it's seen.
-          tracks.querySelector(".track-confirm")?.remove();
-          const what = heard ? ` After transcribing again, the ${heard} line${heard === 1 ? "" : "s"} taken from it will come from the other tracks, where they heard it.` : "";
-          const lost = edited ? ` Your edits to ${edited} of its line${edited === 1 ? "" : "s"} will be lost.` : "";
-          const where = isPhone() ? " This can't be undone." : ` Its audio goes to the ${binName()}.`;
-          const go = el("button", { class: "primary danger-fill", type: "button" }, "Remove track");
-          const box = el("div", { class: "inline-form track-confirm", role: "alertdialog" },
-            el("p", {}, `Remove ${name} from this meeting?${what}${lost}${where}`), go,
-            el("button", { class: "pill", type: "button", onclick: () => box.remove() }, "Cancel"));
-          go.addEventListener("click", async () => {
-            go.disabled = true;
-            stopPlayback();
-            try {
-              await invoke("remove_track", { id, name: stream });
-              await reload();
-            } catch (e) { go.disabled = false; showError(box, e); }
-          });
-          tracks.prepend(box);
-          go.focus();
-        }],
-    ]);
   };
   const used = new Set(scriptLines.map((s) => s.speaker));
   const streams = Object.keys(session.audio).sort();
@@ -4082,7 +4226,7 @@ function renderSession(session, processingError, suggestion) {
     // Scrolling by hand while following leaves the transcript where it was put for a few seconds.
     const pauseFollow = () => { if (followPlayback && player?.playing) { followPausedUntil = performance.now() + 5000; followed = null; } };
     for (const type of ["wheel", "touchmove"]) document.addEventListener(type, (e) => { if (!tracks.contains(e.target)) pauseFollow(); }, { signal, passive: true });
-    const followButton = el("button", { class: "pill follow", type: "button" }, svg("down", 14), el("span", {}, "Follow"));
+    const followButton = el("button", { class: "pill follow", type: "button" }, "Scroll");
     const drawFollow = () => {
       followButton.classList.toggle("on", followPlayback);
       followButton.setAttribute("aria-pressed", String(followPlayback));
@@ -4107,7 +4251,7 @@ function renderSession(session, processingError, suggestion) {
         return b;
       };
       mixLabel.replaceChildren(
-        option("transcript", ["Transcript", el("span", { class: "wide-only" }, " mix")], "Hear what the transcript used: each track is muted where its sound is greyed out"),
+        option("transcript", "Mix", "Hear what the transcript used: each track is muted where its sound is greyed out"),
         option("manual", "Manual", "Every track plays; mute them yourself with M"));
     };
     drawMix();
@@ -4142,8 +4286,65 @@ function renderSession(session, processingError, suggestion) {
       ];
       // Where the mix was changed by hand, over the transcript's own clips.
       const editLayer = el("span", { class: "mix-edits" });
-      const drawEdits = () => editLayer.replaceChildren(...mixEdits.get(stream).map((e) =>
-        clip(e.from_s, e.to_s, "", `${e.play ? "Played" : "Muted"} by you · ${clock(e.from_s)} to ${clock(e.to_s)} · right-click to change`, `mix-edit ${e.play ? "play" : "mute"}`)));
+      const editTitle = (e) => `${e.play ? "Played" : "Muted"} by you · ${clock(e.from_s)} to ${clock(e.to_s)} · drag an edge to move it · right-click to change`;
+      const saveEdits = (next) => {
+        mixEdits.set(stream, next);
+        updateQuiet(stream);
+        drawEdits();
+        // Heard straight away in the transcript mix.
+        if (playMix !== "transcript") { playMix = "transcript"; drawMix(); }
+        applyMix(player?.now() ?? 0);
+        invoke("set_mix_edits", { id, name: stream, edits: next }).catch((err) => showError(page, err));
+      };
+      // Each edge of a change made by hand can be dragged along, to fine-tune where the mute starts or ends;
+      // it stops at the next change, and lets go a second before it so the new edge is heard.
+      const edgeHandle = (span, k, side) => {
+        const handle = el("b", { class: `edit-handle ${side}`, "aria-hidden": "true" });
+        handle.addEventListener("click", (e) => e.stopPropagation());
+        handle.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+        handle.addEventListener("pointerdown", (down) => {
+          if (down.button !== 0 || meta.compacted) return;
+          down.preventDefault();
+          down.stopPropagation();
+          handle.setPointerCapture(down.pointerId);
+          const edits = mixEdits.get(stream);
+          const edit = { ...edits[k] };
+          const lo = side === "start" ? (edits[k - 1]?.to_s ?? 0) : edit.from_s + 0.05;
+          const hi = side === "start" ? edit.to_s - 0.05 : (edits[k + 1]?.from_s ?? duration);
+          let moved = false;
+          span.classList.add("dragging");
+          const move = (e) => {
+            if (!moved && Math.abs(e.clientX - down.clientX) < 3) return;
+            moved = true;
+            const at = Math.round(Math.min(hi, Math.max(lo, timeAt(e.clientX) - shiftOf(stream))) * 1000) / 1000;
+            if (side === "start") edit.from_s = at; else edit.to_s = at;
+            span.style.left = `${(100 * edit.from_s) / duration}%`;
+            span.style.width = `${Math.max(0.3, (100 * (edit.to_s - edit.from_s)) / duration)}%`;
+            span.title = editTitle(edit);
+            timeLabel.textContent = `${clock(at + shiftOf(stream))} / ${clock(duration)}`;
+          };
+          const up = () => {
+            handle.removeEventListener("pointermove", move);
+            handle.removeEventListener("pointerup", up);
+            handle.removeEventListener("pointercancel", up);
+            span.classList.remove("dragging");
+            if (!moved) return;
+            dragged = true;
+            setTimeout(() => { dragged = false; }, 0);
+            saveEdits(edits.map((x, j) => (j === k ? edit : x)));
+            player?.seek(Math.max(0, (side === "start" ? edit.from_s : edit.to_s) + shiftOf(stream) - 1));
+          };
+          handle.addEventListener("pointermove", move);
+          handle.addEventListener("pointerup", up);
+          handle.addEventListener("pointercancel", up);
+        });
+        return handle;
+      };
+      const drawEdits = () => editLayer.replaceChildren(...mixEdits.get(stream).map((e, k) => {
+        const span = clip(e.from_s, e.to_s, "", editTitle(e), `mix-edit ${e.play ? "play" : "mute"}`);
+        if (!meta.compacted) span.append(edgeHandle(span, k, "start"), edgeHandle(span, k, "end"));
+        return span;
+      }));
       drawEdits();
       const used = scriptLines.filter((s) => s.stream === stream).flatMap((s) => spans(s).map(([a, b]) => clip(a, b,
         `background:${strong.get(s.speaker) ?? "var(--key-light)"}`,
@@ -4177,15 +4378,7 @@ function renderSession(session, processingError, suggestion) {
         if (meta.compacted) return;
         const own = timeAt(e.clientX) - shiftOf(stream);
         const edits = mixEdits.get(stream);
-        const save = (next) => {
-          mixEdits.set(stream, next);
-          updateQuiet(stream);
-          drawEdits();
-          // Heard straight away in the transcript mix.
-          if (playMix !== "transcript") { playMix = "transcript"; drawMix(); }
-          applyMix(player?.now() ?? 0);
-          invoke("set_mix_edits", { id, name: stream, edits: next }).catch((err) => showError(page, err));
-        };
+        const save = saveEdits;
         const add = (a, b, play) => save(addMixEdit(edits, Math.max(0, a), Math.min(duration, b), play));
         const blocks = [...quietIn.get(stream).used, ...quietIn.get(stream).greyed].filter(([a, b]) => own >= a && own < b);
         const block = blocks.length ? [Math.min(...blocks.map(([a]) => a)), Math.max(...blocks.map(([, b]) => b))] : null;
@@ -4218,27 +4411,25 @@ function renderSession(session, processingError, suggestion) {
         if (edits.length > (mine ? 1 : 0)) items.push([`Undo all ${edits.length} changes on this track`, "Back to the transcript mix as it was", () => save([])]);
         contextMenu(e.clientX, e.clientY, items);
       });
-      // The name opens the track's settings; an imported track also has a menu to sync it or take it out.
+      // The name opens the track's settings, where it can be placed or deleted too.
       const details = imported ? `${name} · imported · ${placedText(imported, meta.created)}` : trackDetails(name, meta.tracks?.[stream]);
       const flags = [(meta.locked ?? []).includes(stream) ? "everything on it is them" : "", meta.track_offsets?.[stream] ? `moved ${signedClock(meta.track_offsets[stream])}` : ""].filter(Boolean);
       const nameEl = el("span", { class: "name", role: "button", tabindex: "0", style: `color:${strong.get(stream) ?? "inherit"}`,
         title: `${details}${flags.length ? `
 ${flags.join(" · ")}` : ""}
-Click for who is on it and where it starts` }, name);
+Click for who is on it, where it starts, or to delete it` }, name);
       const openSettings = (e) => { e.stopPropagation(); if (!meta.compacted) trackDialog(stream, name); };
       nameEl.addEventListener("click", openSettings);
       nameEl.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSettings(e); } });
-      // A recorded track can be taken out too, as one that heard nothing or doubles another.
-      const menu = imported ? importMenu(id, imported, name, page, meta.created)
-        : streams.length > 1 && !meta.compacted && !session.busy ? recordedTrackMenu(stream, name) : null;
-      lanes.append(el("div", { class: "track" }, menu ? el("span", { class: "name-wrap" }, nameEl, menu) : nameEl, mute, boost, bar));
+      lanes.append(el("div", { class: "track" }, nameEl, mute, boost, bar));
     }
     lanes.append(head);
     // Zoom: the part of the meeting the bars show, from `pan` (a fraction of it) at `zoom` times. The wheel
     // zooms around the pointer (Shift or a sideways scroll moves along); two fingers pinch, one drags.
     if (trackView.id !== id) trackView = { id, zoom: 1, pan: 0 };
     const maxZoom = Math.max(1, duration / 4);
-    const fitButton = el("button", { class: "pill zoom-fit", type: "button", title: "Show the whole meeting again (zoom with the mouse wheel; pinch on a touch screen)" });
+    const fitButton = el("button", { class: "pill zoom-fit", type: "button", "aria-label": "Show the whole meeting",
+      title: "Show the whole meeting again (zoom with the mouse wheel; pinch on a touch screen)" }, svg("fit", 16));
     const barRect = () => lanes.querySelector(".bar").getBoundingClientRect();
     const setView = (zoom, pan) => {
       zoom = Math.min(maxZoom, Math.max(1, zoom));
@@ -4250,7 +4441,6 @@ Click for who is on it and where it starts` }, name);
       lanes.style.setProperty("--pan", pan);
       lanes.classList.toggle("zoomed", zoom > 1.001);
       fitButton.hidden = zoom <= 1.001;
-      fitButton.textContent = `${zoom < 10 ? zoom.toFixed(1) : Math.round(zoom)}× · Fit`;
       if (player) onTick(player.t, player.playing);
       return !same;
     };
@@ -4425,9 +4615,7 @@ Click for who is on it and where it starts` }, name);
     };
     tracks.append(lanes, el("div", { class: "transport" },
       el("button", { class: "pill", "aria-label": "Previous clip or mark", title: "Start of the previous clip, bookmark or action item (←)", onclick: prevClip }, svg("skip-back", 16)),
-      el("button", { class: "pill", "aria-label": "Back 5 seconds", title: "Back 5 seconds (Alt + ←)", onclick: () => player?.seek(player.t - 5) }, "−5"),
       playButton, mini,
-      el("button", { class: "pill", "aria-label": "Forward 5 seconds", title: "Forward 5 seconds (Alt + →)", onclick: () => player?.seek(player.t + 5) }, "+5"),
       el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item (→)", onclick: nextClip }, svg("skip-forward", 16)),
       timeLabel, speedSelect, fitButton, el("span", { class: "grow" }), followButton, mixLabel,
       meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id, meta.created), "aria-label": "Import a recording" }, svg("import", 14), el("span", { class: "wide-only" }, "Import")), fold));
@@ -4830,49 +5018,6 @@ function levelButton(id, stream, name, saved) {
     document.addEventListener("keydown", close, true);
   });
   return button;
-}
-
-function importMenu(id, imported, label, page, meetingStart) {
-  const fail = (e) => showError(page, e);
-  const inline = (text, input, save) => {
-    const button = el("button", { class: "primary pill" }, "Save and transcribe");
-    const box = el("div", { class: "inline-form" }, `${label} ${text}`, input, button,
-      el("button", { class: "pill", onclick: () => box.remove() }, "Cancel"));
-    button.addEventListener("click", () => save(box));
-    page.querySelector("h1")?.before(box);
-    input.focus();
-  };
-  const match = (near) => async () => {
-    try {
-      await invoke("sync_track", { id, name: imported.name, near });
-      processAgain(id);
-    } catch (e) { fail(e); }
-  };
-  return menuButton(svg("more", 14), [
-    "Where it goes",
-    ["Fine-tune by its sound", "Matches it to the other tracks near where it is, and finds clocks that ran apart", match(true)],
-    ["Match its sound anywhere", "When the time of day is far out", match(false)],
-    ["Set the time of day it started", dayClock(meetingStart + imported.offset_s), () => {
-      const input = el("input", { type: "text", class: "mono", size: "10", value: dayClock(meetingStart + imported.offset_s), "aria-label": "Started at, time of day" });
-      inline("started at", input, async (box) => {
-        const started = parseDayClock(input.value, meetingStart);
-        if (started == null) return showError(box, "Type hours:minutes:seconds, such as 14:30:05.");
-        try { await invoke("set_track_start", { id, name: imported.name, startedAt: started }); processAgain(id); } catch (e) { showError(box, e); }
-      });
-    }],
-    ["Set where it starts in the meeting", `${signedClock(imported.offset_s)} now`, () => {
-      const input = el("input", { type: "text", class: "mono", size: "8", value: signedClock(imported.offset_s).replace("−", "-"), "aria-label": "Starts at" });
-      inline("starts at", input, async (box) => {
-        const offset = parseStart(input.value);
-        if (offset == null) return showError(box, "Type minutes:seconds, such as 1:02.5.");
-        try { await invoke("set_track_offset", { id, name: imported.name, offsetS: offset }); processAgain(id); } catch (e) { showError(box, e); }
-      });
-    }],
-    "This track",
-    ["Remove this track", "Its lines leave the transcript", async () => {
-      try { await invoke("remove_track", { id, name: imported.name }); processAgain(id); } catch (e) { fail(e); }
-    }],
-  ]);
 }
 
 /// A phrase heard again this close to a marker made while recording is the same moment.
