@@ -113,6 +113,8 @@ pub struct Prefs {
     pub my_pronounce: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
     /// Scroll a book's text to keep what's being read aloud in the middle of the window. Unset: yes.
     pub follow_reading: Option<bool>,
+    /// How large a book's chapter text shows, from Ctrl + the mouse wheel: 1 (unset) is the usual size.
+    pub book_text_scale: Option<f32>,
     /// The languages new notes and meetings start in; empty for the primary one alone.
     pub default_languages: Vec<String>,
     /// Languages notes and meetings are translated into when asked, or after processing when

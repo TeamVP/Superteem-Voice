@@ -1762,6 +1762,8 @@ async fn dictate_cancel(session: Option<u64>) -> Result<(), String> {
 
 /// The slowest and fastest anything is read aloud: half and three times normal.
 const READ_SPEED: (f32, f32) = (0.5, 3.0);
+/// How much larger than usual a book's chapter text can be made (it never goes below the usual size).
+const BOOK_TEXT_SCALE: (f32, f32) = (1.0, 3.0);
 
 /// Reads text aloud with the system's voice, for platforms whose web view has none (Android): at `speed`,
 /// else the chosen speed.
@@ -2834,6 +2836,7 @@ fn save_voice_settings(
     use_gpu: Option<bool>,
     voice_for: Option<(String, String)>,
     follow_reading: Option<bool>,
+    book_text_scale: Option<f32>,
 ) -> Result<(), String> {
     if let Some((lang, v)) = &voice_for {
         prefs::check_language(lang)?;
@@ -2873,6 +2876,9 @@ fn save_voice_settings(
         }
         if let Some(f) = follow_reading {
             p.follow_reading = Some(f);
+        }
+        if let Some(s) = book_text_scale.filter(|s| s.is_finite()) {
+            p.book_text_scale = Some(s.clamp(BOOK_TEXT_SCALE.0, BOOK_TEXT_SCALE.1));
         }
         if let Some((lang, v)) = voice_for {
             if v.is_empty() {

@@ -1579,6 +1579,63 @@ function readingFollower(surfaceFor) {
   };
 }
 
+// ---------- A book's text size
+
+/// How large a book's chapter text shows: 1 is the usual size, up to BOOK_TEXT_MAX times. Ctrl and the mouse
+/// wheel over a chapter change it; it's kept for every book, from one time to the next.
+const BOOK_TEXT_MAX = 3;
+let bookTextScale = null;
+let bookTextTimer = null;
+const bookTextSize = () => bookTextScale ?? Math.min(BOOK_TEXT_MAX, Math.max(1, Number(prefs.book_text_scale) || 1));
+
+/// Shows chapter text at the size chosen (see .book-chapter-body); called as a book's page opens.
+function showBookTextSize() {
+  document.documentElement.style.setProperty("--book-text-scale", String(bookTextSize()));
+}
+
+/// Where the text under (x, y) is, to keep it there as the text grows or shrinks; null over no chapter.
+function bookTextAnchor(x, y) {
+  const bodies = [...main.querySelectorAll(".book-chapter-body")];
+  const over = document.elementFromPoint(x, y)?.closest(".book-chapter-body");
+  // Beside the text (in the margin), the line across from the pointer.
+  const body = over ?? bodies.find((b) => { const r = b.getBoundingClientRect(); return r.top <= y && r.bottom >= y; });
+  if (!body) return null;
+  const r = body.getBoundingClientRect();
+  const p = caretAtPoint(over ? x : Math.min(r.right - 1, Math.max(r.left + 1, x)), y);
+  const node = p && body.contains(p.node) ? p : { node: body, offset: 0 };
+  const top = () => {
+    const range = document.createRange();
+    if (node.node.nodeType === Node.TEXT_NODE && node.offset < node.node.length) {
+      range.setStart(node.node, node.offset);
+      range.setEnd(node.node, node.offset + 1);
+    } else range.selectNodeContents(node.node);
+    return ([...range.getClientRects()].find((c) => c.height) ?? range.getBoundingClientRect()).top;
+  };
+  return { body, top };
+}
+
+/// Ctrl and the mouse wheel over a book's page make its chapter text larger (up) or smaller again (down), no
+/// smaller than the usual size; the rest of the window stays as it is.
+main.addEventListener("wheel", (e) => {
+  if (!e.ctrlKey || !main.querySelector(".book-chapter-body")) return;
+  e.preventDefault();
+  const delta = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1);
+  const now = bookTextSize();
+  // A notch of a mouse wheel (100) is a tenth of the usual size; a touchpad's pinch, a little at a time.
+  const next = Math.round(Math.min(BOOK_TEXT_MAX, Math.max(1, now - delta / 1000)) * 100) / 100;
+  if (next === now) return;
+  const anchor = bookTextAnchor(e.clientX, e.clientY);
+  const before = anchor?.top();
+  bookTextScale = next;
+  showBookTextSize();
+  if (anchor) {
+    const moved = anchor.top() - before;
+    if (Math.abs(moved) >= 1) scrollerOf(anchor.body).scrollBy({ top: moved, behavior: "instant" });
+  }
+  clearTimeout(bookTextTimer);
+  bookTextTimer = setTimeout(() => saveReading({ bookTextScale: next }).catch(() => {}), 400);
+}, { passive: false });
+
 /// One line for the Settings row: which voice, at what speed.
 async function readingAloudSummary() {
   const status = await invoke("tts_status").catch(() => null);
@@ -1595,6 +1652,7 @@ async function saveReading(change) {
     ...(change.speed != null && { read_speed: change.speed }),
     ...(change.bookSpeed != null && { book_read_speed: change.bookSpeed }),
     ...(change.followReading != null && { follow_reading: change.followReading }),
+    ...(change.bookTextScale != null && { book_text_scale: change.bookTextScale }),
     ...(change.pitch != null && { read_pitch: change.pitch }),
     ...(change.systemVoice != null && { system_voice: change.systemVoice }),
     ...(change.readSpeakers != null && { read_speakers: change.readSpeakers }),

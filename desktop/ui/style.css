@@ -1497,7 +1497,8 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 .book-chapter h2 { margin: 16px 0 8px; font-size: 22px; }
 .book-chapter h2 .link { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; text-align: left; }
 .book-chapter h2 .link:hover { text-decoration: underline; }
-.book-chapter-body { line-height: 1.65; overflow-wrap: anywhere; }
+/* Ctrl + the mouse wheel makes a chapter's text larger (see showBookTextSize): all of it, headings and notes too. */
+.book-chapter-body { line-height: 1.65; overflow-wrap: anywhere; zoom: var(--book-text-scale, 1); }
 .book-chapter-body img { max-width: 100%; }
 .book-chapter-body p { margin: 0 0 0.9em; }
 .book-locked-title { margin: 0; font-size: 28px; flex: 0 1 auto; min-width: 0; }

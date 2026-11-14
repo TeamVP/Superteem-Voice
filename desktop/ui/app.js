@@ -1354,6 +1354,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
       heading, chapterBy(note.author, book),
       turn(), bodyHolder, turn(),
       ...noteScrollButtons(heading, { cover: bar }));
+    showBookTextSize();
     main.replaceChildren(page);
     surface = domSurface(body);
     marks = attachBookmarks({ surface, holder: bodyHolder, noteId: () => note.id,
@@ -1672,6 +1673,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
     }
     const top = page.querySelector("h1, h2") || page;
     page.append(...noteScrollButtons(top));
+    showBookTextSize();
     main.replaceChildren(page);
     for (const a of attached) {
       a.surface = domSurface(a.bodyEl);
