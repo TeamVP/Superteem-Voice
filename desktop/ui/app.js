@@ -1420,9 +1420,14 @@ function listenHeading(p, where, inThis) {
 /// person can change for themselves (see myPronounceDialog). Shows how many they've changed.
 function pronounceLink(book, chapter = null, lang = null) {
   const count = () => Object.keys(myPronounce(chapter ? chapter.id : book.id)).length;
-  const button = el("button", { class: "link commentary-link", type: "button",
-    title: chapter ? "How the voice says the names in this chapter: change any for yourself" : "How the voice says the names in this book: change any for yourself" });
-  const draw = () => button.replaceChildren(svg("cog", 13), count() ? `Pronunciation (${count()} yours)` : "Pronunciation");
+  const what = chapter ? "How the voice says the names in this chapter: change any for yourself" : "How the voice says the names in this book: change any for yourself";
+  const button = el("button", { class: "link commentary-link", type: "button" }, svg("cog", 14));
+  // Just the cog: what it's for, and how many the person has changed, show when pointed at.
+  const draw = () => {
+    const label = count() ? `Pronunciation (${count()} yours). ${what}` : `Pronunciation. ${what}`;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  };
   draw();
   // A word selected in the text starts a new row.
   button.addEventListener("mousedown", (e) => e.preventDefault());
