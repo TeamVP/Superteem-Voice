@@ -61,6 +61,10 @@ pub struct Import {
     /// What it was called when it was added, such as "Ann · Phone": kept when the track is renamed.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub label: String,
+    /// The time zone of the device that recorded it, as minutes ahead of UTC, when known: its own clock's
+    /// times of day are by this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utc_offset_min: Option<i32>,
 }
 
 impl Import {
@@ -256,6 +260,11 @@ fn fit_of(dir: &Path, name: &str, near: bool) -> Result<stv_core::sync::Fit, Str
 /// Adds a track: `pcm` is 16 kHz mono. It's named by `label`, the name shown for it, and placed as `place`
 /// says. Placed by the time of day and fine-tuned, it stays at the time of day when the sound doesn't match.
 pub fn add(dir: &Path, label: &str, pcm: &[i16], place: Place) -> Result<Import, String> {
+    add_in_zone(dir, label, pcm, place, None)
+}
+
+/// As `add`, for a recording whose device's clock was `utc_offset_min` ahead of UTC.
+pub fn add_in_zone(dir: &Path, label: &str, pcm: &[i16], place: Place, utc_offset_min: Option<i32>) -> Result<Import, String> {
     if pcm.len() < RATE as usize {
         return Err("That recording is less than a second long.".into());
     }
@@ -281,6 +290,7 @@ pub fn add(dir: &Path, label: &str, pcm: &[i16], place: Place) -> Result<Import,
         from_session: None,
         markers: Vec::new(),
         label: label.trim().chars().take(60).collect(),
+        utc_offset_min: utc_offset_min.filter(|m| m.abs() <= 14 * 60),
     });
     save(dir, &imports)?;
     let mut meta: Meta = library::load_meta(dir);
@@ -510,7 +520,7 @@ fn add_session_from(dir: &Path, path: &Path, owner: &str, temp: &Path) -> Result
                 (false, _) => format!("{owner} · {what}"),
             }
         };
-        added.push(add(dir, &label, pcm, Place::Time { started_at: start as f64, refine: false })?.name);
+        added.push(add_in_zone(dir, &label, pcm, Place::Time { started_at: start as f64, refine: false }, theirs.utc_offset_min)?.name);
     }
     // The track whose sound matches most surely places them all.
     let best = added.iter().filter_map(|name| fit_of(dir, name, true).ok()).max_by(|a, b| a.confidence.total_cmp(&b.confidence));
@@ -584,6 +594,10 @@ mod tests {
         // No recorded tracks to match: it stays at its time of day.
         let import = add(&dir, "Their side", &pcm, Place::Time { started_at: 1_000_062.5, refine: true }).unwrap();
         assert_eq!((import.offset_s, import.placed_by.as_str(), import.started_at), (62.5, "time", Some(1_000_062.5)));
+        // A device in another time zone keeps it; an impossible one is dropped.
+        let elsewhere = add_in_zone(&dir, "Lagos", &pcm, Place::At(0.0), Some(60)).unwrap();
+        assert_eq!(elsewhere.utc_offset_min, Some(60));
+        assert_eq!(add_in_zone(&dir, "Nowhere", &pcm, Place::At(0.0), Some(2000)).unwrap().utc_offset_min, None);
         set_start_time(&dir, "import-1", 999_990.0).unwrap();
         assert_eq!(load(&dir)[0].offset_s, -10.0);
         let _ = std::fs::remove_dir_all(&dir);

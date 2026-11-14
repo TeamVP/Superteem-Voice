@@ -249,6 +249,19 @@ pub fn speaker_voice(segments: &[Segment], voices: &BTreeMap<usize, Voice>, spea
     segments.iter().filter(|s| s.speaker == speaker).filter_map(|s| voices.get(&s.id)).cloned().reduce(|a, b| embed::merge(&a, &b))
 }
 
+/// The voice of what one track's own wearer said into it: their lines taken from that track's audio (not
+/// another microphone's copy), leaving out any that touch a stretch muted by hand in the mix. Each line's
+/// voice is from the track's recording as it is, before any lift for playback.
+pub fn track_voice(segments: &[Segment], voices: &BTreeMap<usize, Voice>, stream: &str, muted: &[(f64, f64)]) -> Option<Voice> {
+    segments
+        .iter()
+        .filter(|s| s.stream == stream && s.speaker == stream && s.echo_of.is_none())
+        .filter(|s| !muted.iter().any(|&(a, b)| s.start_s < b && s.end_s > a))
+        .filter_map(|s| voices.get(&s.id))
+        .cloned()
+        .reduce(|a, b| embed::merge(&a, &b))
+}
+
 /// What processing found for one line before voices are considered.
 pub struct Line {
     /// The microphone's answer: a stream for its wearer, or UNKNOWN.

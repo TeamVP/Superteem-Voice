@@ -504,6 +504,13 @@ dialog.track-info ul.notes { margin: 0; padding-left: 18px; font-size: 13px; col
 /* A clip left out of the script, shown when asked for. */
 .line.double { opacity: 0.55; }
 .line.double:hover { opacity: 0.85; }
+/* A muted line: one slim, struck-through row that can be brought back. */
+.line.muted-line { padding-top: 0; padding-bottom: 0; color: var(--muted); font-size: 12px; align-items: center; }
+.line.muted-line .muted-text { text-decoration: line-through; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.line.muted-line .line-action { align-self: center; }
+.line.muted-line .line-action button { opacity: 0; }
+.line.muted-line:hover .line-action button, .line.muted-line .line-action button:focus-visible { opacity: 1; }
+.line-action { display: flex; gap: 4px; }
 .who button.link { font-size: 11px; margin-left: 8px; color: var(--accent-text); padding: 0; }
 .line.overlap .text { border-left: 2px solid var(--key-light); padding-left: 8px; }
 .line.suggest { outline: 2px dashed var(--key-light); outline-offset: -2px; }

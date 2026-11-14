@@ -106,6 +106,10 @@ pub struct Segment {
     /// The language it was heard in, when the meeting is in two; empty when it's in the meeting's main one.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub language: String,
+    /// Muted by the person, as a "Mm-hmm" that breaks up someone else's sentence: left out of the script
+    /// and silent in the transcript mix, but kept so it can be brought back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub muted: bool,
 }
 
 impl Segment {
@@ -114,9 +118,9 @@ impl Segment {
         if self.parts.is_empty() { vec![(self.start_s, self.end_s)] } else { self.parts.clone() }
     }
 
-    /// Part of the script: not a doubled-up copy of another line.
+    /// Part of the script: not a doubled-up copy of another line, and not muted.
     pub fn in_script(&self) -> bool {
-        self.echo_of.is_none()
+        self.echo_of.is_none() && !self.muted
     }
 }
 
@@ -212,6 +216,10 @@ pub struct Meta {
     /// played or muted whatever the transcript says. They don't overlap.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub mix_edits: BTreeMap<String, Vec<MixEdit>>,
+    /// The time zone it was recorded in, as minutes ahead of UTC (+660 for Sydney in summer), so its times
+    /// of day read by the clock in the room wherever it's opened; None for meetings from before this was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utc_offset_min: Option<i32>,
 }
 
 /// A stretch of a track (seconds into its own recording) played or muted by hand in the transcript mix.
