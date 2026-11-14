@@ -1656,6 +1656,21 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .reading-para { background: color-mix(in srgb, var(--key) 16%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--key) 16%, transparent); }
 }
+/* A long paragraph being read aloud: the wash covers only the few lines around what's being said, behind the
+   text, and slides down the paragraph as it's read. */
+.reading-para.reading-band, :root[data-theme="dark"] .reading-para.reading-band { background: none; box-shadow: none; position: relative; isolation: isolate; }
+.reading-para.reading-band::before {
+  content: ""; position: absolute; z-index: -1; pointer-events: none;
+  left: -6px; right: -6px; top: calc(var(--band-top, 0px) - 6px); height: calc(var(--band-height, 0px) + 12px);
+  background: color-mix(in srgb, var(--key) 7%, transparent); border-radius: 3px;
+  transition: top 0.4s, height 0.4s;
+}
+:root[data-theme="dark"] .reading-para.reading-band::before { background: color-mix(in srgb, var(--key) 16%, transparent); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .reading-para.reading-band { background: none; box-shadow: none; }
+  :root:not([data-theme="light"]) .reading-para.reading-band::before { background: color-mix(in srgb, var(--key) 16%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) { .reading-para.reading-band::before { transition: none; } }
 ::highlight(search-hit) { background-color: var(--tint); color: var(--text); }
 :root[data-theme="dark"] .book-snippet mark { background: var(--key-2); }
 :root[data-theme="dark"] ::highlight(search-hit) { background-color: var(--key-2); }
