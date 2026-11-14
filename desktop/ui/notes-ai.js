@@ -206,17 +206,29 @@ function noteChat(status) {
     if (e.key === "Escape") setOpen(false);
   });
   // Grows with the text up to five lines, then scrolls with the thin scrollbar.
-  const grow = () => {
+  // Past two lines the microphone moves up above Send, giving the text the full width; it comes back
+  // down only once the text is a single line again (or empty, as after sending).
+  const fit = () => {
     input.style.height = "auto";
     const cs = getComputedStyle(input);
     const edges = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
-    const max = Math.ceil(parseFloat(cs.lineHeight) * 5 + edges);
+    const line = parseFloat(cs.lineHeight);
+    const max = Math.ceil(line * 5 + edges);
     const want = input.scrollHeight + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
     input.style.height = `${Math.min(want, max)}px`;
     input.style.overflowY = want > max ? "auto" : "hidden";
+    return input.value ? Math.round((want - edges) / line) : 0;
+  };
+  const grow = () => {
+    const lines = fit();
+    const stacked = form.classList.contains("stacked");
+    if (!stacked && lines > 2) form.classList.add("stacked");
+    else if (stacked && lines <= 1) form.classList.remove("stacked");
+    else return;
+    fit();
   };
   input.addEventListener("input", grow);
-  new ResizeObserver(() => { if (input.value) grow(); }).observe(form);
+  new ResizeObserver(() => { if (input.value || form.classList.contains("stacked")) grow(); }).observe(form);
   const bubble = (m) => {
     if (m.role === "user") return el("div", { class: "chat-msg mine" }, m.text);
     if (m.error) return el("div", { class: "chat-msg theirs failed" }, m.error);

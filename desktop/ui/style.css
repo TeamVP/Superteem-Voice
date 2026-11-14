@@ -1267,6 +1267,12 @@ body.note-chat-page .note-col { display: flex; flex-direction: column; flex: 1; 
 .chat-form { display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px 14px; }
 .chat-input { flex: 1; min-width: 0; resize: none; box-sizing: border-box; min-height: 40px; max-height: calc(14px * 1.4 * 5 + 20px); overflow-y: hidden; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: transparent; color: var(--text); font: inherit; font-size: 14px; line-height: 1.4; }
 .chat-send { width: 38px; height: 38px; border-radius: 50%; flex: none; }
+/* Long text: the microphone sits above Send so the field gets the width. */
+.chat-form.stacked { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 1fr auto auto; column-gap: 8px; row-gap: 6px; align-items: end; }
+.chat-form.stacked > .chat-input { grid-column: 1; grid-row: 1 / span 3; }
+.chat-form.stacked > :not(.chat-input) { grid-column: 2; justify-self: end; }
+.chat-form.stacked > .chat-send { grid-row: 3; }
+.chat-form.stacked > :not(.chat-input):not(.chat-send) { grid-row: 2; }
 /* Speak instead of typing: records up to two minutes, then the words go in the field. */
 .voice-btn { width: 38px; height: 38px; border-radius: 50%; flex: none; padding: 0; display: inline-flex; align-items: center; justify-content: center; gap: 4px; color: var(--soft); }
 .voice-btn.recording { width: auto; padding: 0 10px; border-radius: 19px; background: var(--danger, #c0392b); color: #fff; font-size: 12px; font-variant-numeric: tabular-nums; }
