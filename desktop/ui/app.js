@@ -485,11 +485,12 @@ async function refreshItems() {
     invoke("list_books", { query }).catch(() => []),
   ]);
   nameMeetings(all ?? sessions);
+  if (typeof activityNoted === "function") activityNoted(notes, sessions, books);
   // Notes in a book are listed in their book; a search still finds them on their own.
   const inBook = new Set(query.trim() ? [] : books.flatMap((b) => b.notes));
   const items = [
     // Archived notes are left out of the list but still found by search.
-    ...books.map((b) => ({ kind: "book", id: b.id, title: b.title, when: b.updated,
+    ...books.map((b) => ({ kind: "book", id: b.id, title: b.title, when: b.updated, notes: b.notes,
       sub: `Book · ${timeText(b.updated)} · ${b.notes.length} note${b.notes.length === 1 ? "" : "s"}` })),
     ...notes.filter((n) => (query.trim() || !n.archived) && !inBook.has(n.id)).map((n) => ({ kind: "note", id: n.id, title: n.title, when: n.updated, status: n.status,
       sub: [`Note · ${timeText(n.updated)}`, n.words ? `${n.words} words` : null, n.archived ? "Archived" : null].filter(Boolean).join(" · ") })),
@@ -525,10 +526,14 @@ async function refreshItems() {
       itemsNav.append(el("div", { class: "group-label" }, label));
     }
     const active = view.kind === it.kind && view.id === it.id;
-    itemsNav.append(el("button", { class: "item" + (active ? " active" : "") + (it.status === "done" ? " done" : ""),
+    // Work going on in the background for it, or finished while its page wasn't open.
+    const act = typeof activityFor === "function" ? activityFor(it.kind, it.id, it.notes) : null;
+    const sub = act ? [it.sub, act.text].filter(Boolean).join(" · ") : it.sub;
+    itemsNav.append(el("button", { class: "item" + (active ? " active" : "") + (it.status === "done" ? " done" : "")
+      + (act?.busy ? " working" : "") + (act?.ready ? (act.failed ? " ready failed" : " ready") : ""),
       onclick: () => (it.kind === "note" ? openNote(it.id) : it.kind === "book" ? openBook(it.id) : openSession(it.id)) },
       el("span", { class: "icon" + (it.kind === "session" ? " meeting" : "") }, svg({ note: "pen", book: "book", session: "wave" }[it.kind], 16)),
-      el("span", { class: "body" }, el("span", { class: "title" }, it.title), el("span", { class: "sub" }, statusBadge(it.status), it.sub))));
+      el("span", { class: "body" }, el("span", { class: "title" }, it.title), el("span", { class: "sub" }, statusBadge(it.status), act ? el("span", { class: "activity-dot", "aria-hidden": "true" }) : null, sub))));
   }
   if (archiveLink) itemsNav.append(archiveLink);
 }
@@ -2204,7 +2209,9 @@ function stoppedSignal() {
 /// words in the field at its cursor. A second press stops it; stopping by itself chirps and buzzes.
 const VOICE_LIMIT_S = 120;
 let voiceRecording = null; // The voice button now recording, so only one records at a time.
-function voiceButton(field, { onWords } = {}) {
+/// A button that fills `field` with what's said. When the field's page is left before the words are written
+/// down, they go to `keep` instead (if given), so they're there on return rather than lost.
+function voiceButton(field, { onWords, keep } = {}) {
   const label = el("span", { class: "rec-time" });
   const b = el("button", { class: "icon-only voice-btn", type: "button", title: "Speak instead of typing (up to two minutes)", "aria-label": "Speak instead of typing" }, svg("mic", 18));
   b.addEventListener("mousedown", (e) => e.preventDefault());
@@ -2232,6 +2239,7 @@ function voiceButton(field, { onWords } = {}) {
       micToast(String(e));
     }
     idle();
+    if (words && !field.isConnected) keep?.(words);
     if (!words || !field.isConnected) return;
     const at = field.selectionStart ?? field.value.length, end = field.selectionEnd ?? at;
     const before = field.value.slice(0, at), after = field.value.slice(end);
@@ -2413,8 +2421,10 @@ function handOffDictation() {
     while (!d.session && !d.failed) await new Promise((r) => setTimeout(r, 50));
     if (!d.session) return;
     const id = await save.catch(() => null);
-    if (id) await invoke("dictate_detach", { session: d.session, note: id }).catch(() => {});
-    else await invoke("dictate_cancel", { session: d.session }).catch(() => {});
+    if (id) {
+      await invoke("dictate_detach", { session: d.session, note: id }).catch(() => {});
+      if (typeof noteDictating === "function") noteDictating(id);
+    } else await invoke("dictate_cancel", { session: d.session }).catch(() => {});
     refreshItems();
   })();
 }
@@ -2498,12 +2508,17 @@ function showProcessing(id) {
 
 /// Processes a session that was never processed (after a crash) or again (after the model was added).
 async function processAgain(id) {
+  // Importing can take a while: the person may have gone elsewhere meanwhile, and stays there. The list says
+  // how the meeting is getting on.
+  const here = () => (view.kind === "session" || view.kind === "processing") && view.id === id;
   try {
     await invoke("process_session", { id });
     queue = await invoke("processing_queue");
-    showProcessing(id);
+    if (here()) showProcessing(id);
+    else refreshItems();
   } catch (e) {
-    await openSession(id, String(e));
+    if (here()) await openSession(id, String(e));
+    else micToast(`Couldn't transcribe the meeting: ${e}`);
   }
 }
 

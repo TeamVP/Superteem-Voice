@@ -1150,6 +1150,18 @@ dialog.sheet .actions { display: flex; justify-content: flex-end; gap: 8px; marg
   max-width: calc(100vw - 32px); background: var(--text); color: var(--bg); border-radius: 10px; padding: 10px 16px;
   font-size: 14px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); pointer-events: none; }
 
+/* ---------- Work going on in the background, shown in the list ---------- */
+.item .activity-dot { display: inline-block; width: 7px; height: 7px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; background: var(--key); }
+.item.working .activity-dot { animation: pulse 1.4s ease-in-out infinite; }
+.item.ready .sub { color: var(--key); }
+.item.ready.failed .sub { color: var(--muted); }
+.item.ready.failed .activity-dot { background: var(--muted); }
+.activity-toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 1000;
+  display: flex; align-items: center; gap: 14px; max-width: calc(100vw - 32px); background: var(--text); color: var(--bg);
+  border-radius: 10px; padding: 8px 10px 8px 16px; font-size: 14px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); }
+.activity-toast .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-toast .link { color: var(--bg); font-weight: 600; text-decoration: underline; flex: none; }
+
 /* ---------- A note's chat and versions ---------- */
 /* Without a chat (on a phone) the note page is laid out as it always was; with one, the note scrolls beside it. */
 .analyses-slot, .note-split, .note-main, .note-col, .chat-side { display: contents; }

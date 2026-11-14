@@ -72,6 +72,13 @@ pub fn writing_into(id: &str) -> bool {
     DETACHED.lock().unwrap().iter().any(|(_, n)| n == id)
 }
 
+/// The notes left dictations are still writing into.
+pub fn writing() -> Vec<String> {
+    let mut notes: Vec<String> = DETACHED.lock().unwrap().iter().map(|(_, n)| n.clone()).collect();
+    notes.dedup();
+    notes
+}
+
 /// The page dictation `id` was on has gone (the person went somewhere else in the app): recording stops,
 /// and what was said, including clips still being written down, goes onto the end of note `note` here
 /// rather than being lost. `on_written` is told once all of it is in.

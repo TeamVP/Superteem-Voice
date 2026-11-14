@@ -13,16 +13,27 @@ icon.search = '<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></pa
 
 /// The chat on the page now: { draw(), id() }.
 let noteChatNow = null;
-/// What the model is doing for the chat on the page: "Loading the model…" until it starts thinking.
+/// What the model is doing for a note's chat: { id, text }, such as "Thinking…" once the model is ready.
 let noteChatStep = null;
-/// What the answer being written shows so far: { kind: "reply", text } or { kind: "rewriting", words }.
+/// What a note's answer being written shows so far: { id, kind: "reply", text } or { id, kind: "rewriting", words }.
+/// Answers carry on while the person is elsewhere, so each is kept with its note's id and the page reads it again on return.
 let noteChatPartial = null;
+
+/// What's typed or said in a note's chat box and not sent yet, by note id, so it's still there after going
+/// elsewhere in the app. Words spoken into the box are written down even when its page was left meanwhile.
+const noteChatDrafts = new Map();
+const addToDraft = (id, words) => {
+  const was = noteChatDrafts.get(id) ?? "";
+  noteChatDrafts.set(id, was && !/\s$/.test(was) ? `${was} ${words}` : was + words);
+  // Back on that note's page already: the words go in its box now.
+  if (noteChatNow?.id() === id) noteChatNow.showDraft();
+};
 
 const CHAT_IDEAS = ["Summarise this note", "Fix spelling and grammar", "Make it shorter", "Turn it into bullet points"];
 
 listen("analysing", (e) => {
   if (e.payload.template !== "chat" || e.payload.id !== note?.id) return;
-  noteChatStep = "Thinking…";
+  noteChatStep = { id: e.payload.id, text: "Thinking…" };
   noteChatNow?.draw();
 });
 listen("chat-partial", (e) => {
@@ -33,6 +44,8 @@ listen("chat-partial", (e) => {
 listen("analysed", (e) => {
   if (e.payload.template === "chat" && e.payload.kind === "note") noteChatAnswered(e.payload.id);
 });
+// An answer waiting its turn moves up as the jobs ahead of it finish.
+listen("analysis-queue", () => noteChatNow?.waiting() && noteChatNow.load());
 
 /// The chat's width when open, dragged by its left edge and remembered on this device.
 const CHAT_WIDTH = { min: 280, max: 720, default: 360 };
@@ -66,7 +79,7 @@ function noteChat(status) {
   const log = el("div", { class: "chat-log", role: "log", "aria-live": "polite" });
   const input = el("textarea", { class: "chat-input", rows: "1", placeholder: "Ask about this note", "aria-label": "Message" });
   const send = el("button", { class: "primary icon-only chat-send", type: "submit", title: "Send (Enter)", "aria-label": "Send" }, svg("send", 16));
-  const form = el("form", { class: "chat-form" }, input, voiceButton(input), send);
+  const form = el("form", { class: "chat-form" }, input, voiceButton(input, { keep: (words) => mine.id && addToDraft(mine.id, words) }), send);
   const close = el("button", { class: "icon-only chat-collapse", type: "button", title: "Collapse the chat (Esc)", "aria-label": "Collapse the chat" }, svg("chevron", 16));
   // On a phone, or in a narrow window, the chat covers the note: this goes back to it.
   const back = el("button", { class: "pill with-icon chat-back", type: "button", title: "Back to the note", "aria-label": "Back to the note" }, svg("chevron", 16), "Note");
@@ -104,6 +117,13 @@ function noteChat(status) {
   const mine = note;
   const chat = { messages: [], ready: true, running: false, loaded: false, notices: new Map() };
   mine.chat = chat;
+  // What was typed or said here before going elsewhere in the app.
+  if (mine.id && noteChatDrafts.has(mine.id)) input.value = noteChatDrafts.get(mine.id);
+  input.addEventListener("input", () => {
+    if (!mine.id) return;
+    if (input.value.trim()) noteChatDrafts.set(mine.id, input.value);
+    else noteChatDrafts.delete(mine.id);
+  });
 
   const isOpen = () => !panel.hidden;
   const setOpen = (open, remember = true) => {
@@ -138,6 +158,15 @@ function noteChat(status) {
       if (note !== mine) return;
       Object.assign(chat, data, { loaded: true });
       if (!chat.running) { noteChatStep = null; noteChatPartial = null; }
+      else {
+        // Asked before this page was opened (the person went elsewhere and came back): what's been written so far.
+        if (data.partial) noteChatPartial = { id: mine.id, ...data.partial };
+        // Started before this page opened, with nothing written yet: the model may be loading or thinking.
+        if (data.ahead == null && noteChatStep?.id !== mine.id) noteChatStep = { id: mine.id, text: "Working on it…" };
+        // A rewrite lands in the editor only if the note is as it was when the answer was asked for. Asked
+        // before this page opened, the note was saved on the way out, so that's the text now.
+        if (chat.sent == null) chat.sent = mine.editorText();
+      }
     } catch (e) {
       chat.error = String(e);
     }
@@ -159,9 +188,12 @@ function noteChat(status) {
       chat.messages.push({ role: "user", text, at: Date.now() / 1000 });
       atEnd = true;
       input.value = "";
+      noteChatDrafts.delete(id);
       grow();
       draw();
       await invoke("chat_note", { id, text });
+      // Whether it starts now or waits behind other analyses and answers.
+      await load();
     } catch (e) {
       chat.error = String(e);
       chat.running = false;
@@ -269,13 +301,15 @@ function noteChat(status) {
     chat.messages.forEach((m) => rows.push(bubble(m)));
     if (chat.running) {
       const stop = el("button", { class: "link", type: "button", onclick: () => invoke("cancel_analysis", { kind: "note", id: mine.id, template: "chat" }).then(() => setTimeout(load, 300)) }, "Stop");
-      const partial = noteChatPartial;
+      const partial = noteChatPartial?.id === mine.id ? noteChatPartial : null;
+      const ahead = chat.ahead ? `Waiting for ${chat.ahead === 1 ? "one other job" : `${chat.ahead} other jobs`} to finish first…` : null;
       if (partial?.kind === "reply") {
         rows.push(el("div", { class: "chat-msg theirs writing" }, formatted(partial.text), el("div", { class: "chat-actions" }, stop)));
       } else {
         const step = partial?.kind === "rewriting"
           ? `Rewriting the note… ${partial.words} word${partial.words === 1 ? "" : "s"} so far`
-          : noteChatStep ?? (recording ? "Waiting until the recording stops…" : "Getting the model ready…");
+          : recording ? "Waiting until the recording stops…"
+          : ahead ?? (noteChatStep?.id === mine.id ? noteChatStep.text : "Getting the model ready…");
         rows.push(el("div", { class: "chat-msg theirs pending" }, el("span", { class: "spinner" }), step, stop));
       }
     }
@@ -287,7 +321,11 @@ function noteChat(status) {
     send.disabled = !chat.ready || chat.running;
   };
   chat.draw = draw;
-  noteChatNow = { draw, id: () => mine.id, close: () => setOpen(false) };
+  const showDraft = () => {
+    input.value = noteChatDrafts.get(mine.id) ?? "";
+    grow();
+  };
+  noteChatNow = { draw, load, showDraft, id: () => mine.id, close: () => setOpen(false), waiting: () => note === mine && !!chat.running && chat.ahead != null };
 
   /// Opens the panel if it was left open, else reads the chat so the bar can show a new answer; called once
   /// the page is in place.

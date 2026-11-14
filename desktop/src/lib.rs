@@ -76,6 +76,8 @@ struct AppState {
     analysing: Mutex<Option<Job>>,
     analysis_worker: std::sync::atomic::AtomicBool,
     analysis_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// What each note's chat answer being written shows so far, so a page opened mid-answer shows it at once.
+    chat_partials: Mutex<std::collections::HashMap<String, chat::Partial>>,
     /// The catalogue model being downloaded.
     llm_downloading: Mutex<Option<String>>,
     llm_download_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -1684,6 +1686,20 @@ fn dictate_detach<R: Runtime>(app: AppHandle<R>, session: u64, note: String) {
     dictation::detach(session, note, move |id| drop(app.emit("note-dictated", id)));
 }
 
+/// What runs in the background, so the app can show it beside each note and meeting wherever the person is.
+#[derive(Serialize)]
+struct Activity {
+    analyses: AnalysisQueue,
+    processing: QueueState,
+    /// Notes that dictation left mid-way is still writing into.
+    dictating: Vec<String>,
+}
+
+#[tauri::command]
+fn activity(state: State<AppState>) -> Activity {
+    Activity { analyses: analysis_queue_state(&state), processing: queue_state(&state), dictating: dictation::writing() }
+}
+
 /// Whether a left dictation is still writing into note `id`.
 #[tauri::command]
 fn dictation_writing(id: String) -> bool {
@@ -2027,7 +2043,10 @@ fn enqueue_analysis<R: Runtime>(app: &AppHandle<R>, job: Job) {
                 if job.template == chat::JOB {
                     report("Thinking", 1, 1);
                     let id = job.id.clone();
-                    return chat::answer(&job.id, model.as_mut(), &mut |partial| drop(app.emit("chat-partial", ChatPartial { id: id.clone(), partial })));
+                    return chat::answer(&job.id, model.as_mut(), &mut |partial| {
+                        state.chat_partials.lock().unwrap().insert(id.clone(), partial.clone());
+                        drop(app.emit("chat-partial", ChatPartial { id: id.clone(), partial }))
+                    });
                 }
                 if let Some(at) = job.template.strip_prefix(LABEL) {
                     report("Writing", 1, 1);
@@ -2060,6 +2079,7 @@ fn enqueue_analysis<R: Runtime>(app: &AppHandle<R>, job: Job) {
                 Ok(())
             })();
             if job.template == chat::JOB {
+                state.chat_partials.lock().unwrap().remove(&job.id);
                 keep_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(120));
                 // The model didn't load, or the note has gone: say so in the chat rather than leave it waiting.
                 if let Err(why) = &outcome {
@@ -2120,12 +2140,27 @@ struct ChatView {
     ready: bool,
     /// An answer is being written, or waiting its turn.
     running: bool,
+    /// While it waits its turn: how many analyses and answers are ahead of it. None once it's started.
+    ahead: Option<usize>,
+    /// What the answer being written shows so far.
+    partial: Option<chat::Partial>,
     /// The version the note's text is now, so a rewrite offers Undo only while it is still the note.
     current: Option<u32>,
 }
 
 fn chat_job(id: &str) -> Job {
     Job { kind: "note".into(), id: id.into(), template: chat::JOB.into() }
+}
+
+/// While this note's chat answer waits its turn, how many jobs are ahead of it, counting the one running.
+fn chat_ahead(state: &AppState, id: &str) -> Option<usize> {
+    let job = chat_job(id);
+    let running = state.analysing.lock().unwrap().clone();
+    if running.as_ref() == Some(&job) {
+        return None;
+    }
+    let at = state.analysis_queue.lock().unwrap().iter().position(|j| j == &job)?;
+    Some(at + usize::from(running.is_some()))
 }
 
 /// An answer for this note's chat is being written, or waiting its turn.
@@ -2146,6 +2181,8 @@ fn get_note_chat(state: State<AppState>, id: String) -> Result<ChatView, String>
         messages: chat::load(&id).messages,
         ready: !p.llm_server.trim().is_empty() || !llm::installed().is_empty(),
         running,
+        ahead: chat_ahead(&state, &id),
+        partial: state.chat_partials.lock().unwrap().get(&id).cloned(),
         current: notes::current_version(&id)?,
     })
 }
@@ -3295,6 +3332,7 @@ pub fn run() {
             dictate_cancel,
             dictate_detach,
             dictation_writing,
+            activity,
             list_vocabulary,
             save_vocab_term,
             delete_vocab_term,
