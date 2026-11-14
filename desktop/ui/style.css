@@ -389,6 +389,13 @@ kbd { font: 600 11px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; paddi
 .track .bar .mix-edits { display: contents; }
 .track .bar span.mix-edit.play { box-shadow: inset 0 0 0 2px var(--key-light); background: color-mix(in srgb, var(--key-light) 25%, transparent); z-index: 1; }
 .track .bar span.mix-edit.mute { background: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.55) 0 3px, transparent 3px 6px); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5); z-index: 1; }
+/* The edges of a change made by hand: drag one to move where it starts or ends. */
+.track .bar span.mix-edit b.edit-handle { position: absolute; top: 0; bottom: 0; width: 10px; cursor: ew-resize; touch-action: none; z-index: 2; }
+.track .bar span.mix-edit b.edit-handle.start { left: -5px; }
+.track .bar span.mix-edit b.edit-handle.end { right: -5px; }
+.track .bar span.mix-edit b.edit-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; border-radius: 1px; background: var(--text); opacity: 0; transition: opacity 0.1s; }
+.track .bar span.mix-edit:hover b.edit-handle::after { opacity: 0.45; }
+.track .bar span.mix-edit b.edit-handle:hover::after, .track .bar span.mix-edit.dragging b.edit-handle::after { opacity: 0.9; }
 .ctx-menu .menu { z-index: 60; top: auto; width: 300px; max-width: calc(100vw - 16px); }
 .boost-pop { position: fixed; z-index: 50; width: 300px; max-width: calc(100vw - 16px); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
 .boost-pop .boost-row { display: flex; align-items: center; gap: 10px; }
@@ -424,6 +431,7 @@ kbd { font: 600 11px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; paddi
 .track-lanes.zoomed .bar { border-radius: 0; }
 .track .bar i.theirs { background: var(--key-light); }
 .zoom-fit[hidden] { display: none; }
+.transport .zoom-fit { display: inline-flex; align-items: center; justify-content: center; min-height: 30px; padding: 3px 10px; color: var(--muted); }
 .track .name[role="button"] { cursor: pointer; }
 .track .name[role="button"]:hover { text-decoration: underline; }
 dialog.track-dialog { max-width: 480px; max-height: calc(100% - 48px); overflow-y: auto; }
@@ -433,6 +441,19 @@ dialog.track-dialog .field.check { flex-direction: row; align-items: flex-start;
 dialog.track-dialog .field.check input { margin-top: 3px; }
 dialog.track-dialog .row-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 dialog.track-dialog .row-pick select { flex: 1 1 140px; min-width: 0; font-size: 13px; }
+dialog.track-dialog .track-confirm[hidden], dialog.track-dialog .track-settings[hidden] { display: none; }
+dialog.track-dialog .track-confirm p { margin: 0 0 12px; font-size: 14px; line-height: 1.45; }
+dialog.track-dialog .track-confirm ul.marks { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+dialog.track-dialog .track-confirm ul.marks li { display: flex; align-items: center; gap: 6px; }
+dialog.track-dialog .actions { align-items: center; }
+dialog.track-dialog .track-delete { color: var(--muted); }
+dialog.track-dialog .track-delete:hover:not(:disabled) { color: #e5484d; }
+dialog.track-dialog .track-delete:disabled { opacity: 0.4; cursor: default; }
+dialog.sheet.track-info { max-width: 480px; }
+dialog.track-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0 0 14px; font-size: 13px; }
+dialog.track-info dt { color: var(--muted); }
+dialog.track-info dd { margin: 0; overflow-wrap: anywhere; }
+dialog.track-info ul.notes { margin: 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
 .transport { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .transport .play { width: 44px; height: 44px; border-radius: 22px; border: none; background: var(--key); color: #fff; padding: 0; display: flex; align-items: center; justify-content: center; }
 .transport .play:hover { background: var(--key-1); }
@@ -997,8 +1018,6 @@ body[data-platform="ios"] { box-sizing: border-box; padding: env(safe-area-inset
 .import-row.check > span { min-width: 0; }
 .import-row input[type="text"] { padding: 5px 8px; }
 .import-row input[type="text"]:disabled { opacity: 0.5; }
-.track .name-wrap { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
-.track .name-wrap .icon-only { width: 22px; height: 22px; }
 .tracks .track-confirm, .tracks .track-removed { margin: 0; }
 .tracks .track-confirm p, .tracks .track-removed p { margin: 0; flex: 1 1 260px; font-size: 13px; }
 
