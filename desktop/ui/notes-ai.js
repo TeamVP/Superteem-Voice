@@ -64,7 +64,7 @@ function noteChat(status) {
   // The whole bar opens it, not just its button.
   rail.addEventListener("click", () => setOpen(true));
   const log = el("div", { class: "chat-log", role: "log", "aria-live": "polite" });
-  const input = el("textarea", { class: "chat-input", rows: "1", placeholder: "Ask about this note, or ask for a rewrite", "aria-label": "Message" });
+  const input = el("textarea", { class: "chat-input", rows: "1", placeholder: "Ask about this note", "aria-label": "Message" });
   const send = el("button", { class: "primary icon-only chat-send", type: "submit", title: "Send (Enter)", "aria-label": "Send" }, svg("send", 16));
   const form = el("form", { class: "chat-form" }, input, voiceButton(input), send);
   const close = el("button", { class: "icon-only chat-collapse", type: "button", title: "Collapse the chat (Esc)", "aria-label": "Collapse the chat" }, svg("chevron", 16));
@@ -173,8 +173,18 @@ function noteChat(status) {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(input.value); }
     if (e.key === "Escape") setOpen(false);
   });
-  const grow = () => { input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight + 2, 160)}px`; };
+  // Grows with the text up to five lines, then scrolls with the thin scrollbar.
+  const grow = () => {
+    input.style.height = "auto";
+    const cs = getComputedStyle(input);
+    const edges = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+    const max = Math.ceil(parseFloat(cs.lineHeight) * 5 + edges);
+    const want = input.scrollHeight + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+    input.style.height = `${Math.min(want, max)}px`;
+    input.style.overflowY = want > max ? "auto" : "hidden";
+  };
   input.addEventListener("input", grow);
+  new ResizeObserver(() => { if (input.value) grow(); }).observe(form);
   const bubble = (m) => {
     if (m.role === "user") return el("div", { class: "chat-msg mine" }, m.text);
     if (m.error) return el("div", { class: "chat-msg theirs failed" }, m.error);
