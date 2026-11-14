@@ -1520,6 +1520,12 @@ fn get_book(id: String) -> Result<books::Book, String> {
     books::load(&id)
 }
 
+/// Who made each of a book's pictures, where it came from, its rights and the changes made to it.
+#[tauri::command]
+fn book_media(id: String) -> Result<books::MediaRegister, String> {
+    books::media_register(&id)
+}
+
 #[tauri::command]
 fn book_chapters(id: String) -> Result<Vec<books::Chapter>, String> {
     books::chapters(&id)
@@ -3467,6 +3473,7 @@ pub fn run() {
             book_bookmark_view,
             set_book_bookmark_view,
             book_file_problems,
+            book_media,
             set_book_listen_place,
             search_book,
             book_for_note,

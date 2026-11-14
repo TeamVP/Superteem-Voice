@@ -1,2 +1,3 @@
 # A book laid out for the library keeps its files byte for byte: book.json lists each one's SHA-256.
 examples/books/** -text
+desktop/resources/example-books/files/** -text

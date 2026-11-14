@@ -874,6 +874,33 @@ function mediaGallery(book, { titles = null, goTo = null } = {}) {
   grid.querySelector("button")?.focus();
 }
 
+/// Each book's media register (see book_media), asked for once.
+const mediaRegisters = new Map();
+function mediaRegister(book) {
+  if (!book.media) return Promise.resolve(null);
+  if (!mediaRegisters.has(book.id)) mediaRegisters.set(book.id, invoke("book_media", { id: book.id }).catch(() => null));
+  return mediaRegisters.get(book.id);
+}
+
+/// What the register says about one picture, as rows to show: who made it, where it first appeared, its
+/// rights and why it may be used, where this copy came from, and what's been changed since.
+function pictureAbout(item) {
+  const c = item.creator ?? {};
+  const o = item.original;
+  const r = item.rights ?? {};
+  const src = item.source;
+  const rows = [
+    ["Made by", [c.name, c.lived ? `(${c.lived})` : "", c.role ? `· ${c.role}` : ""].filter(Boolean).join(" ")],
+    ["Made", [item.made, item.made_how].filter(Boolean).join(". ")],
+    ["First in", o ? [o.work, [o.publisher, o.place, o.year].filter(Boolean).join(", "), o.page].filter(Boolean).join(" · ") : ""],
+    ["Rights", [r.licence ? licenceName(r.licence.toLowerCase()) : r.status, r.holder ? `held by ${r.holder}` : ""].filter(Boolean).join(", ")],
+    ["Why it may be used", [r.basis, r.checked ? `Checked ${dayText(r.checked)}.` : ""].filter(Boolean).join(" ")],
+    ["From", src ? [src.url, src.retrieved ? `retrieved ${dayText(src.retrieved)}` : ""].filter(Boolean).join(", ") : ""],
+    ["Changes", (item.adjustments ?? []).length ? item.adjustments.map((a) => [dayText(a.date), a.what, a.by ? `(${a.by})` : ""].filter(Boolean).join(" ")).join("; ") : (src ? "None" : "")],
+  ];
+  return el("dl", { class: "viewer-about" }, rows.filter(([, v]) => v).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+}
+
 /// One picture filling the window, with its caption and credit, and the ones before and after it a click,
 /// an arrow key or a swipe away. Escape closes it. `onGo`, when given, is done before going to a chapter.
 function pictureViewer(book, pictures, start = 0, { titles = null, goTo = null, onGo = null } = {}) {
@@ -881,6 +908,22 @@ function pictureViewer(book, pictures, start = 0, { titles = null, goTo = null, 
   const img = el("img", { class: "viewer-img", alt: "" });
   const caption = el("p", { class: "viewer-caption" });
   const credit = el("p", { class: "viewer-credit" });
+  // Who made it, its rights and its history, from the book's media register: shown when asked for.
+  const about = el("div", { class: "viewer-about-holder", hidden: true });
+  const aboutButton = el("button", { class: "link", type: "button", "aria-expanded": "false", hidden: true }, "About this picture");
+  let register = null;
+  const drawAbout = () => {
+    const item = register?.items?.find((i) => i.path === pictures[at].name);
+    aboutButton.hidden = !item;
+    about.replaceChildren(item ? pictureAbout(item) : "");
+    if (!item) about.hidden = true;
+  };
+  aboutButton.addEventListener("click", () => {
+    about.hidden = !about.hidden;
+    aboutButton.setAttribute("aria-expanded", String(!about.hidden));
+    aboutButton.textContent = about.hidden ? "About this picture" : "Hide";
+  });
+  mediaRegister(book).then((r) => { register = r; if (dialog.isConnected) drawAbout(); });
   const count = el("span", { class: "viewer-count", "aria-live": "polite" });
   const where = el("span", { class: "viewer-where" });
   const prev = el("button", { class: "viewer-nav prev", type: "button", title: "Previous (←)", "aria-label": "Previous picture" }, svg("left", 30));
@@ -890,7 +933,7 @@ function pictureViewer(book, pictures, start = 0, { titles = null, goTo = null, 
     el("div", { class: "viewer-top" }, count, el("span", { class: "grow" }),
       el("button", { class: "viewer-close", type: "button", title: "Close (Esc)", "aria-label": "Close", onclick: () => dialog.close() }, svg("close", 22))),
     stage,
-    el("div", { class: "viewer-foot" }, caption, credit, where));
+    el("div", { class: "viewer-foot" }, caption, credit, el("div", { class: "viewer-links" }, aboutButton, where), about));
   const show = (i) => {
     at = Math.max(0, Math.min(pictures.length - 1, i));
     const f = pictures[at];
@@ -906,6 +949,7 @@ function pictureViewer(book, pictures, start = 0, { titles = null, goTo = null, 
       onclick: () => { dialog.close(); onGo?.(); goTo(id); } }, `In ${titles[id]} →`)) : []));
     // The ones either side, ready.
     for (const j of [at - 1, at + 1]) if (pictures[j]) new Image().src = bookFileUrl(book, pictures[j].name);
+    drawAbout();
   };
   prev.addEventListener("click", () => show(at - 1));
   next.addEventListener("click", () => show(at + 1));

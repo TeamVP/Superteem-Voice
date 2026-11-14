@@ -1852,7 +1852,7 @@ dialog.picture-viewer::backdrop { background: #000; }
 .viewer-foot { padding: 12px 20px 18px; text-align: center; }
 .viewer-caption { margin: 0 auto; max-width: 900px; font-size: 16px; }
 .viewer-credit { margin: 4px 0 0; font-size: 12px; color: #a9a3b6; }
-.viewer-where { display: inline-flex; gap: 14px; margin-top: 6px; }
+.viewer-where { display: inline-flex; gap: 14px; }
 .viewer-where .link { color: #c9b6ec; }
 @media (max-width: 720px) {
   .viewer-stage { padding: 0 8px; }
@@ -1860,3 +1860,12 @@ dialog.picture-viewer::backdrop { background: #000; }
   .gallery-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
   .gallery-tile img { height: 110px; }
 }
+/* What the book's media register says about the picture shown. */
+.viewer-links { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px 16px; margin-top: 6px; }
+.viewer-links .link { color: #c9b6ec; }
+.viewer-links .link:hover { color: #fff; }
+.viewer-links .viewer-where { margin: 0; }
+.viewer-about-holder { max-height: 34vh; overflow-y: auto; margin: 10px auto 0; max-width: 760px; text-align: left; }
+.viewer-about { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 13px; }
+.viewer-about dt { color: #a9a3b6; }
+.viewer-about dd { margin: 0; overflow-wrap: anywhere; color: #e6e2ee; }

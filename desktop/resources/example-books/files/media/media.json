@@ -1,0 +1,132 @@
+{
+  "format": "superteem-book-media",
+  "format_version": 1,
+  "book": "plutarch-lives",
+  "about": "Every picture in this book: who made it and when, the work it was first published in, who owns it and on what grounds it may be used, where this copy came from, and each change made to it since. An item taken from elsewhere keeps the original's hash in source.sha256 and lists every crop, resize or colour change in adjustments; sha256 is the file as it is in this book.",
+  "fields": {
+    "creator": "name, role (artist, engraver, photographer…), lived (years)",
+    "original": "the work it was first published in: work, publisher, place, year, page or plate; null if made for this book",
+    "rights": "status (public-domain, licensed, dedicated, permission), licence, holder, basis (why it may be used), checked (date)",
+    "source": "where this copy came from: url, retrieved (date), sha256 of the file as downloaded; null if made for this book",
+    "adjustments": "each change, oldest first: date, by, what"
+  },
+  "items": [
+    {
+      "path": "media/cover.jpg",
+      "kind": "image/jpeg",
+      "title": "The cover",
+      "alt": "The cover: Plutarch's Lives, translated by John Dryden, revised by Arthur Hugh Clough",
+      "caption": "",
+      "creator": {
+        "name": "Superteem",
+        "role": "made for this edition",
+        "lived": ""
+      },
+      "made": "2026-11-15",
+      "made_how": "Drawn as type in Georgia, with a ruled border. Rendered with Python and Pillow.",
+      "original": null,
+      "rights": {
+        "status": "dedicated",
+        "licence": "CC0-1.0",
+        "holder": "Superteem",
+        "basis": "Made for this edition and given to the public domain under CC0.",
+        "checked": "2026-11-15"
+      },
+      "source": null,
+      "credit": "Made for this edition by Superteem",
+      "adjustments": [],
+      "sha256": "3ea848615d48dbf82a5649f85237d8c677e32b090d0e686dc76372f87006de6c",
+      "used_in": [
+        "cover"
+      ]
+    },
+    {
+      "path": "media/timelines/plutarchs-world.png",
+      "kind": "image/png",
+      "title": "Three lives and the man who wrote them",
+      "alt": "Timeline from 540 BC to AD 140: Themistocles born about 524 BC, Salamis 480 BC, Caesar born 100 BC, Augustus 27 BC, Plutarch born about AD 46 and writing about AD 100",
+      "caption": "Themistocles, Caesar and Plutarch on one line: Plutarch is as far from Themistocles as we are from the first printed books",
+      "creator": {
+        "name": "Superteem",
+        "role": "made for this edition",
+        "lived": ""
+      },
+      "made": "2026-11-15",
+      "made_how": "A timeline drawn from the dates in the chapter commentaries. Rendered with Python and Pillow.",
+      "original": null,
+      "rights": {
+        "status": "dedicated",
+        "licence": "CC0-1.0",
+        "holder": "Superteem",
+        "basis": "Made for this edition and given to the public domain under CC0.",
+        "checked": "2026-11-15"
+      },
+      "source": null,
+      "credit": "Made for this edition by Superteem",
+      "adjustments": [],
+      "sha256": "a110c5dff0957023de149a49462e02a0e9465f3bebe10264fc27dd3fb3e793ca",
+      "used_in": [
+        "plutarch-04-01-themistocles",
+        "plutarch-17-02-caesar"
+      ]
+    },
+    {
+      "path": "media/timelines/themistocles.png",
+      "kind": "image/png",
+      "title": "Themistocles, c. 524–459 BC",
+      "alt": "Timeline of Themistocles: born about 524 BC, archon 493, Marathon 490, the fleet built 483, Salamis 480, Plataea 479, ostracised about 471, died about 459 BC",
+      "caption": "The life of Themistocles",
+      "creator": {
+        "name": "Superteem",
+        "role": "made for this edition",
+        "lived": ""
+      },
+      "made": "2026-11-15",
+      "made_how": "A timeline drawn from the dates in the Themistocles commentary. Rendered with Python and Pillow.",
+      "original": null,
+      "rights": {
+        "status": "dedicated",
+        "licence": "CC0-1.0",
+        "holder": "Superteem",
+        "basis": "Made for this edition and given to the public domain under CC0.",
+        "checked": "2026-11-15"
+      },
+      "source": null,
+      "credit": "Made for this edition by Superteem",
+      "adjustments": [],
+      "sha256": "330457a64bd74192cf193e035778d20b324ee1ebc604089a20ef248b903f05ad",
+      "used_in": [
+        "plutarch-04-01-themistocles"
+      ]
+    },
+    {
+      "path": "media/timelines/caesar.png",
+      "kind": "image/png",
+      "title": "Julius Caesar, 100–44 BC",
+      "alt": "Timeline of Julius Caesar: born 100 BC, taken by pirates about 75, chief priest 63, consul 59, Gaul from 58, the Rubicon 49, Pharsalus 48, the calendar reformed 46, killed 44 BC",
+      "caption": "The life of Julius Caesar",
+      "creator": {
+        "name": "Superteem",
+        "role": "made for this edition",
+        "lived": ""
+      },
+      "made": "2026-11-15",
+      "made_how": "A timeline drawn from the dates in the Caesar commentary. Rendered with Python and Pillow.",
+      "original": null,
+      "rights": {
+        "status": "dedicated",
+        "licence": "CC0-1.0",
+        "holder": "Superteem",
+        "basis": "Made for this edition and given to the public domain under CC0.",
+        "checked": "2026-11-15"
+      },
+      "source": null,
+      "credit": "Made for this edition by Superteem",
+      "adjustments": [],
+      "sha256": "1717d1a358b96a0b2e301137c870e85a6ff69721ed52738c71b1a8fe94440c55",
+      "used_in": [
+        "plutarch-17-02-caesar"
+      ]
+    }
+  ]
+}

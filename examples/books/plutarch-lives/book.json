@@ -2,7 +2,7 @@
   "format": "superteem-book",
   "format_version": 1,
   "id": "plutarch-lives",
-  "version": 10,
+  "version": 11,
   "title": "Plutarch's Lives",
   "author": "Plutarch",
   "translator": "John Dryden and others (1683–86), revised by Arthur Hugh Clough (1859)",
@@ -10,7 +10,7 @@
   "language": "en",
   "licence": "public-domain",
   "source": "https://www.gutenberg.org/ebooks/674",
-  "published": "https://library.superteem.com/books/plutarch-lives/v10",
+  "published": "https://library.superteem.com/books/plutarch-lives/v11",
   "editable": false,
   "voice": {
     "suggested": "vits-piper-en_GB-alan-medium",
@@ -78,6 +78,11 @@
       "version": 10,
       "date": "2026-11-15",
       "summary": "A cover, and pictures: timelines in the commentaries on Themistocles and Caesar, all in the book's gallery."
+    },
+    {
+      "version": 11,
+      "date": "2026-11-15",
+      "summary": "A register of the book's pictures: who made each, its rights and why it may be used, where it came from and every change since."
     }
   ],
   "contents": [

@@ -7,7 +7,7 @@
   "language": "en",
   "source": "https://www.gutenberg.org/ebooks/674",
   "licence": "public-domain",
-  "version": 10,
+  "version": 11,
   "changes": [
     {
       "version": 1,
@@ -58,6 +58,11 @@
       "version": 10,
       "date": "2026-11-15",
       "summary": "A cover, and pictures: timelines in the commentaries on Themistocles and Caesar, all in the book's gallery."
+    },
+    {
+      "version": 11,
+      "date": "2026-11-15",
+      "summary": "A register of the book's pictures: who made each, its rights and why it may be used, where it came from and every change since."
     }
   ],
   "links": [
@@ -775,6 +780,17 @@
       "used_in": [
         "plutarch-17-02-caesar"
       ]
+    },
+    {
+      "name": "media/media.json",
+      "kind": "application/json",
+      "size": 5541,
+      "sha256": "342644ab5bbe047b36f59a8996f0766f8d5344378239820872b9edffc20d3fb2",
+      "alt": "The register of the book's pictures: who made each, its rights, where it came from and every change since",
+      "caption": "",
+      "credit": "Superteem",
+      "licence": "cc0-1.0"
     }
-  ]
+  ],
+  "media": "media/media.json"
 }

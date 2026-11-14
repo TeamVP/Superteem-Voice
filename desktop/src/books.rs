@@ -97,6 +97,10 @@ pub struct Book {
     /// change under a reader.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<BookFile>,
+    /// The register of its pictures, one of its own files ("media/media.json"): who made each, the work it
+    /// first appeared in, its rights, where this copy came from and every change since (see MediaItem).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub media: String,
     /// The web pages the book may link to. In a book kept for reading, a link to anything else is shown as
     /// plain text; these open only in the system's browser, after saying they leave the app.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -127,6 +131,104 @@ pub struct BookFile {
     /// The chapters (note ids) that show it, so the book's gallery can go to where each is in the text.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub used_in: Vec<String>,
+}
+
+/// A book's media register, kept with its pictures (see `Book::media`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MediaRegister {
+    pub format: String,
+    pub format_version: u32,
+    pub book: String,
+    pub items: Vec<MediaItem>,
+}
+
+/// One picture in a book's media register: its provenance and rights, for the credits and the library's checks.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MediaItem {
+    /// Its name among the book's files ("media/maps/salamis.jpg").
+    pub path: String,
+    pub kind: String,
+    pub title: String,
+    pub alt: String,
+    pub caption: String,
+    pub creator: MediaCreator,
+    /// When it was made ("1900", "2026-11-15").
+    pub made: String,
+    /// How, for a picture made for the book.
+    pub made_how: String,
+    /// The work it first appeared in; none for a picture made for the book.
+    pub original: Option<MediaOriginal>,
+    pub rights: MediaRights,
+    /// Where this copy came from; none for a picture made for the book.
+    pub source: Option<MediaSource>,
+    pub credit: String,
+    /// Every change made to it since it was taken from its source, oldest first.
+    pub adjustments: Vec<MediaAdjustment>,
+    /// The file as it is in the book.
+    pub sha256: String,
+    pub used_in: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MediaCreator {
+    pub name: String,
+    /// Artist, engraver, photographer, or "made for this edition".
+    pub role: String,
+    /// The years they lived ("1852–1936"); empty when not known or not a person.
+    pub lived: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MediaOriginal {
+    pub work: String,
+    pub publisher: String,
+    pub place: String,
+    pub year: String,
+    /// The page or plate it's at, as the work numbers it.
+    pub page: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MediaRights {
+    /// "public-domain", "licensed", "dedicated" (given to the public domain) or "permission".
+    pub status: String,
+    pub licence: String,
+    pub holder: String,
+    /// Why it may be used ("the artist died in 1936; first published in the US in 1900").
+    pub basis: String,
+    /// When that was last checked ("2026-11-15").
+    pub checked: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MediaSource {
+    pub url: String,
+    pub retrieved: String,
+    /// The file as it was downloaded, before any adjustment.
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MediaAdjustment {
+    pub date: String,
+    pub by: String,
+    pub what: String,
+}
+
+/// A book's media register, or an empty one when it has none.
+pub fn media_register(id: &str) -> Result<MediaRegister, String> {
+    let book = load(id)?;
+    if book.media.is_empty() {
+        return Ok(MediaRegister::default());
+    }
+    library::read_json(&file_path(id, &book.media)?).map_err(|_| "The book's list of its pictures can't be read.".to_string())
 }
 
 /// A web page outside the library that a book links to.
@@ -846,7 +948,7 @@ fn copy_bundled(dir: &Dir<'_>, root: &std::path::Path, dest: &std::path::Path) -
 }
 
 /// The example book's version, which is its `version`: what changed in each is in its `changes`.
-const EXAMPLE_BOOK: u32 = 10;
+const EXAMPLE_BOOK: u32 = 11;
 const EXAMPLE_ID: &str = "plutarch-lives";
 
 fn example_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf> {
@@ -943,6 +1045,26 @@ mod tests {
                 assert!(format!("{}{}", note.body, note.commentary).contains(&format!("attachment:book/{}", f.name)), "{chapter} shows {}", f.name);
             }
         }
+    }
+
+    #[test]
+    fn the_example_books_pictures_are_in_its_media_register() {
+        let dir = example_dir(None).expect("the example book is beside the crate");
+        let book: Book = library::read_json(&dir.join(format!("{EXAMPLE_ID}.json"))).unwrap();
+        assert_eq!(book.media, "media/media.json");
+        assert!(book.files.iter().any(|f| f.name == book.media), "the register is one of its files");
+        let register: MediaRegister = library::read_json(&dir.join("files").join(&book.media)).unwrap();
+        assert_eq!(register.book, EXAMPLE_ID);
+        for f in book.files.iter().filter(|f| f.kind.starts_with("image/")) {
+            let item = register.items.iter().find(|i| i.path == f.name).unwrap_or_else(|| panic!("{} is in the register", f.name));
+            assert_eq!(item.sha256, f.sha256, "{} is the file the register describes", f.name);
+            assert!(!item.creator.name.is_empty() && !item.rights.basis.is_empty() && !item.rights.checked.is_empty(), "{} says who made it and why it may be used", f.name);
+            // A picture taken from elsewhere says from where, and as what file.
+            if item.original.is_some() {
+                assert!(item.source.as_ref().is_some_and(|s| !s.url.is_empty() && !s.sha256.is_empty()), "{} says where it came from", f.name);
+            }
+        }
+        assert_eq!(register.items.len(), book.files.iter().filter(|f| f.kind.starts_with("image/")).count());
     }
 
     #[test]
