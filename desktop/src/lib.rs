@@ -1421,6 +1421,30 @@ fn book_chapters(id: String) -> Result<Vec<books::Chapter>, String> {
     books::chapters(&id)
 }
 
+/// Changes a book's commentary and/or pronunciations; a field left out stays as it is.
+#[tauri::command]
+fn set_book_extras(id: String, commentary: Option<String>, pronounce: Option<std::collections::BTreeMap<String, String>>) -> Result<(), String> {
+    books::set_extras(&id, commentary, pronounce)
+}
+
+/// Changes a note's commentary and/or pronunciations; a field left out stays as it is.
+#[tauri::command]
+fn set_note_extras(id: String, commentary: Option<String>, pronounce: Option<std::collections::BTreeMap<String, String>>) -> Result<(), String> {
+    notes::set_extras(&id, commentary, pronounce)
+}
+
+/// Where reading aloud last stopped in a book, or null.
+#[tauri::command]
+fn book_listen_place(id: String) -> Option<books::ListenPlace> {
+    books::listen_place(&id)
+}
+
+/// Keeps where reading aloud stopped in a book; null forgets it.
+#[tauri::command]
+fn set_book_listen_place(id: String, place: Option<books::ListenPlace>) -> Result<(), String> {
+    books::set_listen_place(&id, place)
+}
+
 #[tauri::command]
 fn book_contents(id: String) -> Result<Vec<books::ChapterHead>, String> {
     books::contents(&id)
@@ -3181,6 +3205,10 @@ pub fn run() {
             get_book,
             book_chapters,
             book_contents,
+            book_listen_place,
+            set_book_extras,
+            set_note_extras,
+            set_book_listen_place,
             search_book,
             book_for_note,
             create_book,

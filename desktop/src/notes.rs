@@ -30,6 +30,14 @@ pub struct Note {
     /// as Markdown; when this is missing, as after the assistant rewrites the note, `body` is the note.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc: Option<serde_json::Value>,
+    /// How to say words the voices get wrong, in this note only, as a book's `pronounce`: each word as
+    /// written to how it's spelt for the voice. Read on top of the book's own, so a note can override one.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub pronounce: std::collections::BTreeMap<String, String>,
+    /// Notes about the note (Markdown): background, context, a reader's guide. Hidden until asked for,
+    /// then shown above the note. Never read aloud with it.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub commentary: String,
 }
 
 impl Note {
@@ -258,6 +266,53 @@ pub fn delete(id: &str) -> Result<(), String> {
     let _ = std::fs::remove_file(file.with_extension("bookmarks.json"));
     let _ = std::fs::remove_dir_all(file.with_extension("files"));
     std::fs::remove_file(file).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Commentary and pronunciations: written about the note, beside its text
+
+/// The most pronunciations kept, and the longest commentary.
+const MAX_PRONOUNCE: usize = 1000;
+const MAX_COMMENTARY: usize = 50_000;
+
+/// Pronunciations as typed, tidied: each word trimmed, one word of letters (with ' or -), and a spelling that
+/// says something other than the word. Others are dropped.
+pub fn clean_pronounce(words: std::collections::BTreeMap<String, String>) -> std::collections::BTreeMap<String, String> {
+    words
+        .into_iter()
+        .map(|(w, s)| (w.trim().to_string(), s.split_whitespace().collect::<Vec<_>>().join(" ")))
+        .filter(|(w, s)| {
+            !w.is_empty()
+                && w.chars().count() <= 60
+                && w.chars().all(|c| c.is_alphabetic() || c == '\'' || c == '’' || c == '-')
+                && !s.is_empty()
+                && s.chars().count() <= 120
+                && s != w
+        })
+        .take(MAX_PRONOUNCE)
+        .collect()
+}
+
+/// Commentary as typed, trimmed and kept to a length.
+pub fn clean_commentary(text: String) -> String {
+    let text = text.trim();
+    match text.char_indices().nth(MAX_COMMENTARY) {
+        Some((i, _)) => text[..i].to_string(),
+        None => text.to_string(),
+    }
+}
+
+/// Changes a note's commentary or pronunciations, whichever is given. Not its text, so no version is kept.
+pub fn set_extras(id: &str, commentary: Option<String>, pronounce: Option<std::collections::BTreeMap<String, String>>) -> Result<(), String> {
+    crate::books::protect(id)?;
+    let mut note = load(id)?;
+    if let Some(text) = commentary {
+        note.commentary = clean_commentary(text);
+    }
+    if let Some(words) = pronounce {
+        note.pronounce = clean_pronounce(words);
+    }
+    library::write_json(&path(id)?, &note)
 }
 
 // ---------------------------------------------------------------------------------------------------------

@@ -36,6 +36,8 @@ let prefs = { wake: false, quiet: false, onboarded: true, terms_accepted: 1, inp
 
 const icon = {
   pen: '<path d="M4 20h4L19 9l-4-4L4 16z"></path>',
+  plus: '<path d="M12 5v14M5 12h14"></path>',
+  commentary: '<path d="M4 5h16v11H9l-5 4z"></path><path d="M8 9h8M8 12h5"></path>',
   book: '<path d="M5 4.5A1.5 1.5 0 016.5 3H19v15H6.5A1.5 1.5 0 005 19.5z"></path><path d="M5 19.5A1.5 1.5 0 006.5 21H19v-3"></path>',
   up: '<path d="M6 15l6-6 6 6"></path>',
   down: '<path d="M6 9l6 6 6-6"></path>',
@@ -748,8 +750,149 @@ function noteScrollButtons(topEl, { floor = null, cover = null } = {}) {
   return [up, down];
 }
 
+/// Commentary on a book or a note (Markdown): hidden until its link is pressed, then shown in a panel where
+/// `panel` is put, at the top of the book or the note. Never read aloud with the text. Gives { link, panel },
+/// both null when there is none.
+function commentary(markdown, about) {
+  if (!markdown?.trim()) return { link: null, panel: null };
+  const body = el("div", { class: "commentary-body" });
+  try {
+    body.innerHTML = NoteEditor.toHTML(markdown, () => "");
+  } catch {
+    body.append(...markdown.split(/\n{2,}/).filter((p) => p.trim()).map((p) => el("p", {}, p)));
+  }
+  const panel = el("aside", { class: "commentary", hidden: true, "aria-label": `Commentary on ${about}` });
+  const link = el("button", { class: "link commentary-link", type: "button", "aria-expanded": "false", title: `Commentary on ${about}` }, "Commentary");
+  const toggle = (open) => {
+    panel.hidden = !open;
+    link.setAttribute("aria-expanded", String(open));
+    link.textContent = open ? "Hide commentary" : "Commentary";
+    if (open) panel.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  };
+  link.addEventListener("click", () => toggle(panel.hidden));
+  panel.append(el("div", { class: "commentary-head" }, el("span", {}, "Commentary"),
+    el("button", { class: "icon-only", type: "button", title: "Hide the commentary", "aria-label": "Hide the commentary", onclick: () => toggle(false) }, svg("close", 16))), body);
+  return { link, panel };
+}
+
+/// Asks for commentary on a book or a note, as Markdown. Gives the text ("" to remove it), or null when
+/// cancelled.
+function commentaryDialog(about, text) {
+  return new Promise((done) => {
+    let result = null;
+    const area = el("textarea", { rows: "12", "aria-label": "Commentary", placeholder: "Background, context, things to look out for…" });
+    area.value = text ?? "";
+    const finish = (value) => { result = value; dialog.close(); };
+    const dialog = el("dialog", { class: "sheet extras-dialog", "aria-label": "Commentary" },
+      el("h2", {}, `Commentary on ${about}`),
+      el("p", { class: "hint" }, "Hidden until a reader presses Commentary, then shown at the top. It's never read aloud. "
+        + "Markdown works: *italic*, **bold**, - lists, and a blank line between paragraphs."),
+      area,
+      el("div", { class: "actions" },
+        text?.trim() ? el("button", { class: "link danger", type: "button", onclick: () => finish("") }, "Remove") : null,
+        el("span", { class: "grow" }),
+        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
+        el("button", { class: "primary pill", type: "button", onclick: () => finish(area.value.trim()) }, "Save")));
+    dialog.addEventListener("close", () => { dialog.remove(); done(result); });
+    document.body.append(dialog);
+    dialog.showModal();
+    area.focus();
+  });
+}
+
+/// Asks how to say words the voices get wrong: each word as written, and how to spell it for the voice, with
+/// a button to hear it. `words` is { written: said }; `fresh`, a word to start a new row with (one selected in
+/// the text); `inherited`, for a note in a book, the book's own, shown so they aren't typed again; `voice`, the
+/// voice to try them in (null for the usual one); `lang` the language. Gives the new { written: said }, or
+/// null when cancelled.
+function pronounceDialog(about, words, { fresh = "", inherited = null, voice = null, lang = null } = {}) {
+  return new Promise((done) => {
+    let result = null;
+    const rows = el("div", { class: "pron-rows" });
+    const addRow = (written = "", said = "") => {
+      const word = el("input", { type: "text", value: written, placeholder: "Word as written", "aria-label": "Word as written", maxlength: "60", autocomplete: "off", spellcheck: "false" });
+      const sound = el("input", { type: "text", value: said, placeholder: "How it sounds", "aria-label": "How it sounds", maxlength: "120", autocomplete: "off", spellcheck: "false" });
+      const hear = el("button", { class: "icon-only", type: "button", title: "Hear it", "aria-label": "Hear it" }, svg("speak", 16));
+      hear.dataset.what = "Hear it";
+      hear.addEventListener("click", () => {
+        if (reading?.button === hear) return stopReading();
+        stopReading();
+        const text = sound.value.trim() || word.value.trim();
+        if (text) readAloud(hear, text, lang, { voice });
+      });
+      const row = el("div", { class: "pron-row" }, word, el("span", { class: "pron-arrow", "aria-hidden": "true" }, "→"), sound, hear,
+        el("button", { class: "icon-only", type: "button", title: "Take this word out", "aria-label": "Take this word out", onclick: () => { row.remove(); showEmpty(); } }, svg("close", 16)));
+      // Enter in the spelling goes on to a new word.
+      sound.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addRow().querySelector("input").focus(); } });
+      word.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sound.focus(); } });
+      rows.append(row);
+      showEmpty();
+      return row;
+    };
+    const empty = el("p", { class: "hint pron-empty" }, "No words yet.");
+    const showEmpty = () => { empty.hidden = rows.children.length > 0; };
+    for (const [w, s] of Object.entries(words ?? {}).sort(([a], [b]) => a.localeCompare(b))) addRow(w, s);
+    const first = fresh && !(fresh in (words ?? {})) ? addRow(fresh, "") : null;
+    showEmpty();
+    const read = () => {
+      const out = {};
+      for (const row of rows.children) {
+        const [w, s] = [...row.querySelectorAll("input")].map((i) => i.value.trim());
+        if (w && s && w !== s) out[w] = s;
+      }
+      return out;
+    };
+    const finish = (value) => { result = value; dialog.close(); };
+    const theirs = Object.keys(inherited ?? {}).length;
+    const dialog = el("dialog", { class: "sheet extras-dialog pron-dialog", "aria-label": "Pronunciation" },
+      el("h2", {}, `Pronunciation in ${about}`),
+      el("p", { class: "hint" }, "For words the voice says wrong. Write the word as it is in the text, then spell it the way it sounds, "
+        + "as you'd write it for someone who'd never seen it: Phocion → Foe shee on. Whole words, matching capitals; Phocion's is covered too."),
+      theirs ? el("p", { class: "hint" }, `The book's own ${theirs} word${theirs === 1 ? " is" : "s are"} used too. A word here is said this way in this note only.`) : null,
+      rows, empty,
+      el("button", { class: "pill with-icon pron-add", type: "button", onclick: () => addRow().querySelector("input").focus() }, svg("plus", 14), "Add a word"),
+      el("div", { class: "actions" },
+        el("span", { class: "grow" }),
+        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
+        el("button", { class: "primary pill", type: "button", onclick: () => finish(read()) }, "Save")));
+    dialog.addEventListener("close", () => { stopReading(); dialog.remove(); done(result); });
+    document.body.append(dialog);
+    dialog.showModal();
+    (first?.querySelectorAll("input")[1] ?? rows.querySelector("input") ?? dialog.querySelector(".pron-add")).focus();
+  });
+}
+
+/// The word a selection holds, to start a pronunciation with: one word of letters, else "".
+function selectedWord() {
+  const text = String(getSelection() ?? "").trim();
+  return /^[\p{L}'’-]{1,60}$/u.test(text) ? text : "";
+}
+
+/// How many words a pronunciation list has, as a button says it.
+const pronounceCount = (words) => {
+  const n = Object.keys(words ?? {}).length;
+  return n ? `Pronunciation (${n})` : "Pronunciation";
+};
+
+/// A chapter as the contents list names it: "Book 1 · Chapter 2 · Romulus".
+const chapterName = (c) => [c.part, c.label, c.title].filter(Boolean).join(" · ");
+/// A sentence cut short to show.
+const shortQuote = (q, n = 70) => (q.length > n ? `${q.slice(0, n - 1).trimEnd()}…` : q);
+
+/// The top of the Read aloud button's hold menu: where reading aloud last stopped in the book, or how a place
+/// comes to be kept.
+function listenHeading(p, where, inThis) {
+  if (!p) return { heading: "No listening place yet", sub: `Stop reading aloud after a few sentences (more than ${LISTEN_MIN_WORDS} words) and where you stopped is kept.` };
+  const at = inThis ? "in this chapter" : where ? `in ${chapterName(where)}` : "in this book";
+  return { heading: `You stopped listening ${at}`, sub: [p.quote ? `“${shortQuote(p.quote)}”` : "At the start of the chapter", agoText(p.created)].join(" · ") };
+}
+
+const READ_CHAPTER = "Read the chapter aloud (from where you click, or what you select). Hold for more";
+const READ_ON = "Read on from where you stopped listening (or from where you click, or what you select). Hold for more";
+
 /// A book kept for reading: a contents list, then one chapter at a time. Nothing in it can be changed.
-async function openReadingBook(book, chapterId, find = null) {
+/// `listen` opens the chapter at the place reading aloud stopped: "show" to go there, "read" to read on.
+async function openReadingBook(book, chapterId, find = null, listen = null) {
   const mine = view;
   let contents = [];
   try {
@@ -789,27 +932,91 @@ async function openReadingBook(book, chapterId, find = null) {
     const heading = el("h1", {}, note.title || chapter.title);
     const bodyHolder = el("div", { class: "book-chapter-holder" }, body);
     const lang = () => itemLanguages(note)[0];
+    // The note's own pronunciations go on top of the book's.
+    const pronounce = { ...book.pronounce, ...note.pronounce };
+    const place = listenPlace(book.id);
     let marks = null;
-    // What is selected, or from where the text was last clicked; otherwise the whole chapter.
-    const speak = readAloudButton(() => marks?.readingText() ?? `${HEADING}${heading.textContent}\n${body.innerText}`,
-      "Read the chapter aloud (from where you click, or what you select)", { lang, voice: (l) => bookVoice(book, l), pronounce: book.pronounce });
+    let surface = null;
+    // Where in the text reading starts, so where it stops can be found: set as the text to read is chosen.
+    let startAt = 0;
+    const whole = () => `${HEADING}${heading.textContent}\n${surface.text()}`;
+    const stoppedHere = () => (place.get()?.note === note.id ? marks?.listenFrom() ?? null : null);
+    const readFrom = (from) => {
+      const rest = from > 0 ? marks.textFrom(from) : whole();
+      if (!rest.trim()) return micToast("That's the end of the chapter.");
+      speak.readText(rest, lang(), { chapter: 0, at: from });
+    };
+    // Goes to where reading aloud last stopped, or reads on from there: in this chapter, or opens the one it's in.
+    const toListenPlace = (how) => {
+      const p = place.get();
+      if (!p) return;
+      if (p.note !== note.id) return openBook(book.id, { chapter: p.note, listen: how });
+      const found = findBookmark(surface.text(), p);
+      surface.reveal(found.from, Math.max(found.to, found.from + 1));
+      if (how === "read") readFrom(found.from);
+    };
+    // When reading stops after more than a few words, where it stopped is kept, in place of the last. Read to
+    // the end of the chapter, it's the start of the next.
+    const keepWhereStopped = (r) => {
+      if (!surface) return;
+      const text = surface.text();
+      const stop = stoppedAt([text], r);
+      if (!stop) return;
+      const had = place.get();
+      place.set(stop.end && index + 1 < contents.length ? listenAnchor(contents[index + 1].id, "", 0) : listenAnchor(note.id, text, stop.at, stop.quote));
+      toldListenPlace(!!had);
+    };
+    const listenMenu = () => {
+      const p = place.get();
+      return [
+        listenHeading(p, p && contents.find((c) => c.id === p.note), p?.note === note.id),
+        "-",
+        { icon: "play", text: "Read on from where you stopped", disabled: !p, run: () => toListenPlace("read") },
+        { icon: "bookmark", text: "Go to where you stopped", disabled: !p, run: () => toListenPlace("show") },
+        { icon: "speak", text: "Read this chapter from the start", run: () => readFrom(0) },
+        "-",
+        { icon: "trash", text: "Forget where you stopped", disabled: !p, run: () => { place.forget(); micToast("Forgotten. Read aloud starts at the top of the chapter again."); } },
+      ];
+    };
+    // What is selected, or from where the text was last clicked, or where reading aloud stopped in this chapter;
+    // otherwise the whole chapter.
+    const speak = readAloudButton(() => {
+      const chosen = marks?.reading();
+      if (chosen) { startAt = chosen.from; return chosen.text; }
+      const from = stoppedHere();
+      if (from != null) { startAt = from; return marks.textFrom(from); }
+      startAt = 0;
+      return whole();
+    }, READ_CHAPTER, { lang, voice: (l) => bookVoice(book, l), pronounce,
+      startOf: () => ({ chapter: 0, at: startAt }), onEnd: keepWhereStopped, menu: listenMenu });
     const mark = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or where you clicked", "aria-label": "Bookmark" }, svg("bookmark", 16));
     mark.addEventListener("mousedown", (e) => e.preventDefault());
     mark.addEventListener("click", () => marks?.create());
+    const notes = commentary(note.commentary, note.title || chapter.title);
+    const bar = el("div", { class: "book-contents-bar" },
+      el("span", { class: "book-bar-links" }, el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"), notes.link),
+      el("span", { class: "top-actions" }, mark, speak));
     const page = el("div", { class: "page book book-read" },
-      el("div", { class: "book-contents-bar" },
-        el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"),
-        el("span", { class: "top-actions" }, mark, speak)),
+      bar,
+      notes.panel ?? "",
       kicker ? el("p", { class: "book-kicker" }, kicker) : "",
       heading,
       turn(), bodyHolder, turn(),
-      ...noteScrollButtons(heading));
+      ...noteScrollButtons(heading, { cover: bar }));
     main.replaceChildren(page);
-    const surface = domSurface(body);
-    marks = attachBookmarks({ surface, holder: bodyHolder, noteId: () => note.id, onRead: (text) => speak.readText(text, lang()),
-      onVoice: book.voice && isDesktop() ? () => changeBookVoice(book, lang(), speak.isReading() ? speak.readOn : null) : null });
+    surface = domSurface(body);
+    marks = attachBookmarks({ surface, holder: bodyHolder, noteId: () => note.id,
+      onRead: (text, { from = 0 } = {}) => speak.readText(text, lang(), { chapter: 0, at: from }),
+      onVoice: book.voice && isDesktop() ? () => changeBookVoice(book, lang(), speak.isReading() ? speak.readOn : null) : null,
+      listen: { read: readFrom, forget: () => place.forget() } });
+    place.watch((p) => {
+      marks.setListen(p?.note === note.id ? p : null);
+      speak.describe(stoppedHere() != null ? READ_ON : READ_CHAPTER);
+    });
     openAtTop(page);
     revealSnippet(surface, find);
+    // After the page has settled at its top, as revealSnippet waits.
+    if (listen) place.ready.then(() => setTimeout(() => { if (surface.root.isConnected) toListenPlace(listen); }, 320));
     return;
   }
   const rows = [];
@@ -826,13 +1033,38 @@ async function openReadingBook(book, chapterId, find = null) {
   });
   const list = el("div", { class: "group book-notes" }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "This book has no chapters.")));
   const search = bookSearch(book.id, list, (hit, snippet) => openBook(book.id, { chapter: hit.id, find: snippet }));
+  const notes = commentary(book.commentary, book.title || "this book");
   const page = el("div", { class: "page book book-read" },
     el("div", { class: "book-head" }, el("span", { class: "book-icon" }, svg("book", 22)),
       el("h1", { class: "book-locked-title" }, book.title || "Untitled book"),
       el("span", { class: "reader-pill", title: "For reading: the chapters stay as they are" }, "Reader")),
+    notes.link ? el("div", { class: "book-links" }, notes.link) : "",
+    notes.panel ?? "",
+    listenResume(book.id, contents, (c, how) => openBook(book.id, { chapter: c.id, listen: how })),
     search.bar, search.results, list);
   main.replaceChildren(page);
   openAtTop(page);
+}
+
+/// Above a book's contents, where reading aloud last stopped: to read on from there, go there, or forget it.
+/// `open(chapter, how)` opens the chapter, "read" or "show".
+function listenResume(bookId, contents, open) {
+  const box = el("div", { class: "listen-resume", hidden: true });
+  const place = listenPlace(bookId);
+  place.watch((p) => {
+    const c = p && contents.find((x) => x.id === p.note);
+    box.hidden = !c;
+    if (!c) return box.replaceChildren();
+    box.replaceChildren(
+      el("span", { class: "listen-resume-icon" }, svg("speak", 18)),
+      el("div", { class: "listen-resume-text" }, el("strong", {}, "Carry on listening"),
+        el("small", {}, [chapterName(c), p.quote ? `“${shortQuote(p.quote, 60)}”` : "", agoText(p.created)].filter(Boolean).join(" · "))),
+      el("span", { class: "listen-resume-actions" },
+        el("button", { class: "primary pill with-icon", type: "button", onclick: () => open(c, "read") }, svg("play", 12), "Read on"),
+        el("button", { class: "pill", type: "button", onclick: () => open(c, "show") }, "Go there"),
+        el("button", { class: "icon-only", type: "button", title: "Forget where you stopped", "aria-label": "Forget where you stopped listening", onclick: () => place.forget() }, svg("close", 16))));
+  });
+  return box;
 }
 
 /// What was last searched for in each book, so going back to its contents shows the same results.
@@ -900,7 +1132,7 @@ function revealSnippet(surface, snippet) {
 
 /// A book's page: its notes in order, to open, reorder, take out or add to; or all of them read as one.
 /// A book that isn't editable opens as a reading copy instead.
-async function openBook(id, { naming = false, reading = false, chapter = null, find = null } = {}) {
+async function openBook(id, { naming = false, reading = false, chapter = null, find = null, listen = null } = {}) {
   leave();
   showPage();
   const mine = view = { kind: "book", id };
@@ -914,7 +1146,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
   }
   if (view !== mine) return;
   if (book.editable === false) {
-    await openReadingBook(book, chapter, find);
+    await openReadingBook(book, chapter, find, listen);
     return;
   }
   const [chapters, allNotes] = await Promise.all([
@@ -945,8 +1177,32 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
   const modes = el("div", { class: "book-mode", role: "group", "aria-label": "View" },
     el("button", { class: "pill" + (reading ? "" : " on"), "aria-pressed": String(!reading), onclick: () => reopen({ reading: false }) }, "Notes"),
     el("button", { class: "pill" + (reading ? " on" : ""), "aria-pressed": String(reading), onclick: () => reopen({ reading: true }) }, "Read"));
+  const bookNotes = commentary(book.commentary, book.title || "this book");
+  const about = () => title.value.trim() || "this book";
+  const saveExtras = async (change) => {
+    try {
+      await invoke("set_book_extras", { id, commentary: null, pronounce: null, ...change });
+      reopen();
+    } catch (e) {
+      micToast(String(e));
+    }
+  };
+  const editCommentary = el("button", { class: "link commentary-link", type: "button" }, svg("pen", 13), book.commentary?.trim() ? "Edit commentary" : "Add commentary");
+  editCommentary.addEventListener("click", async () => {
+    const text = await commentaryDialog(about(), book.commentary);
+    if (text != null && text !== (book.commentary ?? "")) saveExtras({ commentary: text });
+  });
+  const editPronounce = el("button", { class: "link commentary-link", type: "button", title: "How the voice says words it gets wrong, in this book" }, svg("speak", 13), pronounceCount(book.pronounce));
+  // A word selected in the text starts a new row.
+  editPronounce.addEventListener("mousedown", (e) => e.preventDefault());
+  editPronounce.addEventListener("click", async () => {
+    const chosen = prefs.book_voices?.[book.id];
+    const words = await pronounceDialog(about(), book.pronounce, { fresh: selectedWord(), voice: chosen && chosen !== "default" ? chosen : null });
+    if (words) saveExtras({ pronounce: words });
+  });
   const page = el("div", { class: "page book" },
-    el("div", { class: "book-head" }, el("span", { class: "book-icon" }, svg("book", 22)), title, remove), modes);
+    el("div", { class: "book-head" }, el("span", { class: "book-icon" }, svg("book", 22)), title, remove),
+    el("div", { class: "book-links" }, bookNotes.link, editCommentary, editPronounce), bookNotes.panel ?? "", modes);
 
   if (reading) {
     // All the notes one after another, each under its title, which opens it.
@@ -956,16 +1212,68 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
     const attached = [];
     let lastClicked = null;
     const chapterText = (a) => `${HEADING}${a.heading}\n${a.surface.text()}`;
+    const place = listenPlace(book.id);
+    // Where reading starts ({ chapter, at }), so where it stops can be found.
+    let startPlace = { chapter: 0, at: 0 };
+    const stoppedIn = () => {
+      const k = attached.findIndex((a) => a.c.id === place.get()?.note);
+      const at = k >= 0 ? attached[k].marks.listenFrom() : null;
+      return at == null ? null : { chapter: k, at };
+    };
+    const readOnFrom = (k, at) => {
+      startPlace = { chapter: k, at };
+      speak.readText([at > 0 ? attached[k].marks.textFrom(at) : chapterText(attached[k]), ...attached.slice(k + 1).map(chapterText)].join("\n\n"), undefined, startPlace);
+    };
+    const toListenPlace = (how) => {
+      const k = attached.findIndex((a) => a.c.id === place.get()?.note);
+      if (k < 0) return;
+      const found = findBookmark(attached[k].surface.text(), place.get());
+      attached[k].surface.reveal(found.from, Math.max(found.to, found.from + 1));
+      if (how === "read") readOnFrom(k, found.from);
+    };
+    const READ_BOOK = "Read the book aloud (from where you click, or what you select). Hold for more";
     const speak = readAloudButton(() => {
       const from = attached.find((a) => a.bodyEl.contains(getSelection()?.anchorNode)) ?? lastClicked;
       const i = from ? attached.indexOf(from) : -1;
-      const start = from?.marks.readingText();
-      if (i < 0 || start == null) return attached.map(chapterText).join("\n\n");
+      const chosen = from?.marks.reading();
+      if (i < 0 || chosen == null) {
+        // Where reading aloud stopped, else the whole book.
+        const stop = stoppedIn();
+        startPlace = stop ?? { chapter: 0, at: 0 };
+        if (stop) return [attached[stop.chapter].marks.textFrom(stop.at), ...attached.slice(stop.chapter + 1).map(chapterText)].join("\n\n");
+        return attached.map(chapterText).join("\n\n");
+      }
+      startPlace = { chapter: i, at: chosen.from };
       // A selection is read on its own; from a place clicked, reading goes on into the chapters after it.
       const sel = from.surface.selection();
-      if (sel && sel.from !== sel.to) return start;
-      return [start, ...attached.slice(i + 1).map(chapterText)].join("\n\n");
-    }, "Read the book aloud (from where you click, or what you select)", { voice: (l) => bookVoice(book, l), pronounce: book.pronounce });
+      if (sel && sel.from !== sel.to) return chosen.text;
+      return [chosen.text, ...attached.slice(i + 1).map(chapterText)].join("\n\n");
+    }, READ_BOOK, {
+      voice: (l) => bookVoice(book, l),
+      // Each note's own pronunciations go on top of the book's.
+      pronounce: Object.assign({}, book.pronounce, ...chapters.map((c) => c.pronounce ?? {})),
+      startOf: () => startPlace,
+      onEnd: (r) => {
+        const stop = stoppedAt(attached.map((a) => a.surface.text()), r);
+        if (!stop) return;
+        const a = attached[stop.chapter];
+        const had = place.get();
+        place.set(listenAnchor(a.c.id, a.surface.text(), stop.at, stop.quote));
+        toldListenPlace(!!had);
+      },
+      menu: () => {
+        const p = place.get();
+        return [
+          listenHeading(p, p && chapters.find((c) => c.id === p.note), false),
+          "-",
+          { icon: "play", text: "Read on from where you stopped", disabled: !p, run: () => toListenPlace("read") },
+          { icon: "bookmark", text: "Go to where you stopped", disabled: !p, run: () => toListenPlace("show") },
+          { icon: "speak", text: "Read the book from the start", disabled: !attached.length, run: () => readOnFrom(0, 0) },
+          "-",
+          { icon: "trash", text: "Forget where you stopped", disabled: !p, run: () => { place.forget(); micToast("Forgotten. Read aloud starts at the top of the book again."); } },
+        ];
+      },
+    });
     if (chapters.length) modes.append(el("span", { class: "grow" }), speak);
     let part = "";
     for (const c of chapters) {
@@ -985,8 +1293,10 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
       }
       const heading = c.label ? `${c.label}. ${c.title}` : c.title;
       const holder = el("div", { class: "book-chapter-holder" }, body);
+      const notes = commentary(c.commentary, c.title);
       page.append(el("section", { class: "book-chapter" },
-        el("h2", {}, el("button", { class: "link", onclick: () => openNote(c.id) }, heading)), holder));
+        el("h2", {}, el("button", { class: "link", onclick: () => openNote(c.id) }, heading)),
+        notes.link ? el("div", { class: "book-links" }, notes.link) : "", notes.panel ?? "", holder));
       attached.push({ c, heading, bodyEl: body, holder });
     }
     const top = page.querySelector("h1, h2") || page;
@@ -994,12 +1304,17 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
     main.replaceChildren(page);
     for (const a of attached) {
       a.surface = domSurface(a.bodyEl);
-      a.marks = attachBookmarks({ surface: a.surface, holder: a.holder, noteId: () => a.c.id, onRead: (text, { toEnd } = {}) => {
+      a.marks = attachBookmarks({ surface: a.surface, holder: a.holder, noteId: () => a.c.id, onRead: (text, { toEnd, from = 0 } = {}) => {
         const i = attached.indexOf(a);
-        speak.readText(toEnd ? [text, ...attached.slice(i + 1).map(chapterText)].join("\n\n") : text);
-      }, onVoice: book.voice && isDesktop() ? () => changeBookVoice(book, null, speak.isReading() ? speak.readOn : null) : null });
+        speak.readText(toEnd ? [text, ...attached.slice(i + 1).map(chapterText)].join("\n\n") : text, undefined, { chapter: i, at: from });
+      }, onVoice: book.voice && isDesktop() ? () => changeBookVoice(book, null, speak.isReading() ? speak.readOn : null) : null,
+      listen: { read: (from) => readOnFrom(attached.indexOf(a), from), forget: () => place.forget() } });
       a.bodyEl.addEventListener("click", () => { lastClicked = a; });
     }
+    place.watch((p) => {
+      for (const a of attached) a.marks.setListen(p?.note === a.c.id ? p : null);
+      speak.describe(stoppedIn() ? READ_ON : READ_BOOK);
+    });
     openAtTop(page);
     return;
   }
@@ -1355,13 +1670,57 @@ function renderNote(data, dictate) {
   });
   // Reads what is selected, or from where the note was last clicked; otherwise the whole note, title first.
   let marks = null;
+  // The note's own pronunciations, changed in place when they're edited, so reading aloud has them at once.
+  const notePronounce = { ...(data?.pronounce ?? {}) };
+  let noteCommentary = data?.commentary ?? "";
   const speakNote = readAloudButton(() => marks?.readingText() ?? `${HEADING}${title.value}\n${ed.text()}`,
-    "Read the note aloud (from where you click, or what you select)", { lang: noteLanguage });
+    "Read the note aloud (from where you click, or what you select)", { lang: noteLanguage, pronounce: notePronounce });
+  const noteAbout = () => title.value.trim() || "this note";
+  const saveNoteExtras = async (change) => {
+    const id = await note.save();
+    await invoke("set_note_extras", { id, commentary: null, pronounce: null, ...change });
+  };
+  const editNoteCommentary = async () => {
+    const text = await commentaryDialog(noteAbout(), noteCommentary);
+    if (text == null || text === noteCommentary) return;
+    try {
+      await saveNoteExtras({ commentary: text });
+      noteCommentary = text;
+      micToast(text ? "Commentary saved. In a book, readers open it from the Commentary link." : "Commentary removed.");
+    } catch (e) {
+      micToast(String(e));
+    }
+  };
+  const editNotePronounce = async (fresh) => {
+    // A note in a book reads with the book's words too: shown, so they aren't typed again.
+    const inBook = note.id ? (await invoke("list_books", { query: "" }).catch(() => [])).find((b) => b.notes.includes(note.id)) : null;
+    const book = inBook ? await invoke("get_book", { id: inBook.id }).catch(() => null) : null;
+    const chosen = book && prefs.book_voices?.[book.id];
+    const words = await pronounceDialog(noteAbout(), notePronounce, { fresh, inherited: book?.pronounce, voice: chosen && chosen !== "default" ? chosen : null, lang: noteLanguage() });
+    if (!words) return;
+    try {
+      await saveNoteExtras({ pronounce: words });
+      for (const w of Object.keys(notePronounce)) delete notePronounce[w];
+      Object.assign(notePronounce, words);
+    } catch (e) {
+      micToast(String(e));
+    }
+  };
+  const extras = el("button", { class: "icon-only more-action", type: "button", title: "Commentary and pronunciation", "aria-label": "Commentary and pronunciation" }, svg("commentary", 18), menuText("Commentary"));
+  extras.addEventListener("mousedown", (e) => e.preventDefault());
+  extras.addEventListener("click", () => {
+    const word = selectedWord();
+    const r = extras.getBoundingClientRect();
+    showContextMenu(Math.max(8, r.right - 240), r.bottom + 6, [
+      { icon: "commentary", text: noteCommentary ? "Edit commentary…" : "Add commentary…", run: editNoteCommentary },
+      { icon: "speak", text: `${pronounceCount(notePronounce)}…`, run: () => editNotePronounce(word) },
+    ]);
+  });
   const markButton = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or the cursor's place", "aria-label": "Bookmark" }, svg("bookmark", 16), menuText("Bookmark"));
   markButton.addEventListener("mousedown", (e) => e.preventDefault());
   markButton.addEventListener("click", () => marks?.create());
   // On a phone, Export, Archive and Delete sit behind one "more" button, so the top bar keeps to one line.
-  const more = moreMenu([exporter, archive, remove]);
+  const more = moreMenu([extras, exporter, archive, remove]);
   foot.append(el("span", { class: "grow" }), talk, live);
   // On a computer the chat runs the full height of the page, and the top bar and the note sit beside it.
   const topBar = el("div", { class: "topbar" }, picker, languagePicker(note.languages, async (list) => {

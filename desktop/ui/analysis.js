@@ -709,7 +709,12 @@ let reading = null;
 /// told each as it's said, then null when reading ends. `voice(lang)`, before each reading, gives the voice
 /// to read in instead of the usual one (a book's own; see bookVoice), or false to not read. `pronounce`: a
 /// book's own pronunciations (see respeller).
-function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPiece, voice, pronounce } = {}) {
+/// `startOf()`, asked straight after `text()`, says where in the page that text begins (anything the page
+/// likes; readText takes one too), and `onEnd(reading)` is told when a reading ends, stopped or finished:
+/// { start, pieces, at (the piece to go on from; pieces.length when it read to the end), heard (about how
+/// many words were heard), finished }. `menu()` gives the items of a menu (see showContextMenu) shown when
+/// the button is held down, or right-clicked.
+function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPiece, voice, pronounce, startOf, onEnd, menu } = {}) {
   const button = label
     ? el("button", { class: "pill with-icon read-aloud", type: "button", title: what, "aria-pressed": "false" }, svg("play", 14), label)
     : el("button", { class: "icon-only read-aloud", type: "button", title: what, "aria-label": what, "aria-pressed": "false" },
@@ -719,7 +724,28 @@ function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPie
   if (label) button.reading = (on) => button.replaceChildren(svg(on ? "pause" : "play", 14), on ? "Stop" : label);
   button.addEventListener("mousedown", (e) => e.preventDefault());
   const langNow = () => (typeof lang === "function" ? lang() : lang);
+  // Held down for half a second (or right-clicked), the button shows its menu instead of reading.
+  let held = false;
+  if (menu) {
+    let holdTimer = null;
+    const open = () => {
+      const r = button.getBoundingClientRect();
+      showContextMenu(Math.max(8, r.right - 260), r.bottom + 6, menu());
+    };
+    button.addEventListener("pointerdown", (e) => {
+      held = false;
+      clearTimeout(holdTimer);
+      if (e.button === 0) holdTimer = setTimeout(() => { held = true; open(); }, 500);
+    });
+    for (const type of ["pointerup", "pointerleave", "pointercancel"]) button.addEventListener(type, () => clearTimeout(holdTimer));
+    button.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      clearTimeout(holdTimer);
+      if (!held) open();
+    });
+  }
   button.addEventListener("click", async () => {
+    if (held) { held = false; return; }
     if (reading?.button === button) {
       // Stop shows for a moment, so the press is seen, then the speaker again.
       button.classList.add("stopped");
@@ -731,29 +757,36 @@ function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPie
     stopReading();
     // What to read is taken at the click, before any question about the voice moves the selection.
     const words = pieces ? null : text();
+    const start = startOf?.();
     const given = pieces?.();
     const prefer = voice ? await voice(langNow()) : null;
     if (prefer === false) return;
-    readAloud(button, words, langNow(), { pieces: given, onPiece, voice: prefer, pronounce });
+    readAloud(button, words, langNow(), { pieces: given, onPiece, voice: prefer, pronounce, start, onEnd });
   });
   button.isReading = () => reading?.button === button;
   /// Goes on reading from the piece being said, in the voice `voice` now gives: after the voice is changed.
   button.readOn = async () => {
     if (reading?.button !== button) return;
-    const { pieces: all, index = 0, onPiece: follow } = reading;
+    const { pieces: all, index = 0, onPiece: follow, start } = reading;
     stopReading();
     // The old reading lets go of the button first.
     await new Promise((resolve) => setTimeout(resolve, 60));
     const prefer = voice ? await voice(langNow()) : null;
     if (prefer === false || !all?.length) return;
-    readAloud(button, null, langNow(), { pieces: all.slice(index), onPiece: follow, voice: prefer, pronounce });
+    readAloud(button, null, langNow(), { pieces: all.slice(index), onPiece: follow, voice: prefer, pronounce, start, onEnd });
   };
-  /// Reads `text` now, in place of whatever is being read: "Read aloud from here".
-  button.readText = async (words, language) => {
+  /// Reads `text` now, in place of whatever is being read: "Read aloud from here". `start` as startOf gives.
+  button.readText = async (words, language, start) => {
     stopReading();
     const prefer = voice ? await voice(language ?? langNow()) : null;
     if (prefer === false) return;
-    readAloud(button, words, language ?? langNow(), { voice: prefer, pronounce });
+    readAloud(button, words, language ?? langNow(), { voice: prefer, pronounce, start, onEnd });
+  };
+  /// Changes what the button says it does, as where reading would start from changes.
+  button.describe = (words) => {
+    button.dataset.what = words;
+    if (reading?.button !== button) button.title = words;
+    if (!label) button.setAttribute("aria-label", words);
   };
   return button;
 }
@@ -818,7 +851,7 @@ function pause(ms, mine) {
 /// Says the text a sentence at a time, with a pause after each and longer ones around headings and between
 /// paragraphs. Short pieces also keep long text going where a voice gives up after a while, and let it stop
 /// between them.
-async function readAloud(button, text, lang, { pieces: given, onPiece, voice: prefer, pronounce } = {}) {
+async function readAloud(button, text, lang, { pieces: given, onPiece, voice: prefer, pronounce, start, onEnd } = {}) {
   const pieces = given ?? speechPieces(text);
   if (!pieces.length) return;
   // What the voice is given: the piece, with the book's own pronunciations. onPiece still gets the words
@@ -829,7 +862,9 @@ async function readAloud(button, text, lang, { pieces: given, onPiece, voice: pr
   // so changing the speed while reading takes effect at once.)
   const gap = (i) => (i + 1 < pieces.length ? Math.max(pieces[i].after, pieces[i + 1].before) : 0) / Math.max(0.5, prefs.read_speed ?? 1);
   // Where it is, so it can go on from there in another voice (see readOn).
-  const mine = { button, cancelled: false, onPiece, what: button.dataset.what || "Read aloud", pieces, index: 0 };
+  const mine = { button, cancelled: false, onPiece, what: button.dataset.what || "Read aloud", pieces, index: 0, start, at: 0, heard: 0, began: 0 };
+  // Each piece heard to its end counts all its words; one stopped part way, about as many as were said by then.
+  const heardAll = (i) => { mine.heard += wordCount(pieces[i].text); mine.at = i + 1; mine.began = 0; };
   reading = mine;
   button.classList.add("on");
   button.setAttribute("aria-pressed", "true");
@@ -847,22 +882,33 @@ async function readAloud(button, text, lang, { pieces: given, onPiece, voice: pr
         const wav = await next;
         if (i + 1 < pieces.length) next = invoke("natural_speak", { text: said(pieces[i + 1].text), voice: voice.id });
         if (mine.cancelled) break;
-        mine.index = i;
+        mine.index = mine.at = i;
         onPiece?.(pieces[i], voice);
+        mine.began = Date.now();
         await playWav(wav, mine);
+        if (!mine.cancelled) heardAll(i);
         await pause(gap(i), mine);
       }
     } else {
       for (let i = 0; i < pieces.length && !mine.cancelled; i++) {
-        mine.index = i;
+        mine.index = mine.at = i;
         onPiece?.(pieces[i], null);
+        mine.began = Date.now();
         await systemSay(said(pieces[i].text), lang);
+        if (!mine.cancelled) heardAll(i);
         await pause(gap(i), mine);
       }
     }
   } catch (e) {
     showError(button.closest(".page") ?? main, e);
   }
+  if (mine.began && mine.at < pieces.length) {
+    // About two and a half words a second at normal speed.
+    const seconds = (Date.now() - mine.began) / 1000;
+    mine.heard += Math.min(wordCount(pieces[mine.at].text), Math.floor(seconds * 2.5 * (prefs.read_speed ?? 1)));
+  }
+  mine.finished = !mine.cancelled && mine.at >= pieces.length;
+  try { onEnd?.(mine); } catch (e) { console.error(e); }
   if (reading === mine) reading = null;
   // Unless reading started again from elsewhere in the same place, which now says where it is.
   if (reading?.onPiece !== onPiece) onPiece?.(null);

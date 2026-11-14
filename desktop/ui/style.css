@@ -1459,7 +1459,25 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 .book-chapter-body img { max-width: 100%; }
 .book-chapter-body p { margin: 0 0 0.9em; }
 .book-locked-title { margin: 0; font-size: 28px; flex: 0 1 auto; min-width: 0; }
-.book-contents-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* A reading book's chapter: Contents, Commentary, Bookmark and Read aloud stay at the top, over a thin line, while
+   the chapter scrolls under them. The bar reaches the page's edges, through its padding. */
+.book-contents-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  position: sticky; top: 0; z-index: 6; margin: -40px -40px 0; padding: 14px 40px 10px;
+  background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.book-bar-links { display: inline-flex; align-items: center; gap: 18px; min-width: 0; }
+@media (max-width: 720px) { .book-contents-bar { margin: -12px -16px 0; padding: 8px 16px; } }
+
+/* Commentary on a book or a note: a link, and the panel it opens at the top. */
+.book-links { display: flex; gap: 18px; margin: 6px 0 0; }
+.commentary-link { background: none; border: none; padding: 0; min-height: 0; color: var(--key); cursor: pointer; font: inherit; font-size: 14px; }
+.commentary-link:hover { text-decoration: underline; }
+.commentary { margin: 16px 0 6px; padding: 12px 16px 6px; border-left: 3px solid var(--key); border-radius: 0 10px 10px 0; background: var(--raised); scroll-margin-top: 64px; }
+.commentary[hidden] { display: none; }
+.commentary-head { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.commentary-body { line-height: 1.6; color: var(--soft); font-size: 15px; }
+.commentary-body p { margin: 0.5em 0 0.8em; }
 .book-kicker { color: var(--muted); margin: 14px 0 0; font-size: 13px; letter-spacing: 0.04em; }
 .book-read h1 { margin: 6px 0 0; font-size: 28px; }
 .book-turn { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px 0; }
@@ -1476,6 +1494,10 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 .bm-flag.plain { background: var(--raised); color: var(--muted); border: 1px solid var(--line); box-shadow: none; }
 .bm-flag:hover, .bm-flag.on { outline: 2px solid var(--bm, var(--key)); outline-offset: 1px; }
 .bm-flag.plain:hover, .bm-flag.plain.on { color: var(--text); }
+/* Where reading aloud last stopped: a speaker in the key colour, its place a line in the same. */
+.bm-flag.listen { background: var(--key); color: #fff; --bm: var(--key); }
+.bm-point.listen { --bm: var(--key); }
+.bm-pop-label small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
 .bm-span { position: absolute; width: 3px; border-radius: 2px; background: var(--bm); opacity: 0.45; }
 .bm-span.plain { background: var(--muted); opacity: 0.3; }
 .bm-under { position: absolute; border-bottom: 2px solid var(--bm); background: color-mix(in srgb, var(--bm) 14%, transparent); border-radius: 2px 2px 0 0; }
@@ -1513,6 +1535,8 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 .context-menu .grow { flex: 1; }
 .context-menu .context-blank { width: 16px; }
 .context-menu kbd { background: none; border: none; padding: 0; font-weight: 400; color: var(--muted); font-size: 12px; }
+.context-heading { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px 4px; max-width: 300px; font-size: 13px; font-weight: 600; color: var(--text); }
+.context-heading small { font-weight: 400; color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .context-menu hr { border: none; border-top: 1px solid var(--line); margin: 5px 4px; }
 
 /* A book kept for reading says so beside its title. */
@@ -1549,3 +1573,23 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 .book-voice-option .book-voice-extra { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .book-voice-status:empty { display: none; }
 @media (max-width: 420px) { .book-voice-options { grid-template-columns: 1fr; } }
+
+/* Writing a book's or a note's commentary and pronunciations. */
+.book-links .commentary-link { display: inline-flex; align-items: center; gap: 5px; }
+dialog.sheet.extras-dialog { max-width: 560px; }
+.extras-dialog textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); line-height: 1.5; resize: vertical; margin: 4px 0 14px; }
+.pron-rows { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; margin: 6px 0 8px; }
+.pron-row { display: grid; grid-template-columns: 1fr auto 1fr auto auto; align-items: center; gap: 6px; }
+.pron-row input { min-width: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
+.pron-row .read-aloud.on, .pron-row .icon-only.on { color: var(--key); }
+.pron-arrow { color: var(--muted); }
+.pron-empty[hidden] { display: none; }
+.pron-add { margin: 2px 0 14px; }
+
+/* Above a book's contents: where reading aloud last stopped, to carry on from. */
+.listen-resume { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
+.listen-resume[hidden] { display: none; }
+.listen-resume-icon { color: var(--key); display: inline-flex; }
+.listen-resume-text { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 2px; }
+.listen-resume-text small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.listen-resume-actions { display: inline-flex; align-items: center; gap: 6px; }

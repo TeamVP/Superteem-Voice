@@ -61,6 +61,9 @@ pub struct Book {
     /// written.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub pronounce: std::collections::BTreeMap<String, String>,
+    /// Notes about the book as a whole (Markdown), hidden until asked for, then shown above its contents.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub commentary: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -86,6 +89,10 @@ pub struct Chapter {
     pub part: String,
     /// "Chapter 2" within that part; empty when the note has no chapter number.
     pub label: String,
+    /// The note's own pronunciations, read on top of the book's.
+    pub pronounce: std::collections::BTreeMap<String, String>,
+    /// The note's commentary (Markdown); empty for none.
+    pub commentary: String,
 }
 
 /// A chapter as the contents list shows it, without the text.
@@ -201,6 +208,19 @@ pub fn rename(id: &str, title: String) -> Result<(), String> {
     write(&mut book, true)
 }
 
+/// Changes a book's commentary or pronunciations, whichever is given.
+pub fn set_extras(id: &str, commentary: Option<String>, pronounce: Option<std::collections::BTreeMap<String, String>>) -> Result<(), String> {
+    let mut book = load(id)?;
+    reading_only(&book)?;
+    if let Some(text) = commentary {
+        book.commentary = notes::clean_commentary(text);
+    }
+    if let Some(words) = pronounce {
+        book.pronounce = notes::clean_pronounce(words);
+    }
+    write(&mut book, true)
+}
+
 /// Adds a note at the end, once.
 pub fn add_note(id: &str, note: &str) -> Result<(), String> {
     notes::load(note)?;
@@ -245,6 +265,7 @@ pub fn reorder(id: &str, order: Vec<String>) -> Result<(), String> {
 pub fn delete(id: &str) -> Result<(), String> {
     let book = load(id)?;
     reading_only(&book)?;
+    let _ = std::fs::remove_file(place_path(id)?);
     std::fs::remove_file(path(id)?).map_err(|e| e.to_string())
 }
 
@@ -280,7 +301,18 @@ pub fn chapters(id: &str) -> Result<Vec<Chapter>, String> {
         .into_iter()
         .map(|n| {
             let (part, label) = place(&book, &n.id);
-            Chapter { title: notes::display_title(&n), words: n.body.split_whitespace().count(), id: n.id, body: n.body, format: n.format, updated: n.updated, part, label }
+            Chapter {
+                title: notes::display_title(&n),
+                words: n.body.split_whitespace().count(),
+                id: n.id,
+                body: n.body,
+                format: n.format,
+                updated: n.updated,
+                part,
+                label,
+                pronounce: n.pronounce,
+                commentary: n.commentary,
+            }
         })
         .collect())
 }
@@ -375,6 +407,57 @@ pub fn search(id: &str, query: &str) -> Result<Vec<SearchHit>, String> {
     Ok(hits)
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// Where reading aloud last stopped, kept beside the book as `<id>.listened.json`. One per book: stopping again
+// moves it. A book kept for reading can have one too, since it doesn't change the book.
+
+/// The place reading aloud stopped: the chapter's note, and the place in its text found as a bookmark's is
+/// (`at`, and the words either side). `quote` is the sentence that was being read, to show.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ListenPlace {
+    pub note: String,
+    pub at: usize,
+    pub quote: String,
+    pub prefix: String,
+    pub suffix: String,
+    pub created: u64,
+}
+
+fn place_path(id: &str) -> Result<PathBuf, String> {
+    Ok(path(id)?.with_extension("listened.json"))
+}
+
+pub fn listen_place(id: &str) -> Option<ListenPlace> {
+    let place: ListenPlace = library::read_json(&place_path(id).ok()?).ok()?;
+    (!place.note.is_empty()).then_some(place)
+}
+
+/// Keeps where reading aloud stopped, in place of the last; `None` forgets it.
+pub fn set_listen_place(id: &str, place: Option<ListenPlace>) -> Result<(), String> {
+    let book = load(id)?;
+    let file = place_path(id)?;
+    let Some(mut place) = place else {
+        let _ = std::fs::remove_file(file);
+        return Ok(());
+    };
+    if !book.notes.contains(&place.note) {
+        return Err("That chapter isn't in this book.".into());
+    }
+    let clip = |s: &mut String, n: usize| {
+        if let Some((i, _)) = s.char_indices().nth(n) {
+            s.truncate(i);
+        }
+    };
+    clip(&mut place.quote, 400);
+    clip(&mut place.prefix, 64);
+    clip(&mut place.suffix, 64);
+    if place.created == 0 {
+        place.created = library::now();
+    }
+    library::write_json(&file, &place)
+}
+
 /// Takes a deleted note out of every book it was in. A book kept for reading holds onto its chapters.
 pub fn forget_note(note: &str) {
     for mut book in all() {
@@ -413,10 +496,9 @@ fn install_bundled(now: u64) -> Result<(), String> {
         if !name.ends_with(".json") {
             continue;
         }
+        // A newer copy of the book replaces its notes: they are only read, so nothing of the person's is lost
+        // (their bookmarks are kept beside each note).
         let dest = notes_dst.join(name);
-        if dest.is_file() {
-            continue;
-        }
         let mut note: serde_json::Value = serde_json::from_slice(file.contents()).map_err(|e| e.to_string())?;
         if let Some(obj) = note.as_object_mut() {
             obj.insert("created".into(), serde_json::json!(now));
@@ -430,8 +512,9 @@ fn install_bundled(now: u64) -> Result<(), String> {
 }
 
 /// 3: the book suggests a voice. 4: names respelled so the voice says them right: whole syllables it reads
-/// as words, unstressed lead-ins ("de Ryus"), and none where it already says the name well.
-const EXAMPLE_BOOK: u32 = 4;
+/// as words, unstressed lead-ins ("de Ryus"), and none where it already says the name well. 5: commentary on
+/// the book and on Theseus, and Theseus's own pronunciations.
+const EXAMPLE_BOOK: u32 = 5;
 const EXAMPLE_ID: &str = "plutarch-lives";
 
 fn example_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf> {
@@ -466,6 +549,39 @@ mod tests {
             assert!(word.chars().all(char::is_alphabetic), "{word} is one word");
             assert!(!said.trim().is_empty() && said != word, "{word} has a spelling for the voice");
             assert!(words.contains(word.as_str()), "{word} is in the book");
+        }
+    }
+
+    #[test]
+    fn pronunciations_as_typed_are_tidied() {
+        let typed: std::collections::BTreeMap<String, String> = [
+            (" Phocion ", "Foe  shee on "),
+            ("two words", "x"),
+            ("Same", "Same"),
+            ("Empty", "  "),
+            ("O'Neill", "Oh Neel"),
+        ]
+        .into_iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+        let kept = notes::clean_pronounce(typed);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept["Phocion"], "Foe shee on");
+        assert_eq!(kept["O'Neill"], "Oh Neel");
+    }
+
+    #[test]
+    fn a_notes_own_pronunciations_and_the_commentary_are_there() {
+        let dir = example_dir(None).expect("the example book is beside the crate");
+        let book: Book = library::read_json(&dir.join(format!("{EXAMPLE_ID}.json"))).unwrap();
+        assert!(!book.commentary.trim().is_empty());
+        let note: notes::Note = library::read_json(&dir.join("notes").join("plutarch-01-01-theseus.json")).unwrap();
+        assert!(!note.commentary.trim().is_empty());
+        let words: std::collections::HashSet<&str> = note.body.split(|c: char| !c.is_alphabetic()).collect();
+        assert!(!note.pronounce.is_empty());
+        for (word, said) in &note.pronounce {
+            assert!(words.contains(word.as_str()), "{word} is in Theseus");
+            assert!(!said.trim().is_empty() && said != word && !book.pronounce.contains_key(word), "{word} is the note's own");
         }
     }
 

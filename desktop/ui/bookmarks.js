@@ -172,7 +172,8 @@ function findBookmark(text, a) {
   return point ?? { from: at, to: at };
 }
 
-/// The right-click menu: `items` are { icon, text, keys, disabled, run } or "-".
+/// The right-click menu: `items` are { icon, text, keys, disabled, run }, { heading, sub } (a line saying
+/// something, not a choice) or "-".
 function showContextMenu(x, y, items) {
   document.querySelector(".context-menu")?.remove();
   const menu = el("div", { class: "context-menu", role: "menu" });
@@ -196,6 +197,7 @@ function showContextMenu(x, y, items) {
   };
   for (const item of items.filter(Boolean)) {
     if (item === "-") { if (menu.lastChild && menu.lastChild.tagName !== "HR") menu.append(el("hr")); continue; }
+    if (item.heading) { menu.append(el("div", { class: "context-heading" }, item.heading, item.sub ? el("small", {}, item.sub) : null)); continue; }
     const row = el("button", { type: "button", role: "menuitem", disabled: !!item.disabled },
       item.icon ? svg(item.icon, 16) : el("span", { class: "context-blank" }), el("span", { class: "grow" }, item.text),
       item.keys ? el("kbd", {}, item.keys) : null);
@@ -221,9 +223,11 @@ const modKey = () => (platform === "macos" ? "⌘" : "Ctrl+");
 
 /// Bookmarks on one surface. `holder` is an element around the surface's root, which the markers are drawn
 /// over. `noteId()` is the note's id, or null before it is saved; `ensureNote()` saves it and gives its id.
-/// `onRead(text)` reads text aloud. `onVoice()`, for a book with its own voice, changes which voice reads it.
-/// Returns { create, readingText, reload }.
-function attachBookmarks({ surface, holder, noteId, ensureNote = async () => noteId(), onRead, onVoice }) {
+/// `onRead(text, { toEnd, from })` reads text aloud, `from` being where in the text it begins. `onVoice()`,
+/// for a book with its own voice, changes which voice reads it. `listen`, in a book: { read(from), forget() },
+/// for the place reading aloud stopped, which setListen shows.
+/// Returns { create, reading, readingText, reload, redraw, setListen, listenFrom, textFrom }.
+function attachBookmarks({ surface, holder, noteId, ensureNote = async () => noteId(), onRead, onVoice, listen }) {
   const layer = el("div", { class: "bm-layer", "aria-hidden": "false" });
   holder.classList.add("bm-holder");
   surface.root.classList.add("bm-root");
@@ -233,6 +237,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
   let shown = null;       // the id of the bookmark whose words and label are showing
   let point = null;       // where the person last clicked in the text, for reading aloud from there
   let loadedFor = null;
+  let listened = null;    // where reading aloud last stopped, when it's in this text: { place, from }
 
   // ----- Keeping them
 
@@ -273,6 +278,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
 
   surface.onChange((map) => {
     if (point != null) point = map(point, -1);
+    if (listened) listened.from = map(listened.from, 1);
     if (!marks.length) return;
     for (const m of marks) {
       m.from = map(m.from, 1);
@@ -281,7 +287,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     save();
     redraw();
   });
-  surface.onReset(() => { point = null; place(); });
+  surface.onReset(() => { point = null; if (listened) setListen(listened.place); place(); });
   surface.onLayout(() => redraw());
   new ResizeObserver(() => redraw()).observe(surface.root);
 
@@ -309,14 +315,37 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     const x = root.right - pad - base.left + (pad >= 22 ? 2 : 8);
     const size = 22;
     let below = -Infinity;
-    for (const m of marks) {
+    const all = listened ? [...marks, { id: LISTEN_ID, from: listened.from, to: listened.from, listen: true }].sort((p, q) => p.from - q.from) : marks;
+    for (const m of all) {
       const rects = rectsOf(m);
       if (!rects.length) continue;
       const first = rects[0], last = rects.at(-1);
       const top = Math.max(first.top - base.top + (first.height - size) / 2, below + 3);
       below = top + size;
-      const colour = bookmarkColour(m.color);
       const open = shown === m.id;
+      if (m.listen) {
+        const flag = el("button", {
+          class: "bm-flag listen" + (open ? " on" : ""), type: "button", style: `left:${x}px;top:${top}px`,
+          title: "Where you stopped listening", "aria-label": "Where you stopped listening", "aria-expanded": String(open),
+        }, svg("speak", 13));
+        flag.addEventListener("mousedown", (e) => e.preventDefault());
+        flag.addEventListener("click", () => show(open ? null : m.id));
+        layer.append(flag);
+        if (!open) continue;
+        layer.append(el("div", { class: "bm-point listen", style: `left:${first.left - base.left - 1}px;top:${first.top - base.top}px;height:${first.height}px` }));
+        const pop = el("div", { class: "bm-pop", role: "dialog", "aria-label": "Where you stopped listening" },
+          el("div", { class: "bm-pop-label" }, "You stopped listening here", el("small", {}, agoText(listened.place.created))),
+          el("div", { class: "bm-pop-actions" },
+            el("button", { class: "icon-only", type: "button", title: "Read on from here", "aria-label": "Read on from here", onclick: () => { show(null); listen?.read(listened.from); } }, svg("play", 14)),
+            el("button", { class: "icon-only", type: "button", title: "Forget this place", "aria-label": "Forget where you stopped listening", onclick: () => { show(null); listen?.forget(); } }, svg("trash", 16))));
+        pop.addEventListener("mousedown", (e) => { if (e.target.closest("button")) e.preventDefault(); });
+        layer.append(pop);
+        const high = pop.offsetHeight;
+        pop.style.top = `${top - high - 6 >= -base.top + 4 ? top - high - 6 : top + size + 6}px`;
+        pop.style.right = `${base.width - x - size}px`;
+        continue;
+      }
+      const colour = bookmarkColour(m.color);
       const span = last.bottom - first.top > first.height * 1.5;
       if (span) {
         layer.append(el("div", { class: "bm-span" + (colour ? "" : " plain"), style: `left:${x + size / 2 - 1.5}px;top:${top + size}px;height:${Math.max(0, last.bottom - base.top - top - size)}px;${colour ? `--bm:${colour}` : ""}` }));
@@ -342,7 +371,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
       const pop = el("div", { class: "bm-pop", role: "dialog", "aria-label": "Bookmark", style: `right:${base.width - x + 6}px;top:${top - 4}px` },
         m.label ? el("div", { class: "bm-pop-label" }, m.label) : el("div", { class: "bm-pop-label none" }, "No label"),
         el("div", { class: "bm-pop-actions" },
-          el("button", { class: "icon-only", type: "button", title: "Read aloud from here", "aria-label": "Read aloud from here", onclick: () => { show(null); onRead?.(textFrom(m.from, m.to), { toEnd: m.to <= m.from }); } }, svg("speak", 16)),
+          el("button", { class: "icon-only", type: "button", title: "Read aloud from here", "aria-label": "Read aloud from here", onclick: () => { show(null); onRead?.(textFrom(m.from, m.to), { toEnd: m.to <= m.from, from: m.to > m.from ? m.from : wordStart(m.from) }); } }, svg("speak", 16)),
           el("button", { class: "icon-only", type: "button", title: "Edit or delete the bookmark", "aria-label": "Edit bookmark", onclick: () => edit(m) }, svg("pen", 16))));
       pop.addEventListener("mousedown", (e) => { if (e.target.closest("button")) e.preventDefault(); });
       layer.append(pop);
@@ -417,22 +446,45 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
 
   // ----- Reading aloud from a place
 
-  /// From the start of the word at `from`, to `to` or the end.
-  function textFrom(from, to) {
+  /// The start of the word at `from`.
+  function wordStart(from) {
     const text = surface.text();
-    if (to > from) return text.slice(from, to);
     let start = Math.min(from, text.length);
     while (start > 0 && /[\p{L}\p{N}'’-]/u.test(text[start - 1])) start--;
-    return text.slice(start);
+    return start;
   }
 
-  /// What reading aloud reads: what is selected, else from the place last clicked; null for all of it.
-  function readingText() {
+  /// From the start of the word at `from`, to `to` or the end.
+  function textFrom(from, to = from) {
+    const text = surface.text();
+    if (to > from) return text.slice(from, to);
+    return text.slice(wordStart(from));
+  }
+
+  /// What reading aloud reads, and where in the text it begins: what is selected, else from the place last
+  /// clicked; null for all of it.
+  function reading() {
     const sel = surface.selection();
-    if (sel && sel.to !== sel.from) return textFrom(Math.min(sel.from, sel.to), Math.max(sel.from, sel.to));
+    if (sel && sel.to !== sel.from) {
+      const from = Math.min(sel.from, sel.to);
+      return { text: textFrom(from, Math.max(sel.from, sel.to)), from };
+    }
     if (point == null) return null;
     const rest = textFrom(point, point);
-    return rest.trim() && rest.length < surface.text().length ? rest : null;
+    return rest.trim() && rest.length < surface.text().length ? { text: rest, from: wordStart(point) } : null;
+  }
+  const readingText = () => reading()?.text ?? null;
+
+  /// Shows where reading aloud last stopped, when that's in this text (`place` as books keep it); null for none.
+  function setListen(place) {
+    listened = place ? { place, from: findBookmark(surface.text(), place).from } : null;
+    if (!listened && shown === LISTEN_ID) shown = null;
+    redraw();
+  }
+  /// Where reading aloud stopped in this text, or null; null too at its very end, where nothing is left to read.
+  function listenFrom() {
+    if (!listened) return null;
+    return surface.text().slice(listened.from).trim() ? listened.from : null;
   }
 
   // A click in the text is where reading aloud goes on from.
@@ -459,7 +511,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     const here = selected ?? (at != null ? { from: at, to: at } : null);
     const mod = modKey();
     showContextMenu(e.clientX, e.clientY, [
-      { icon: "speak", text: selected ? "Read aloud" : "Read aloud from here", disabled: !here, run: () => onRead?.(textFrom(here.from, here.to), { toEnd: !selected }) },
+      { icon: "speak", text: selected ? "Read aloud" : "Read aloud from here", disabled: !here, run: () => onRead?.(textFrom(here.from, here.to), { toEnd: !selected, from: selected ? here.from : wordStart(here.from) }) },
       onVoice && { icon: "speak", text: "Voice for this book…", run: () => onVoice(here) },
       { icon: "bookmark", text: selected ? "Bookmark…" : "Bookmark here…", disabled: !here, run: () => create(here) },
       "-",
@@ -472,7 +524,99 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
   });
 
   reload();
-  return { create, readingText, reload, redraw };
+  return { create, reading, readingText, reload, redraw, setListen, listenFrom, textFrom };
+}
+
+const LISTEN_ID = "listened";
+
+/// "just now", "5 minutes ago", "yesterday", "3 days ago", or the date.
+function agoText(seconds) {
+  const s = Math.max(0, Date.now() / 1000 - (seconds || 0));
+  if (s < 90) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} minutes ago`;
+  if (s < 86400) { const h = Math.round(s / 3600); return `${h} hour${h === 1 ? "" : "s"} ago`; }
+  if (s < 2 * 86400) return "yesterday";
+  if (s < 14 * 86400) return `${Math.floor(s / 86400)} days ago`;
+  return new Date(seconds * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+// ----- Where reading aloud stopped in a book
+
+/// Stopping reading aloud after hearing more than this many words keeps the place; fewer, and it's taken as
+/// a try or a slip, and the place stays where it was.
+const LISTEN_MIN_WORDS = 20;
+
+/// A book's place where reading aloud last stopped: one per book, kept beside it. `get()` is it or null
+/// ({ note, at, quote, prefix, suffix, created }); `watch(f)` is told now and each time it changes.
+function listenPlace(bookId) {
+  let place = null;
+  const watchers = new Set();
+  const tell = () => { for (const f of watchers) f(place); };
+  const ready = invoke("book_listen_place", { id: bookId }).then((p) => { place = p ?? null; tell(); }).catch(() => {});
+  return {
+    ready,
+    get: () => place,
+    watch(f) { watchers.add(f); f(place); },
+    async set(next) {
+      place = next;
+      tell();
+      try {
+        await invoke("set_book_listen_place", { id: bookId, place: next });
+      } catch (e) {
+        micToast(`Where you stopped listening wasn't kept: ${e}`);
+      }
+    },
+    forget() { return this.set(null); },
+  };
+}
+
+/// Where a reading that ended stopped, in a book's chapters: `texts` is each chapter's text in order, and
+/// `reading.start` is { chapter, at }, where in them the reading began. Follows the pieces said through the
+/// text to the one it would go on from. Gives { chapter, at, quote, end } (`end` when it read to its end), or
+/// null when too little was heard to count.
+function stoppedAt(texts, reading) {
+  const { pieces, start } = reading;
+  if (!start || !texts.length || !pieces?.length || reading.heard <= LISTEN_MIN_WORDS) return null;
+  const end = reading.at >= pieces.length;
+  const target = end ? pieces.length - 1 : reading.at;
+  let c = Math.max(0, Math.min(start.chapter ?? 0, texts.length - 1)), at = start.at ?? 0;
+  let found = { chapter: c, from: at, to: at };
+  for (let i = 0; i <= target; i++) {
+    const want = pieces[i].text;
+    let hit = null;
+    // In this chapter after the last piece, or else from the top of the next.
+    for (let k = c; k < Math.min(texts.length, c + 2) && !hit; k++) {
+      const j = texts[k].indexOf(want, k === c ? at : 0);
+      if (j >= 0) hit = { chapter: k, from: j, to: j + want.length };
+    }
+    if (hit) found = hit;
+    // A chapter's title isn't in its text: once a chapter has been read into, a title is the next one's.
+    else if (pieces[i].before >= PAUSE.heading && at > 0 && c + 1 < texts.length) found = { chapter: c + 1, from: 0, to: 0 };
+    else found = { chapter: c, from: at, to: at };
+    c = found.chapter;
+    at = found.to;
+  }
+  return { chapter: found.chapter, at: end ? found.to : found.from, quote: end ? "" : pieces[target].text, end };
+}
+
+/// A place in a chapter's text, as a book keeps it: found again by the words either side, as a bookmark is.
+function listenAnchor(note, text, at, quote = "") {
+  const q = text.slice(at, at + quote.length) === quote ? quote : "";
+  return {
+    note, at, quote: q.slice(0, 400),
+    prefix: text.slice(Math.max(0, at - BOOKMARK_CONTEXT), at),
+    suffix: text.slice(at + q.length, at + q.length + BOOKMARK_CONTEXT),
+    created: Math.floor(Date.now() / 1000),
+  };
+}
+
+/// Says, the first few times, that the place was kept and how to get back to it.
+function toldListenPlace(moved) {
+  let told = 0;
+  try { told = Number(localStorage.getItem("listen-place-told")) || 0; } catch {}
+  if (told >= 3) return;
+  try { localStorage.setItem("listen-place-told", String(told + 1)); } catch {}
+  micToast(`${moved ? "Moved" : "Kept"} where you stopped listening. Read aloud goes on from there; hold it for more.`);
 }
 
 /// Asks for a bookmark's label and colour. Gives { label, color }, { remove: true }, or null.
