@@ -154,7 +154,8 @@ fn transcript_quiet(segments: &[Segment], stream: &str) -> Vec<(f64, f64)> {
         .flat_map(|s| {
             if !s.in_script() && s.stream == stream {
                 spans(s)
-            } else if s.in_script() && s.stream != stream && s.also_on.iter().any(|o| o == stream) {
+            } else if (s.in_script() || s.muted) && s.stream != stream && s.also_on.iter().any(|o| o == stream) {
+                // A muted line is silent on every microphone that heard it.
                 vec![(s.start_s, s.end_s)]
             } else {
                 Vec::new()
@@ -572,6 +573,15 @@ mod tests {
         // Played by hand from 4 s, as a word's start was cut off; and a cough muted at 8 s.
         let edits = [MixEdit { from_s: 4.0, to_s: 5.0, play: true }, MixEdit { from_s: 8.0, to_s: 8.5, play: false }];
         assert_eq!(quiet_spans(&meeting(), "input2", &edits), [(1.0, 4.0), (8.0, 8.5)]);
+    }
+
+    #[test]
+    fn a_muted_line_is_quiet_on_every_track_that_heard_it() {
+        let mut lines = meeting();
+        lines.push(Segment { muted: true, ..seg(4, "input2", 9.0, 9.5, None, &["input1"]) });
+        assert_eq!(quiet_spans(&lines, "input2", &[]), [(1.0, 5.0), (9.0, 9.5)]);
+        assert_eq!(quiet_spans(&lines, "input1", &[]), [(6.5, 7.0), (9.0, 9.5)]);
+        assert!(!lines[4].in_script());
     }
 
     #[test]

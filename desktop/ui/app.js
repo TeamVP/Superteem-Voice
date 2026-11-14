@@ -2878,7 +2878,7 @@ async function startMeeting(devices, pins) {
   clearInterval(pollTimer);
   clearInterval(sourceTimer);
   probing = false;
-  await invoke("start_recording", { devices, pins });
+  await invoke("start_recording", { devices, pins, utcOffsetMin: localZone() });
   // Consent is asked now that the recording is running: { at_s, how, words } once given.
   recording = { started: Date.now(), devices, markers: [], levels: {}, consent: null };
   view = { kind: "recorder" };
@@ -3401,7 +3401,9 @@ function renderSession(session, processingError, suggestion) {
   window.currentPrints = session.voiceprints;
   // Clips another microphone heard more clearly are left out of the script; they stay, greyed, in the tracks.
   const doubles = session.segments.filter((s) => s.echo_of != null);
-  const scriptLines = session.segments.filter((s) => s.echo_of == null);
+  // Lines the person muted stay, struck through, but are out of the script and silent in the mix.
+  const mutedLines = session.segments.filter((s) => s.muted && s.echo_of == null);
+  const scriptLines = session.segments.filter((s) => s.echo_of == null && !s.muted);
   const keepTime = player?.t ?? 0;
   stopPlayback();
   const save = async (command, args) => {
@@ -3529,7 +3531,11 @@ function renderSession(session, processingError, suggestion) {
       const together = imported.from_session ? session.imports.filter((i) => i.from_session === imported.from_session).length : 1;
       if (together > 1) row("Recorded with", `${together - 1} other track${together === 2 ? "" : "s"} here`);
       row("Length", clock(imported.seconds));
-      if (imported.started_at && meta.created) row("Started at", `${dayClock(imported.started_at)} by the time of day`);
+      if (imported.started_at && meta.created) {
+        const own = imported.utc_offset_min ?? meetingZone(meta);
+        row("Its clock said", `${dayClock(imported.started_at, own)} ${zoneName(imported.started_at, own)} when it started`);
+        if (imported.utc_offset_min == null) row("Its time zone", "Not known: taken to be the meeting's");
+      }
       row("Placed by", { time: "The time of day it started", sound: "Matching its sound to the other tracks", hand: "Typed in by hand" }[imported.placed_by] ?? imported.placed_by);
       if (imported.matched) row("Sound matched", `${imported.matched[0]} of ${imported.matched[1]} half-minute stretches`);
       if (imported.confidence != null) row("Match", `${imported.confidence.toFixed(1)}× surer than the next best place`);
@@ -3550,7 +3556,7 @@ function renderSession(session, processingError, suggestion) {
         row("Loudest", t.peak === 0 ? "Silent: it heard nothing" : t.peak ? `${Math.round(20 * Math.log10(t.peak))} dB` : "");
       }
     }
-    row("Starts at", offset ? `${signedClock(offset)} into the meeting` : "With the meeting");
+    row("Offset", offset ? `${signedClock(offset)} against the meeting` : "None: it starts with the meeting");
     row("Everything on it", (meta.locked ?? []).includes(stream) ? "Is this person" : "Is matched to people by their voices");
     row("In the transcript", `${lines} line${lines === 1 ? "" : "s"} taken from it`);
     const notes = t?.notes ?? [];
@@ -3578,10 +3584,19 @@ function renderSession(session, processingError, suggestion) {
     if (speaker?.print && ![...print.options].some((o) => o.value === speaker.print.id)) {
       print.append(el("option", { value: speaker.print.id, selected: true }, speaker.print.name));
     }
+    // A new print is made from this track's own audio: what its wearer said into it, less hand mutes.
+    const NEW_PRINT = "\u0000new";
+    print.append(el("option", { value: NEW_PRINT }, "New voice print from this track…"));
     const original = print.value;
+    const consent = el("input", { type: "checkbox" });
+    const consentRow = el("label", { class: "field check", hidden: true }, consent, el("span", {}, "They agreed to have a voice print kept"));
     print.addEventListener("change", () => {
       const chosen = print.selectedOptions[0];
-      if (print.value) nameInput.value = chosen.textContent;
+      consentRow.hidden = print.value !== NEW_PRINT;
+      if (print.value === NEW_PRINT) {
+        if (/^(Guest|input|pin)/.test(nameInput.value)) nameInput.value = "";
+        nameInput.focus();
+      } else if (print.value) nameInput.value = chosen.textContent;
     });
     const lock = el("input", { type: "checkbox", checked: locked });
     const start = el("input", { type: "text", class: "mono", size: "9", value: signedClock(offset).replace("−", "-"), "aria-label": "Starts at" });
@@ -3618,9 +3633,9 @@ function renderSession(session, processingError, suggestion) {
         el("small", {}, "Their bookmark is the same moment as yours, such as one everyone made at once.")),
         el("div", { class: "row-pick" }, theirSelect, el("span", { class: "hint" }, "is"), mineSelect, go));
     }
-    // An imported track can also be found by its sound, or by the time of day it started.
+    // An imported track can also be found by its sound. When it started by the time of day is a fact of
+    // its recording, shown above; the offset moves it against the meeting.
     let finder = null;
-    let dayInput = null;
     if (imported) {
       const match = (near) => async () => {
         try {
@@ -3629,12 +3644,12 @@ function renderSession(session, processingError, suggestion) {
           processAgain(id);
         } catch (e) { fail(e); }
       };
-      dayInput = el("input", { type: "text", class: "mono", size: "10", value: dayClock(meta.created + imported.offset_s), "aria-label": "Started at, time of day" });
-      finder = el("div", { class: "field" }, el("span", {}, "Find where it goes",
-        el("small", {}, "Match its sound to the other tracks, near where it is now (and find clocks that ran apart) or anywhere when the time of day is far out. Transcribes the meeting again.")),
+      finder = el("div", { class: "field" }, el("span", {}, "Match by its sound"),
         el("div", { class: "row-pick" },
-          el("button", { class: "pill", type: "button", onclick: match(true) }, "Fine-tune by its sound"),
-          el("button", { class: "pill", type: "button", onclick: match(false) }, "Match it anywhere")));
+          el("button", { class: "pill", type: "button", onclick: match(true),
+            title: "Match its sound to the other tracks near where it is now, and find clocks that ran apart. Transcribes the meeting again." }, "Fine-tune"),
+          el("button", { class: "pill", type: "button", onclick: match(false),
+            title: "Search the whole meeting for where its sound fits, for when it's far out. Transcribes the meeting again." }, "Anywhere")));
     }
     const whose = group.length > 1 ? ` Moves all ${group.length} tracks recorded with it.` : "";
     const saveButton = el("button", { class: "primary pill", type: "button" }, "Save");
@@ -3642,19 +3657,20 @@ function renderSession(session, processingError, suggestion) {
     const canDelete = imported || (streams.length > 1 && !session.busy);
     const trash = el("button", { class: "icon-only track-delete", type: "button", disabled: !canDelete, "aria-label": "Delete this track",
       title: canDelete ? "Delete this track" : session.busy ? "The meeting is being processed; delete the track once it's done" : "The meeting's only track can't be deleted" }, svg("trash", 18));
-    const kind = imported ? `Imported · ${placedText(imported, meta.created)}` : [t ? TRACK_KINDS[t.kind] ?? t.kind : "", t?.program && t.program !== t.label ? t.program : "",
-      t?.peak === 0 ? "Silent" : ""].filter(Boolean).join(" · ");
+    // The time of day it started is a fact of the recording, so it's shown, not edited: the offset places it.
+    const how = imported ? { sound: "matched by sound", hand: "placed by hand" }[imported.placed_by] ?? "placed by time of day" : "";
+    const kind = imported ? ["Imported", `started ${startedText(meta.created + imported.offset_s, meetingZone(meta), imported.utc_offset_min)}`, how].join(" · ")
+      : [t ? TRACK_KINDS[t.kind] ?? t.kind : "", t?.program && t.program !== t.label ? t.program : "", t?.peak === 0 ? "Silent" : ""].filter(Boolean).join(" · ");
     const more = el("button", { class: "link inline", type: "button", onclick: () => trackInfoDialog(stream) }, "Details");
     const settings = el("div", { class: "track-settings" },
       el("p", { class: "hint source" }, kind ? `${kind} · ` : "", more),
-      el("label", { class: "field" }, el("span", {}, "Name", el("small", {}, "Who is on this track, or what it recorded.")), nameInput),
-      el("label", { class: "field" }, el("span", {}, "Voice print", el("small", {}, "Links the person, so the voice print names them.")), print),
-      el("label", { class: "field check" }, lock, el("span", {}, "Everything on this track is this person",
-        el("small", {}, "For when each person has their own microphone or call track. Lines you moved by hand stay put."))),
-      el("label", { class: "field" }, el("span", {}, "Starts at",
-        el("small", {}, `minutes:seconds into the meeting; − if it starts before. You hear a move straight away; its lines in the transcript follow when you transcribe again.${whose}`)), start),
-      dayInput ? el("label", { class: "field" }, el("span", {}, "Started at, time of day",
-        el("small", {}, "hours:minutes:seconds by the clock of the device that recorded it. Transcribes the meeting again.")), dayInput) : null,
+      el("label", { class: "field" }, el("span", {}, "Name"), nameInput),
+      el("label", { class: "field" }, el("span", {}, "Voice print"), print),
+      consentRow,
+      el("label", { class: "field check", title: "For when each person has their own microphone or call track. Lines you moved by hand stay put." },
+        lock, el("span", {}, "Everything on this track is this person")),
+      el("label", { class: "field", title: `How far it's shifted against the meeting, as minutes:seconds; − for earlier. You hear a move at once; its lines follow when you transcribe again.${whose}` },
+        el("span", {}, "Offset"), start),
       finder, lineUp, status,
       el("div", { class: "actions" }, trash, el("span", { class: "grow" }), el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"), saveButton));
     // Asked in the sheet itself, in place of the settings; a second step when bookmarks would go with it.
@@ -3714,28 +3730,24 @@ function renderSession(session, processingError, suggestion) {
     });
     saveButton.addEventListener("click", async () => {
       const at = parseStart(start.value);
-      if (at == null) return fail("Type where it starts as minutes:seconds, such as 0:01.5 or -0:00.4.");
-      const dayChanged = dayInput && dayInput.value.trim() !== dayClock(meta.created + imported.offset_s);
-      const started = dayChanged ? parseDayClock(dayInput.value, meta.created) : null;
-      if (dayChanged && started == null) return fail("Type the time of day as hours:minutes:seconds, such as 14:30:05.");
+      if (at == null) return fail("Type the offset as minutes:seconds, such as 0:01.5 or -0:00.4.");
+      const newPrint = print.value === NEW_PRINT;
+      const typed = nameInput.value.trim();
+      if (newPrint && !typed) { nameInput.focus(); return fail("Type the person's name for the voice print."); }
+      if (newPrint && !consent.checked) return fail("Tick that they agreed to have a voice print kept.");
       saveButton.disabled = true;
       try {
-        if (print.value !== original) await invoke("link_speaker", { id, key: stream, print: print.value || null, learn: false });
-        const typed = nameInput.value.trim();
-        const printName = print.value ? print.selectedOptions[0].textContent : null;
-        if (typed && typed !== (speaker?.name ?? name) && typed !== printName) await invoke("rename_speaker", { id, key: stream, name: typed });
-        const moved = Math.abs(at - offset) > 0.004 && !lined && !dayChanged;
+        if (newPrint) await invoke("save_track_print", { id, stream, name: typed, consent: true });
+        else if (print.value !== original) await invoke("link_speaker", { id, key: stream, print: print.value || null, learn: false });
+        const printName = print.value && !newPrint ? print.selectedOptions[0].textContent : null;
+        if (!newPrint && typed && typed !== (speaker?.name ?? name) && typed !== printName) await invoke("rename_speaker", { id, key: stream, name: typed });
+        const moved = Math.abs(at - offset) > 0.004 && !lined;
         if (moved || lock.checked !== locked) {
           await invoke("set_track", { id, name: stream, offsetS: moved ? at : null, lock: lock.checked !== locked ? lock.checked : null });
         }
         lined = false;
         dialog.close();
-        if (dayChanged) {
-          await invoke("set_track_start", { id, name: imported.name, startedAt: started });
-          processAgain(id);
-        } else {
-          reload();
-        }
+        reload();
       } catch (e) {
         saveButton.disabled = false;
         fail(e);
@@ -4006,10 +4018,21 @@ function renderSession(session, processingError, suggestion) {
   };
 
   const lineById = new Map(session.segments.map((s) => [s.id, s]));
-  for (const seg of showDoubles ? session.segments : scriptLines) {
+  for (const seg of showDoubles ? session.segments : session.segments.filter((s) => s.echo_of == null)) {
     while (markers.length && markers[0].at_s <= seg.start_s) {
       // The same person carrying on after a bookmark or action item isn't named again.
       transcript.append(markerLine(markers.shift()));
+    }
+    if (seg.muted) {
+      // Drawn slim and struck through; it doesn't split the lines either side, so they can be joined.
+      const time = el("button", { class: "time mono", title: "Play from this line" }, clock(seg.start_s));
+      time.addEventListener("click", () => { if (player) { player.seek(seg.start_s); player.play(); } });
+      const who = session.speakers.find((sp) => sp.key === seg.speaker)?.name ?? "Someone";
+      const unmute = el("button", { type: "button", title: "Bring this line back into the transcript and the mix" }, "UNMUTE");
+      unmute.addEventListener("click", async () => { if (await save("mute_segment", { segment: seg.id, muted: false })) reload(); });
+      transcript.append(el("div", { class: "line muted-line", title: `Muted: ${who}: “${seg.text}”` }, time,
+        el("span", { class: "muted-text" }, `${who}: ${seg.text}`), el("div", { class: "line-action" }, unmute)));
+      continue;
     }
     const select = el("select", { style: `background:${colours.get(seg.speaker)}`, title: "Change the speaker for this line" },
       session.speakers.map((sp) => el("option", { value: sp.key, selected: sp.key === seg.speaker }, sp.name)),
@@ -4093,9 +4116,13 @@ function renderSession(session, processingError, suggestion) {
 
   // SPLIT where the cursor sits mid-line; JOIN at the start (onto the line before, taking its speaker)
   // or at the end (the next line joins this one). JOIN is greyed out when the lines can't be joined.
+  // Lines over someone else's "Yeah" can be joined; a muted line between two isn't in the way.
   const joinBlocker = (a, b) => !a || !b ? "There is no line to join"
-    : a.stream !== b.stream ? "These lines were heard on different microphones"
-    : a.overlap || b.overlap ? "Someone else was talking at the same time" : null;
+    : a.echo_of != null || b.echo_of != null ? "A greyed-out copy can't be joined"
+    : a.stream !== b.stream ? "These lines were heard on different microphones" : null;
+  const muteButton = (entry) => entry.seg.echo_of != null ? null : actionButton("MUTE",
+    "Take this line out of the transcript and silence it in the mix, such as a “Mm-hmm” that breaks up someone's sentence", false,
+    () => applyLineAction(entry, "mute_segment", { segment: entry.seg.id, muted: true }));
   const actionButton = (label, title, disabled, run) => el("button", {
     type: "button", title, disabled,
     // Keeps the cursor in the text, so the line isn't saved and redrawn before the click lands.
@@ -4145,6 +4172,8 @@ function renderSession(session, processingError, suggestion) {
       entry.action.append(actionButton("SPLIT", "Split this line here, so the rest can be given to another speaker", false,
         () => applyLineAction(entry, "split_segment", { segment: entry.seg.id, at })));
     }
+    const mute = muteButton(entry);
+    if (mute) entry.action.prepend(mute);
   };
   // One listener per drawn meeting; redrawing or leaving drops the old one.
   sessionListeners?.abort();
@@ -4182,6 +4211,9 @@ function renderSession(session, processingError, suggestion) {
       greyed: [
         ...scriptLines.filter((s) => s.stream !== stream && s.also_on?.includes(stream)).map((s) => [s.start_s, s.end_s]),
         ...doubles.filter((s) => s.stream === stream).flatMap(clipSpans),
+        // A muted line is silent on its own track and on every other that heard it.
+        ...mutedLines.filter((s) => s.stream === stream).flatMap(clipSpans),
+        ...mutedLines.filter((s) => s.stream !== stream && s.also_on?.includes(stream)).map((s) => [s.start_s, s.end_s]),
       ],
       used: scriptLines.filter((s) => s.stream === stream).flatMap(clipSpans),
     }]));
@@ -4412,7 +4444,7 @@ function renderSession(session, processingError, suggestion) {
         contextMenu(e.clientX, e.clientY, items);
       });
       // The name opens the track's settings, where it can be placed or deleted too.
-      const details = imported ? `${name} · imported · ${placedText(imported, meta.created)}` : trackDetails(name, meta.tracks?.[stream]);
+      const details = imported ? `${name} · imported · ${placedText(imported, meta.created, meetingZone(meta))}` : trackDetails(name, meta.tracks?.[stream]);
       const flags = [(meta.locked ?? []).includes(stream) ? "everything on it is them" : "", meta.track_offsets?.[stream] ? `moved ${signedClock(meta.track_offsets[stream])}` : ""].filter(Boolean);
       const nameEl = el("span", { class: "name", role: "button", tabindex: "0", style: `color:${strong.get(stream) ?? "inherit"}`,
         title: `${details}${flags.length ? `
@@ -4553,7 +4585,7 @@ Click for who is on it, where it starts, or to delete it` }, name);
         head.style.left = `${rect.left - lanesRect.left + rect.width * fx}px`;
       }
       timeLabel.textContent = `${clock(t)} / ${clock(duration)}`;
-      if (meta.created) timeLabel.title = `${dayClock(meta.created + t)} by the time of day`;
+      if (meta.created) timeLabel.title = `${dayClock(meta.created + t, meetingZone(meta))} ${zoneName(meta.created + t, meetingZone(meta))} by the time of day`;
       // Only when it changes: swapping the icon on every tick removes the element a click pressed
       // down on, and WebView2 then drops the click, so Pause wouldn't work while playing.
       if (playButton.dataset.playing !== String(playing)) {
@@ -4618,7 +4650,7 @@ Click for who is on it, where it starts, or to delete it` }, name);
       playButton, mini,
       el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item (→)", onclick: nextClip }, svg("skip-forward", 16)),
       timeLabel, speedSelect, fitButton, el("span", { class: "grow" }), followButton, mixLabel,
-      meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id, meta.created), "aria-label": "Import a recording" }, svg("import", 14), el("span", { class: "wide-only" }, "Import")), fold));
+      meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id, meta.created, meetingZone(meta)), "aria-label": "Import a recording" }, svg("import", 14), el("span", { class: "wide-only" }, "Import")), fold));
     player.prevClip = prevClip;
     player.nextClip = nextClip;
     setView(trackView.zoom, trackView.pan);
@@ -4676,34 +4708,75 @@ async function decodeTo16k(file) {
   return new Uint8Array(pcm.buffer);
 }
 
-/// "14:30:05" for a time of day in Unix seconds.
-function dayClock(unix) {
-  return new Date(unix * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+/// "14:30:05" for a time of day in Unix seconds: by the clock `zone` minutes ahead of UTC, or this computer's.
+function dayClock(unix, zone = null) {
+  const opts = { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false };
+  if (zone == null) return new Date(unix * 1000).toLocaleTimeString([], opts);
+  return new Date((unix + zone * 60) * 1000).toLocaleTimeString([], { ...opts, timeZone: "UTC" });
 }
 
-/// A time of day typed as "14:30", "14:30:05" or "2:30:05 pm", on the meeting's day (or the day either side,
-/// whichever is closest to the meeting), as Unix seconds; null when it isn't a time.
-function parseDayClock(text, meetingStart) {
+/// This computer's time zone at a moment, as minutes ahead of UTC.
+const localZone = (unix = Date.now() / 1000) => -new Date(unix * 1000).getTimezoneOffset();
+
+/// The meeting's time zone: where it was recorded, or for meetings from before that was kept, this computer's.
+const meetingZone = (meta) => meta.utc_offset_min ?? localZone(meta.created || undefined);
+
+/// "GMT+11", "GMT−3:30" or "GMT" for a time zone `zone` minutes ahead of UTC.
+function zoneLabel(zone) {
+  if (!zone) return "GMT";
+  const a = Math.abs(zone);
+  return `GMT${zone > 0 ? "+" : "−"}${Math.floor(a / 60)}${a % 60 ? `:${String(a % 60).padStart(2, "0")}` : ""}`;
+}
+
+/// The name of a time zone at a moment: this computer's own short name ("AEDT") when it's this computer's,
+/// else its offset ("GMT+5:30").
+function zoneName(unix, zone = localZone(unix)) {
+  if (zone === localZone(unix)) {
+    try {
+      const name = new Intl.DateTimeFormat([], { timeZoneName: "short" }).formatToParts(new Date(unix * 1000)).find((p) => p.type === "timeZoneName")?.value;
+      if (name) return name;
+    } catch { /* falls back to the offset */ }
+  }
+  return zoneLabel(zone);
+}
+
+/// Time zones to choose from, as minutes ahead of UTC: every whole hour and the half and quarter hours in use.
+const ZONES = [...Array.from({ length: 27 }, (_, k) => (k - 12) * 60), -570, -210, 210, 270, 330, 345, 390, 570, 630, 765, 525]
+  .sort((a, b) => a - b);
+
+/// A choice of time zone, set to `zone`.
+function zonePicker(zone, label) {
+  const pick = el("select", { "aria-label": label },
+    [...new Set([...ZONES, zone])].sort((a, b) => a - b).map((z) => el("option", { value: z, selected: z === zone },
+      `${zoneLabel(z)}${z === localZone() ? " (this computer)" : ""}`)));
+  return pick;
+}
+
+/// A time of day typed as "14:30", "14:30:05" or "2:30:05 pm", by the clock `zone` minutes ahead of UTC, on
+/// the meeting's day (or the day either side, whichever is closest to the meeting), as Unix seconds; null
+/// when it isn't a time.
+function parseDayClock(text, meetingStart, zone = localZone(meetingStart)) {
   const m = text.trim().toLowerCase().match(/^(\d{1,2})[:.](\d{2})(?:[:.](\d{2}(?:\.\d+)?))?\s*(am|pm)?$/);
   if (!m) return null;
   let hours = Number(m[1]);
   if (m[4] === "pm" && hours < 12) hours += 12;
   if (m[4] === "am" && hours === 12) hours = 0;
   if (hours > 23 || Number(m[2]) > 59) return null;
-  const day = new Date(meetingStart * 1000);
-  day.setHours(hours, Number(m[2]), 0, 0);
-  const at = day.getTime() / 1000 + Number(m[3] ?? 0);
+  const midnight = Math.floor((meetingStart + zone * 60) / 86400) * 86400 - zone * 60;
+  const at = midnight + hours * 3600 + Number(m[2]) * 60 + Number(m[3] ?? 0);
   return [at - 86400, at, at + 86400].reduce((a, b) => (Math.abs(b - meetingStart) < Math.abs(a - meetingStart) ? b : a));
 }
 
 /// When a recording started, from its file: a date and time in its name, as phones and recorders write them
 /// ("20261111_143005", "2026-11-11 14.30.05"), or else when the file was last changed less its length.
-/// { at, from } or null.
+/// A name's time is by the recording device's own clock, so it's kept as that clock read it (`wall`, Unix
+/// seconds as if that clock were UTC) for its time zone to place; a file's saved time is already the same
+/// instant everywhere (`at`). { at } or { wall }, with `from`, or null.
 function recordingStart(file, seconds) {
   const m = file.name.match(/(20\d\d)[-_.]?(\d\d)[-_.]?(\d\d)[ T_-]?(\d\d)[-_.:h]?(\d\d)[-_.:m]?(\d\d)/);
   if (m) {
-    const at = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])).getTime() / 1000;
-    if (Number.isFinite(at)) return { at, from: "the file's name" };
+    const wall = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])) / 1000;
+    if (Number.isFinite(wall)) return { wall, from: "the file's name" };
   }
   if (file.lastModified && seconds) return { at: file.lastModified / 1000 - seconds, from: "when the file was saved, less its length" };
   return null;
@@ -4724,30 +4797,42 @@ function audioSeconds(file) {
 }
 
 /// How an imported track was placed, for its title and menu.
-function placedText(imported, meetingStart) {
+function placedText(imported, meetingStart, zone) {
   const how = imported.placed_by === "sound" ? `matched by its sound (${syncQuality(imported.confidence ?? 0)})`
     : imported.placed_by === "hand" ? "placed by hand" : "placed by the time of day";
   const drift = imported.rate && imported.rate !== 1 ? ` · its clock ran ${Math.abs((imported.rate - 1) * 100).toFixed(2)} % ${imported.rate > 1 ? "slow" : "fast"}` : "";
-  return `Starts ${dayClock(meetingStart + imported.offset_s)}, ${signedClock(imported.offset_s)} into the meeting · ${how}${drift}`;
+  return `Starts ${startedText(meetingStart + imported.offset_s, zone, imported.utc_offset_min)}, ${signedClock(imported.offset_s)} into the meeting · ${how}${drift}`;
+}
+
+/// When a track started, by the meeting's clock, and by its own device's too when that was elsewhere:
+/// "21:32:24 AEDT (10:32:24 GMT by its clock)".
+function startedText(at, zone, own) {
+  const theirs = own != null && own !== zone ? ` (${dayClock(at, own)} ${zoneName(at, own)} by its clock)` : "";
+  return `${dayClock(at, zone)} ${zoneName(at, zone)}${theirs}`;
 }
 
 /// The form for adding a recording as a track: the file, its name, and where it goes. The time of day it
 /// started places it first, read from the file and changeable; matching its sound can then fine-tune it.
-function showImport(tracks, id, meetingStart) {
+function showImport(tracks, id, meetingStart, zone) {
   tracks.querySelector(".import-form")?.remove();
+  // The device that made it may have been in another time zone; its clock's times are by that zone.
+  const zoneOf = zonePicker(zone, "Its clock's time zone");
+  const ownZone = () => Number(zoneOf.value);
+  let found = null;
+  const meetingAt = `The meeting started at ${dayClock(meetingStart, zone)} ${zoneName(meetingStart, zone)}.`;
   const file = el("input", { type: "file", accept: "audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm", "aria-label": "Audio file" });
   const name = el("input", { type: "text", placeholder: "Track name, such as Phone", maxlength: "60", "aria-label": "Track name" });
   const how = el("select", { "aria-label": "How to place it" },
     el("option", { value: "time" }, "By the time of day it started"),
     el("option", { value: "sound" }, "By matching its sound anywhere"),
     el("option", { value: "at" }, "At a point in the meeting"));
-  const when = el("input", { type: "text", class: "mono", size: "10", value: dayClock(meetingStart), "aria-label": "Started at, time of day" });
-  const whenFrom = el("small", { class: "hint" }, `The meeting started at ${dayClock(meetingStart)}.`);
+  const when = el("input", { type: "text", class: "mono", size: "10", value: dayClock(meetingStart, zone), "aria-label": "Started at, time of day" });
+  const whenFrom = el("small", { class: "hint" }, meetingAt);
   const refine = el("input", { type: "checkbox", checked: true });
   const at = el("input", { type: "text", value: "0:00.0", class: "mono", size: "8", "aria-label": "Starts at" });
   const status = el("div", { class: "hint", role: "status" });
   const timeRows = [
-    el("label", { class: "import-row" }, el("span", {}, "It started at"), when, whenFrom),
+    el("label", { class: "import-row" }, el("span", {}, "It started at"), when, zoneOf, whenFrom),
     el("label", { class: "import-row check" }, refine, el("span", {}, "Then fine-tune it by matching its sound nearby",
       el("small", { class: "hint" }, " Takes up a call's delay and clocks that run apart. Leave it off for two sides of a call that share no sound."))),
   ];
@@ -4761,19 +4846,25 @@ function showImport(tracks, id, meetingStart) {
     const chosen = file.files[0];
     if (!chosen) return;
     if (!name.value) name.value = chosen.name.replace(/\.[^.]+$/, "");
-    const found = recordingStart(chosen, await audioSeconds(chosen));
-    if (!found) return;
-    when.value = dayClock(found.at);
-    const apart = Math.abs(found.at - meetingStart);
-    whenFrom.textContent = `From ${found.from}. The meeting started at ${dayClock(meetingStart)}.${apart > 6 * 3600 ? " That's hours apart: check it." : ""}`;
+    found = recordingStart(chosen, await audioSeconds(chosen));
+    showFound();
   });
+  // A time read from the file's name is by its clock, so it moves with the zone chosen; a saved time doesn't.
+  const showFound = () => {
+    if (!found) return;
+    const at = found.at ?? found.wall - ownZone() * 60;
+    when.value = dayClock(at, ownZone());
+    const apart = Math.abs(at - meetingStart);
+    whenFrom.textContent = `From ${found.from}. ${meetingAt}${apart > 6 * 3600 ? " That's hours apart: check its time zone." : ""}`;
+  };
+  zoneOf.addEventListener("change", () => { if (found?.wall != null) showFound(); });
   const go = el("button", { class: "primary pill" }, "Import and transcribe");
   go.addEventListener("click", async () => {
     const chosen = file.files[0];
     if (!chosen) return status.replaceChildren(el("span", { class: "danger" }, "Choose a recording first."));
-    const headers = { "x-id": id, "x-label": encodeURIComponent(name.value.trim() || chosen.name), "x-place": how.value };
+    const headers = { "x-id": id, "x-label": encodeURIComponent(name.value.trim() || chosen.name), "x-place": how.value, "x-utc-offset": String(ownZone()) };
     if (how.value === "time") {
-      const started = parseDayClock(when.value, meetingStart);
+      const started = parseDayClock(when.value, meetingStart, ownZone());
       if (started == null) return status.replaceChildren(el("span", { class: "danger" }, "Type the time it started as hours:minutes:seconds, such as 14:30:05."));
       headers["x-started-at"] = String(started);
       headers["x-refine"] = refine.checked ? "1" : "0";
@@ -4789,7 +4880,7 @@ function showImport(tracks, id, meetingStart) {
       status.replaceChildren(el("span", { class: "spinner" }), how.value === "at" || (how.value === "time" && !refine.checked) ? " Adding it…" : " Matching its sound to the other tracks…");
       const added = await invoke("import_track", pcm, { headers });
       const missed = how.value === "time" && refine.checked && added.placed_by !== "sound" ? " Its sound didn't clearly match nearby, so it's placed by the time of day." : "";
-      status.replaceChildren(`${placedText(added, meetingStart)}.${missed} Transcribing…`);
+      status.replaceChildren(`${placedText(added, meetingStart, zone)}.${missed} Transcribing…`);
       processAgain(id);
     } catch (e) {
       go.disabled = false;
@@ -4810,8 +4901,8 @@ function showImport(tracks, id, meetingStart) {
     try {
       const done = await invoke("import_session", { id, path: picked, owner: owner.value.trim() });
       const silent = done.silent ? ` ${done.silent} that heard nothing ${done.silent === 1 ? "was" : "were"} left out.` : "";
-      const placed = done.matched ? placedText(done.added[0], meetingStart)
-        : `Their recording started at ${dayClock(done.started_at)}, ${signedClock(done.started_at - meetingStart)} into the meeting · its sound didn't clearly match nearby, so it's placed by the time of day`;
+      const placed = done.matched ? placedText(done.added[0], meetingStart, zone)
+        : `Their recording started at ${startedText(done.started_at, zone, done.added[0]?.utc_offset_min)}, ${signedClock(done.started_at - meetingStart)} into the meeting · its sound didn't clearly match nearby, so it's placed by the time of day`;
       sessionStatus.replaceChildren(`Added ${done.added.length} track${done.added.length === 1 ? "" : "s"}. ${placed}.${silent} Transcribing…`);
       processAgain(id);
     } catch (e) {

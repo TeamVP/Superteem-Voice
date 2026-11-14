@@ -257,7 +257,7 @@ async fn download_model<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn start_recording<R: Runtime>(app: AppHandle<R>, devices: Vec<String>, pins: bool) -> Result<(), String> {
+async fn start_recording<R: Runtime>(app: AppHandle<R>, devices: Vec<String>, pins: bool, utc_offset_min: Option<i32>) -> Result<(), String> {
     let state = app.state::<AppState>();
     // Consent is asked once recording has started, so a spoken "yes" is on the recording too.
     if devices.is_empty() && !pins {
@@ -281,6 +281,8 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>, devices: Vec<String>, pi
     // The session keeps which input each track came from, and an app's track is named after the app.
     let mut meta = library::load_meta(&dir);
     meta.inputs = devices.clone();
+    // The room's clock, from the page, which knows this computer's time zone.
+    meta.utc_offset_min = utc_offset_min.filter(|m| m.abs() <= 14 * 60);
     for (i, device) in devices.iter().enumerate() {
         if let Some(label) = sources::track_label(device) {
             meta.names.insert(format!("input{}", i + 1), label);
@@ -739,15 +741,23 @@ fn split_segment(state: State<AppState>, id: String, segment: usize, at: usize) 
     Ok(new_id)
 }
 
-/// Why two neighbouring lines can't be joined, or None when they can.
+/// Why two neighbouring lines can't be joined, or None when they can. Lines with someone else talking at
+/// the same time can be joined: a "Yeah" over someone's sentence shouldn't keep it in pieces.
 fn join_blocker(first: &Segment, second: &Segment) -> Option<&'static str> {
-    if first.stream != second.stream {
-        Some("These lines were heard on different microphones.")
-    } else if first.overlap || second.overlap {
-        Some("Someone else was talking at the same time.")
-    } else {
-        None
-    }
+    (first.stream != second.stream).then_some("These lines were heard on different microphones.")
+}
+
+/// Mutes a line, or brings a muted one back: muted, it leaves the script and is silent in the transcript
+/// mix, so the lines either side of it can be joined.
+#[tauri::command]
+fn mute_segment(state: State<AppState>, id: String, segment: usize, muted: bool) -> Result<(), String> {
+    edit_session(&state, &id, |_, segments| {
+        let s = segments.iter_mut().find(|s| s.id == segment).ok_or("That line no longer exists.")?;
+        s.muted = muted;
+        s.edited = true;
+        voices::mark_overlaps(segments);
+        Ok(())
+    })
 }
 
 /// Joins a line onto the one before it. The joined line takes the earlier line's speaker.
@@ -871,6 +881,29 @@ fn save_speaker_print(state: State<AppState>, id: String, key: String, name: Str
         meta.suggested.remove(&key);
         meta.prints.insert(key.clone(), PrintLink { id: print_id, score: None });
         meta.names.insert(key, name.trim().to_string());
+        Ok(())
+    })
+}
+
+/// Starts a voice print from one track: what its own wearer said into it, less what was muted by hand in
+/// the mix, and links the track's speaker to it.
+#[tauri::command]
+fn save_track_print(state: State<AppState>, id: String, stream: String, name: String, consent: bool) -> Result<(), String> {
+    if !consent {
+        return Err("Confirm that this person agreed to have a voice print kept.".into());
+    }
+    if name.trim().is_empty() {
+        return Err("Type the person's name for the voice print.".into());
+    }
+    edit_session(&state, &id, |meta, segments| {
+        let dir = library::session_dir(&id)?;
+        let muted: Vec<(f64, f64)> = meta.mix_edits.get(&stream).into_iter().flatten().filter(|e| !e.play).map(|e| (e.from_s, e.to_s)).collect();
+        let voice = voices::track_voice(segments, &voices::load_line_voices(&dir), &stream, &muted)
+            .ok_or("This track has no clear speech by its own speaker yet. Transcribe the meeting, or tick “Everything on this track is this person” and transcribe again.")?;
+        let print_id = voices::start_print(&name, None, &recorded_on(meta, &stream), voice, &id)?;
+        meta.suggested.remove(&stream);
+        meta.prints.insert(stream.clone(), PrintLink { id: print_id, score: None });
+        meta.names.insert(stream, name.trim().to_string());
         Ok(())
     })
 }
@@ -1955,7 +1988,7 @@ fn action_label(model: &mut dyn stv_core::analysis::Model, segments: &[Segment],
     let clock = |t: f64| format!("{:02}:{:02}", t.max(0.0) as u64 / 60, t.max(0.0) as u64 % 60);
     let said: Vec<String> = segments
         .iter()
-        .filter(|s| s.echo_of.is_none() && !s.text.trim().is_empty() && s.end_s >= at_s - 60.0 && s.start_s <= at_s + 30.0)
+        .filter(|s| s.in_script() && !s.text.trim().is_empty() && s.end_s >= at_s - 60.0 && s.start_s <= at_s + 30.0)
         .map(|s| format!("[{}] {}", clock(s.start_s), s.text.trim()))
         .collect();
     if said.is_empty() {
@@ -3001,7 +3034,8 @@ fn save_analysis_settings(model: Option<String>, auto: Option<bool>, server: Opt
 }
 
 /// Adds an audio track to a meeting. The body is the audio, 16 kHz mono 16-bit, decoded by the page; the
-/// headers say which meeting (`x-id`), the track's name (`x-label`, URI-encoded) and how to place it
+/// headers say which meeting (`x-id`), the track's name (`x-label`, URI-encoded), its device's time zone
+/// (`x-utc-offset`, minutes ahead of UTC, when known) and how to place it
 /// (`x-place`): "time" at the time of day it started (`x-started-at`, Unix seconds), fine-tuned by its sound
 /// when `x-refine` is 1; "sound" by matching it anywhere; or "at" a point in the meeting (`x-offset`, seconds).
 #[tauri::command]
@@ -3017,6 +3051,7 @@ async fn import_track<R: Runtime>(app: AppHandle<R>, request: tauri::ipc::Reques
         "sound" => imports::Place::Sound,
         _ => imports::Place::At(header("x-offset").parse().unwrap_or(0.0)),
     };
+    let zone: Option<i32> = header("x-utc-offset").parse().ok();
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("No audio was sent.".into()) };
     let pcm: Vec<i16> = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
     let dir = library::session_dir(&id)?;
@@ -3026,7 +3061,7 @@ async fn import_track<R: Runtime>(app: AppHandle<R>, request: tauri::ipc::Reques
     let import = blocking(move || {
         let state = app.state::<AppState>();
         let _guard = state.edit.lock().unwrap();
-        imports::add(&dir, &label, &pcm, place)
+        imports::add_in_zone(&dir, &label, &pcm, place, zone)
     })
     .await??;
     Ok(import)
@@ -3372,6 +3407,8 @@ pub fn run() {
             merge_speakers,
             link_speaker,
             save_speaker_print,
+            save_track_print,
+            mute_segment,
             list_voiceprints,
             merge_voiceprint_people,
             separate_voiceprint,

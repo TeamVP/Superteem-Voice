@@ -68,8 +68,9 @@ fn carry_over_edits(old: &[Segment], new: &mut [Segment]) {
             s.speaker = edited.speaker.clone();
             s.edited = true;
             s.fixes = edited.fixes.clone();
+            s.muted = edited.muted;
             // A line the person put back in the script stays there.
-            if edited.in_script() {
+            if edited.echo_of.is_none() {
                 s.echo_of = None;
             }
         }
