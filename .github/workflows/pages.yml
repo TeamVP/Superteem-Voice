@@ -27,7 +27,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Assemble the site
         run: |
           mkdir -p _site/brand
@@ -55,9 +55,9 @@ jobs:
           # that query, and this repository gets no access log, so the parameters are not collected here.
           jq '{tag_name, published_at, html_url, assets: [.assets[] | {name, size}]}' latest.json > _site/download/release.json
           ls -l _site/download
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - id: artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: _site
       # GitHub Pages names each deployment after a commit, and treats a second deployment of a commit it has

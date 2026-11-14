@@ -20,7 +20,7 @@ jobs:
   version:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check the tag matches the app version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -34,10 +34,11 @@ jobs:
     needs: version
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
+          package-manager-cache: false
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
@@ -121,7 +122,7 @@ jobs:
           $setup = Get-ChildItem desktop/target/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item $setup.FullName "dist/$env:WINDOWS_FILE"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/
@@ -130,11 +131,12 @@ jobs:
     needs: version
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - uses: actions/setup-java@v4
+          package-manager-cache: false
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
@@ -236,7 +238,7 @@ jobs:
           }
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item desktop/target/superteem-voice.apk "dist/$env:ANDROID_FILE"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android
           path: dist/
@@ -250,10 +252,11 @@ jobs:
     needs: version
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
+          package-manager-cache: false
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
@@ -290,7 +293,7 @@ jobs:
           mkdir -p ../dist
           cp target/aarch64-apple-darwin/release/bundle/dmg/*.dmg "../dist/$MAC_FILE"
           ls -l ../dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: dist/
@@ -308,10 +311,11 @@ jobs:
       IOS_SIGNED: ${{ secrets.IOS_CERTIFICATE != '' }}
       TESTFLIGHT: ${{ secrets.APPLE_API_KEY_P8 != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
+          package-manager-cache: false
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
@@ -359,7 +363,7 @@ jobs:
           printf '%s\n' "$APPLE_API_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_$APPLE_API_KEY.p8
           xcrun altool --upload-app --type ios --file dist/Voice-by-Superteem-iOS.ipa \
             --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ios
           path: dist/
@@ -374,7 +378,7 @@ jobs:
       contents: write
       actions: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
