@@ -90,8 +90,15 @@ pub fn phrases_changed() {
 
 //// Transcribes dictation in `languages` (the note's, main one first), steered towards the app's name and
 /// the person's vocabulary, then corrected by it. With two languages, each clip is heard as whichever it
-/// sounds like.
-pub fn transcribe_all(pcm: &[i16], languages: &[String]) -> Result<String, String> {
+/// sounds like. `noise_db` is the room's background level when known, so speech is told from noise.
+///
+/// Only the stretch with speech in it is heard: given silence or noise at the ends, whisper writes the
+/// words it was prompted with ("Superteem.") rather than nothing.
+pub fn transcribe_all(pcm: &[i16], languages: &[String], noise_db: Option<f32>) -> Result<String, String> {
+    let Some(span) = stv_core::chunk::speech_span(pcm, noise_db) else {
+        return Ok(String::new());
+    };
+    let pcm = &pcm[span];
     let languages = if languages.is_empty() { vec![crate::prefs::load().primary_language()] } else { languages.to_vec() };
     let terms = vocabulary::load();
     with_transcriber(&languages, |t| {
@@ -102,8 +109,30 @@ pub fn transcribe_all(pcm: &[i16], languages: &[String]) -> Result<String, Strin
             Some(prompt) => t.transcribe_with_prompt(pcm, &prompt, &language)?,
             None => t.transcribe_plain(pcm, &language)?,
         };
+        let words = if base.is_empty() { words } else { drop_prompt_echo(&words) };
         Ok(vocabulary::correct_text(&words))
     })
+}
+
+/// Takes off sentences at either end made only of the prompt's words, "Superteem." or "Hey Superteem.":
+/// whisper writes them for a breath or noise at the edge of a clip. Said with other words they stay.
+fn drop_prompt_echo(text: &str) -> String {
+    let prompt: Vec<String> = PROMPT.split_whitespace().map(stv_core::vocab::plain).collect();
+    let mut sentences: Vec<&str> = Vec::new();
+    let mut from = 0;
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if matches!(c, '.' | '!' | '?' | '…') && chars.peek().is_none_or(|(_, n)| n.is_whitespace()) {
+            let end = i + c.len_utf8();
+            sentences.push(&text[from..end]);
+            from = end;
+        }
+    }
+    sentences.push(&text[from..]);
+    let echo = |s: &&str| s.split_whitespace().map(stv_core::vocab::plain).filter(|w| !w.is_empty()).all(|w| prompt.contains(&w));
+    let first = sentences.iter().position(|s| !echo(s)).unwrap_or(sentences.len());
+    let last = sentences.iter().rposition(|s| !echo(s)).map_or(first, |i| i + 1);
+    sentences[first..last].concat().trim().to_string()
 }
 
 /// Returns the words spoken since `dictate_start`, and the audio they came from.
@@ -112,7 +141,7 @@ pub fn dictate_stop(languages: &[String]) -> Result<(String, Vec<i16>), String> 
     if pcm.len() < RATE as usize / 4 {
         return Ok((String::new(), pcm));
     }
-    Ok((transcribe_all(&pcm, languages)?, pcm))
+    Ok((transcribe_all(&pcm, languages, None)?, pcm))
 }
 
 /// What whisper writes for the words spoken since `dictate_start` with nothing to steer or correct it, so
@@ -847,3 +876,19 @@ mod imp {
 }
 
 pub use imp::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_prompt_written_for_noise_at_the_ends_is_dropped() {
+        assert_eq!(drop_prompt_echo(" Superteem."), "");
+        assert_eq!(drop_prompt_echo(" Hey Superteem."), "");
+        assert_eq!(drop_prompt_echo(" Buy milk and eggs. Superteem."), "Buy milk and eggs.");
+        assert_eq!(drop_prompt_echo(" Superteem. Buy milk. Superteem!"), "Buy milk.");
+        // Said along with other words, the name stays.
+        assert_eq!(drop_prompt_echo(" Thanks, Superteem."), "Thanks, Superteem.");
+        assert_eq!(drop_prompt_echo(" Superteem is great. Buy milk"), "Superteem is great. Buy milk");
+    }
+}

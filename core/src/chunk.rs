@@ -81,6 +81,28 @@ pub fn find_cut(pcm: &[i16], noise_db: Option<f32>) -> Option<Cut> {
     None
 }
 
+/// Less speech than this in a clip is a click, a breath or a knock, not a word.
+const MIN_SPEECH_FRAMES: usize = 8;
+/// Kept around the speech when a clip is trimmed: quiet sounds at the edges of words (an "s", a "f") fall
+/// under the speech level, so a little either side keeps them.
+const LEAD_FRAMES: usize = FRAMES_PER_S / 4;
+const TAIL_FRAMES: usize = FRAMES_PER_S * 2 / 5;
+
+/// The samples of `pcm` from just before its first speech to just after its last, or None when it has too
+/// little speech to hold a word. Whisper, given silence or noise, writes something anyway, often the words
+/// it was prompted with; trimming the quiet off the ends leaves it nothing to make words from.
+pub fn speech_span(pcm: &[i16], noise_db: Option<f32>) -> Option<std::ops::Range<usize>> {
+    let speech = speech_frames(pcm, noise_db);
+    if speech.iter().filter(|&&s| s).count() < MIN_SPEECH_FRAMES {
+        return None;
+    }
+    let first = speech.iter().position(|&s| s)?;
+    let last = speech.iter().rposition(|&s| s)?;
+    let start = first.saturating_sub(LEAD_FRAMES) * FRAME;
+    let end = ((last + 1 + TAIL_FRAMES) * FRAME).min(pcm.len());
+    Some(start..end)
+}
+
 /// How long the end of `pcm` has been without speech, in seconds.
 pub fn trailing_silence_s(pcm: &[i16], noise_db: Option<f32>) -> f32 {
     let speech = speech_frames(pcm, noise_db);
@@ -130,6 +152,17 @@ mod tests {
     fn waits_while_someone_is_still_talking() {
         assert_eq!(find_cut(&audio(&[(false, 0.3), (true, 3.0)]), None), None);
         assert_eq!(find_cut(&audio(&[(true, 2.0), (false, 0.3)]), Some(-40.0)), None);
+    }
+
+    #[test]
+    fn speech_span_trims_the_quiet_and_ignores_clicks() {
+        let span = speech_span(&audio(&[(false, 2.0), (true, 1.0), (false, 3.0)]), Some(-40.0)).unwrap();
+        let s = |n: usize| n as f32 / 16_000.0;
+        assert!((s(span.start) - 1.75).abs() < 0.03, "{}", s(span.start));
+        assert!((s(span.end) - 3.4).abs() < 0.03, "{}", s(span.end));
+        // Nothing but quiet, or a 60 ms click in it, holds no words.
+        assert_eq!(speech_span(&audio(&[(false, 2.0)]), Some(-40.0)), None);
+        assert_eq!(speech_span(&audio(&[(false, 1.0), (true, 0.06), (false, 1.0)]), Some(-40.0)), None);
     }
 
     #[test]

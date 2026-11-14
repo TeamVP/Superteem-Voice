@@ -101,11 +101,11 @@ fn deliver(words: Words, on_words: &impl Fn(Words)) {
 }
 
 /// The words in a piece, or nothing for silence or Whisper's markers for it.
-fn words(pcm: &[i16], languages: &[String]) -> Result<String, String> {
+fn words(pcm: &[i16], languages: &[String], noise_db: Option<f32>) -> Result<String, String> {
     if pcm.len() < process::RATE as usize / 4 {
         return Ok(String::new());
     }
-    let text = listen::transcribe_all(pcm, languages)?;
+    let text = listen::transcribe_all(pcm, languages, noise_db)?;
     Ok(if process::is_silence(&text) { String::new() } else { text.trim().to_string() })
 }
 
@@ -160,11 +160,12 @@ pub fn start(
                 session.clips += 1;
                 let clip = session.clips;
                 let languages = session.languages.clone();
+                let noise = session.noise_db;
                 on_clip(Clip { session: id, clip });
                 // Written down without holding the session, so the level meter and stop stay quick; the
                 // microphone keeps recording the next clip meanwhile.
                 drop(guard);
-                let text = words(&piece, &languages).unwrap_or_default();
+                let text = words(&piece, &languages, noise).unwrap_or_default();
                 let mut guard = SESSION.lock().unwrap();
                 let Some(session) = guard.as_mut().filter(|s| s.id == id) else {
                     // Stopped while this clip was written down: its words still go in.
@@ -203,7 +204,7 @@ fn finish(id: u64) -> Result<String, String> {
         guard.take().expect("checked")
     };
     let rest = listen::dictate_stop_audio()?;
-    let text = words(&rest, &session.languages)?;
+    let text = words(&rest, &session.languages, session.noise_db)?;
     if let Some(note) = &session.keep_for {
         let mut audio = session.kept;
         audio.extend_from_slice(&rest);
