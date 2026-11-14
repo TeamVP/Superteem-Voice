@@ -208,6 +208,19 @@ pub struct Meta {
     /// How each track is lifted when it's played back, by stream: for one that was recorded too quietly.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub track_levels: BTreeMap<String, TrackLevel>,
+    /// Where the person changed the transcript mix by hand, by stream: stretches of a track's own recording
+    /// played or muted whatever the transcript says. They don't overlap.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mix_edits: BTreeMap<String, Vec<MixEdit>>,
+}
+
+/// A stretch of a track (seconds into its own recording) played or muted by hand in the transcript mix.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MixEdit {
+    pub from_s: f64,
+    pub to_s: f64,
+    /// Played; otherwise muted.
+    pub play: bool,
 }
 
 /// A track lifted for playback: louder by `boost_db`, and with `compress` its loud and quiet parts brought
@@ -218,6 +231,16 @@ pub struct TrackLevel {
     pub boost_db: f64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub compress: bool,
+    /// Bottom end cut below this many hertz; 0 for none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub low_cut_hz: f64,
+    /// Top end cut above this many hertz; 0 for none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub high_cut_hz: f64,
+}
+
+fn is_zero(x: &f64) -> bool {
+    *x == 0.0
 }
 
 /// The most a track can be lifted, in decibels.
@@ -534,6 +557,7 @@ pub fn delete_track(dir: &Path, stream: &str) -> Result<(), String> {
     meta.suggested.remove(stream);
     meta.track_offsets.remove(stream);
     meta.track_levels.remove(stream);
+    meta.mix_edits.remove(stream);
     meta.locked.retain(|k| k != stream);
     // A meeting not yet processed has no details or transcript to change.
     if has_meta(dir) {

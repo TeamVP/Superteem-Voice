@@ -3092,6 +3092,13 @@ function makePlayer(session, duration, onTick) {
     p.context ??= new (window.AudioContext || window.webkitAudioContext)();
     const ctx = p.context;
     const source = ctx.createMediaElementSource(audios.get(stream));
+    // Cutting the bottom end (rumble, hum, handling noise) and the top end (hiss).
+    const lowCut = ctx.createBiquadFilter();
+    lowCut.type = "highpass";
+    lowCut.Q.value = Math.SQRT1_2;
+    const highCut = ctx.createBiquadFilter();
+    highCut.type = "lowpass";
+    highCut.Q.value = Math.SQRT1_2;
     // Evening out: quiet parts and loud parts closer together, before the lift.
     const compressor = ctx.createDynamicsCompressor();
     compressor.threshold.value = -30;
@@ -3107,24 +3114,59 @@ function makePlayer(session, duration, onTick) {
     limiter.ratio.value = 20;
     limiter.attack.value = 0.001;
     limiter.release.value = 0.1;
-    const chain = { source, compressor, gain, limiter };
+    // The lift is crossfaded in only while someone speaks on the track, so the hiss between words isn't
+    // lifted too; and muting happens here as well as on the element, as the element's mute may not reach
+    // Web Audio.
+    const dry = ctx.createGain();
+    const wet = ctx.createGain();
+    wet.gain.value = 0;
+    const out = ctx.createGain();
+    const chain = { source, lowCut, highCut, compressor, gain, limiter, dry, wet, out };
     chains.set(stream, chain);
     return chain;
   };
   const route = (stream) => {
-    const level = levels.get(stream) ?? { boost_db: 0, compress: false };
-    if (!chains.has(stream) && !level.boost_db && !level.compress) return;
-    const { source, compressor, gain, limiter } = chainFor(stream);
-    for (const node of [source, compressor, gain, limiter]) node.disconnect();
+    const level = { ...FLAT_LEVEL, ...levels.get(stream) };
+    if (!chains.has(stream) && isFlat(level)) return;
+    const chain = chainFor(stream);
+    const { source, lowCut, highCut, compressor, gain, limiter, dry, wet, out } = chain;
+    for (const node of Object.values(chain)) node.disconnect();
+    chain.liftable = !!(level.boost_db || level.compress);
     gain.gain.value = 10 ** ((level.boost_db || 0) / 20);
-    if (level.compress) {
-      source.connect(compressor).connect(gain).connect(limiter).connect(p.context.destination);
-    } else {
-      source.connect(gain).connect(p.context.destination);
-    }
+    lowCut.frequency.value = level.low_cut_hz || 20;
+    highCut.frequency.value = level.high_cut_hz || 20000;
+    const connect = (nodes) => nodes.filter(Boolean).reduce((from, to) => from.connect(to));
+    const filtered = connect([source, level.low_cut_hz && lowCut, level.high_cut_hz && highCut]);
+    connect([filtered, dry, out]);
+    connect([filtered, level.compress && compressor, gain, level.compress && limiter, wet, out]);
+    out.connect(p.context.destination);
+    chain.state = null;
+    gate(stream);
+  };
+  // Whether each track is muted and whether someone speaks on it now, as the review last said.
+  const gates = new Map();
+  const gate = (stream) => {
+    const chain = chains.get(stream);
+    if (!chain) return;
+    const { muted = false, speaking = false } = gates.get(stream) ?? {};
+    const lifted = speaking && chain.liftable;
+    const state = `${muted}/${lifted}`;
+    if (chain.state === state) return;
+    // The first setting is immediate; changes after it fade over a few milliseconds, so they don't click.
+    const now = p.context.currentTime;
+    const set = (param, value) => (chain.state == null ? param.setValueAtTime(value, now) : param.setTargetAtTime(value, now, 0.012));
+    for (const param of [chain.dry.gain, chain.wet.gain, chain.out.gain]) param.cancelScheduledValues(now);
+    set(chain.out.gain, muted ? 0 : 1);
+    set(chain.dry.gain, lifted ? 0 : 1);
+    set(chain.wet.gain, lifted ? 1 : 0);
+    chain.state = state;
+  };
+  p.gate = (stream, muted, speaking) => {
+    gates.set(stream, { muted, speaking });
+    gate(stream);
   };
   for (const stream of audios.keys()) route(stream);
-  p.level = (stream) => ({ boost_db: 0, compress: false, ...levels.get(stream) });
+  p.level = (stream) => ({ ...FLAT_LEVEL, ...levels.get(stream) });
   p.setLevel = (stream, level) => {
     levels.set(stream, level);
     route(stream);
@@ -3152,9 +3194,21 @@ function makePlayer(session, duration, onTick) {
     for (const [s, a] of audios) place(s, a, true);
     onTick(p.t, p.playing);
   };
+  // Where the playhead is between ticks, for muting a track on time rather than up to a tick late.
+  p.now = () => {
+    if (!p.playing || !started) return p.t;
+    const clock = steady.find((a) => !a.paused && !a.ended);
+    return clock ? clock.currentTime : started.t + ((performance.now() - started.at) / 1000) * playRate;
+  };
+  const frame = () => {
+    if (!p.playing) return;
+    p.onFrame?.(p.now());
+    requestAnimationFrame(frame);
+  };
   p.play = () => {
     if (!audios.size) return;
     p.playing = true;
+    requestAnimationFrame(frame);
     // Started before a click, it waits for one.
     if (p.context?.state === "suspended") p.context.resume().catch(() => {});
     started = { t: p.t, at: performance.now() };
@@ -3269,6 +3323,8 @@ let playMix = "transcript";
 /// How fast meetings play back, kept while the app is open.
 const PLAY_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3, 5];
 let playRate = 1;
+/// Whether the transcript scrolls along with playback, remembered on this device.
+let followPlayback = (() => { try { return localStorage.getItem("followPlayback") === "1"; } catch { return false; } })();
 
 /// `suggestion` is lines that sound like one just moved: { lines, speaker }.
 function renderSession(session, processingError, suggestion) {
@@ -3924,23 +3980,61 @@ function renderSession(session, processingError, suggestion) {
     const within = (spans, t) => spans.some(([a, b]) => t >= a && t < b);
     // A track moved since it was transcribed: its clips are that much later until it's transcribed again.
     const shiftOf = (stream) => session.pending_offsets?.[stream] ?? 0;
-    const quietAt = (stream, t) => {
-      const own = t - shiftOf(stream);
-      return within(quietIn.get(stream).greyed, own) && !within(quietIn.get(stream).used, own);
+    // Where each track is muted in the transcript mix, in its own time: greyed and not used, then as the
+    // person played or muted it by hand.
+    const mixEdits = new Map(streams.map((stream) => [stream, [...(meta.mix_edits?.[stream] ?? [])]]));
+    const quietSpans = new Map();
+    const updateQuiet = (stream) => {
+      const { greyed, used } = quietIn.get(stream);
+      const edits = mixEdits.get(stream);
+      const base = spanMinus(spanMerge(greyed), spanMerge(used));
+      const played = spanMinus(base, spanMerge(edits.filter((e) => e.play).map((e) => [e.from_s, e.to_s])));
+      quietSpans.set(stream, spanMerge([...played, ...edits.filter((e) => !e.play).map((e) => [e.from_s, e.to_s])]));
     };
+    streams.forEach(updateQuiet);
+    const quietAt = (stream, t) => within(quietSpans.get(stream), t - shiftOf(stream));
     const muteButtons = new Map();
     const manualMuted = new Set();
+    // Where someone speaks on each track (its own time), with a little either side: the only places a
+    // track's lift applies.
+    const speech = new Map(streams.map((stream) => [stream, spanMerge(session.segments
+      .filter((s) => s.stream === stream || s.also_on?.includes(stream))
+      .flatMap(clipSpans)
+      .map(([a, b]) => [a - 0.3, b + 0.4]))]));
     const applyMix = (t) => {
       for (const stream of streams) {
         const muted = playMix === "transcript" ? quietAt(stream, t) : manualMuted.has(stream);
         const audio = player?.audios.get(stream);
         if (audio && audio.muted !== muted) audio.muted = muted;
+        player?.gate?.(stream, muted, within(speech.get(stream), t - shiftOf(stream)));
         const button = muteButtons.get(stream);
         button.classList.toggle("on", muted);
         button.classList.toggle("auto", playMix === "transcript");
         button.setAttribute("aria-pressed", String(muted));
       }
     };
+    let followed = null;
+    let followPausedUntil = 0;
+    // Scrolling by hand while following leaves the transcript where it was put for a few seconds.
+    const pauseFollow = () => { if (followPlayback && player?.playing) { followPausedUntil = performance.now() + 5000; followed = null; } };
+    for (const type of ["wheel", "touchmove"]) document.addEventListener(type, (e) => { if (!tracks.contains(e.target)) pauseFollow(); }, { signal, passive: true });
+    const followButton = el("button", { class: "pill follow", type: "button" }, svg("down", 14), el("span", {}, "Follow"));
+    const drawFollow = () => {
+      followButton.classList.toggle("on", followPlayback);
+      followButton.setAttribute("aria-pressed", String(followPlayback));
+      followButton.title = followPlayback
+        ? "Following: the transcript scrolls to the line being played. Click to stop."
+        : "Scroll the transcript along with playback, to read it as you listen";
+    };
+    drawFollow();
+    followButton.addEventListener("click", () => {
+      followPlayback = !followPlayback;
+      try { localStorage.setItem("followPlayback", followPlayback ? "1" : "0"); } catch {}
+      followed = null;
+      followPausedUntil = 0;
+      drawFollow();
+      if (player) onTick(player.t, player.playing);
+    });
     const mixLabel = el("span", { class: "mix-switch", role: "group", "aria-label": "What you hear" });
     const drawMix = () => {
       const option = (value, label, title) => {
@@ -3982,6 +4076,11 @@ function renderSession(session, processingError, suggestion) {
           return spans(s).map(([a, b]) => clip(a, b, "", `Left out of the script: heard more clearly ${original ? `on ${trackName(original.stream)}` : "elsewhere"} · “${s.text}”`, "echo"));
         }),
       ];
+      // Where the mix was changed by hand, over the transcript's own clips.
+      const editLayer = el("span", { class: "mix-edits" });
+      const drawEdits = () => editLayer.replaceChildren(...mixEdits.get(stream).map((e) =>
+        clip(e.from_s, e.to_s, "", `${e.play ? "Played" : "Muted"} by you · ${clock(e.from_s)} to ${clock(e.to_s)} · right-click to change`, `mix-edit ${e.play ? "play" : "mute"}`)));
+      drawEdits();
       const used = scriptLines.filter((s) => s.stream === stream).flatMap((s) => spans(s).map(([a, b]) => clip(a, b,
         `background:${strong.get(s.speaker) ?? "var(--key-light)"}`,
         `${session.speakers.find((sp) => sp.key === s.speaker)?.name ?? ""} · ${clock(s.start_s)}`)));
@@ -3995,7 +4094,7 @@ function renderSession(session, processingError, suggestion) {
         tick.addEventListener("click", (e) => { e.stopPropagation(); player?.seek(at + shiftOf(stream)); });
         return tick;
       });
-      const bar = el("span", { class: "bar" }, el("span", { class: "bar-inner", style: `--shift:${shiftOf(stream) / duration}` }, greyed, used, imported ? theirTicks :
+      const bar = el("span", { class: "bar" }, el("span", { class: "bar-inner", style: `--shift:${shiftOf(stream) / duration}` }, greyed, used, editLayer, imported ? theirTicks :
         allMarkers.map((m) => {
           const note = markerNote(m);
           // The meeting's own marks stay put when a track's strip is moved.
@@ -4007,6 +4106,54 @@ function renderSession(session, processingError, suggestion) {
           });
           return tick;
         })));
+      // Right-click a block: play or mute part of it in the transcript mix, such as a word cut off at its start.
+      bar.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (meta.compacted) return;
+        const own = timeAt(e.clientX) - shiftOf(stream);
+        const edits = mixEdits.get(stream);
+        const save = (next) => {
+          mixEdits.set(stream, next);
+          updateQuiet(stream);
+          drawEdits();
+          // Heard straight away in the transcript mix.
+          if (playMix !== "transcript") { playMix = "transcript"; drawMix(); }
+          applyMix(player?.now() ?? 0);
+          invoke("set_mix_edits", { id, name: stream, edits: next }).catch((err) => showError(page, err));
+        };
+        const add = (a, b, play) => save(addMixEdit(edits, Math.max(0, a), Math.min(duration, b), play));
+        const blocks = [...quietIn.get(stream).used, ...quietIn.get(stream).greyed].filter(([a, b]) => own >= a && own < b);
+        const block = blocks.length ? [Math.min(...blocks.map(([a]) => a)), Math.max(...blocks.map(([, b]) => b))] : null;
+        const quiet = quietSpans.get(stream);
+        const q = quiet.find(([a, b]) => own >= a && own < b);
+        const items = [`${name} at ${clock(own + shiftOf(stream))}`];
+        if (q) {
+          items.push(
+            ["Play from here", `Ends the mute here, for a word cut off at its start (muted ${clock(q[0])}–${clock(q[1])})`, () => add(own, q[1], true)],
+            ["Play up to here", "Starts the mute here instead, for a word cut off at its end", () => add(q[0], own, true)],
+            ["Play this muted stretch", `${clock(q[0])} to ${clock(q[1])}`, () => add(q[0], q[1], true)]);
+        } else {
+          // What's playing here: the block under the pointer, or the stretch between mutes.
+          const r = block ?? [quiet.filter(([, b]) => b <= own).at(-1)?.[1] ?? 0, quiet.find(([a]) => a > own)?.[0] ?? duration];
+          // Just after a mute, the start of the block's first word may be cut off.
+          const before = quiet.find(([, b]) => Math.abs(b - r[0]) < 0.06);
+          if (block && before) {
+            items.push(
+              ["Start playing 0.25 s sooner", "Unmutes just before this block, for a word cut off at its start", () => add(r[0] - 0.25, r[0] + 0.01, true)],
+              ["Start playing 0.5 s sooner", "", () => add(r[0] - 0.5, r[0] + 0.01, true)]);
+          }
+          items.push(
+            ["Mute from here", `To the end of ${block ? "this block" : "this stretch"} (${clock(r[1])})`, () => add(own, r[1], false)],
+            ["Mute up to here", `From the start of ${block ? "this block" : "this stretch"} (${clock(r[0])})`, () => add(r[0], own, false)],
+            [block ? "Mute this block" : "Mute this stretch", `${clock(r[0])} to ${clock(r[1])}`, () => add(r[0], r[1], false)]);
+        }
+        const mine = edits.find((x) => own >= x.from_s && own < x.to_s);
+        if (mine || edits.length) items.push("Your changes");
+        if (mine) items.push(["Undo this change", `${mine.play ? "Played" : "Muted"} by you, ${clock(mine.from_s)} to ${clock(mine.to_s)}`, () => save(edits.filter((x) => x !== mine))]);
+        if (edits.length > (mine ? 1 : 0)) items.push([`Undo all ${edits.length} changes on this track`, "Back to the transcript mix as it was", () => save([])]);
+        contextMenu(e.clientX, e.clientY, items);
+      });
       // The name opens the track's settings; an imported track also has a menu to sync it or take it out.
       const details = imported ? `${name} · imported · ${placedText(imported, meta.created)}` : trackDetails(name, meta.tracks?.[stream]);
       const flags = [(meta.locked ?? []).includes(stream) ? "everything on it is them" : "", meta.track_offsets?.[stream] ? `moved ${signedClock(meta.track_offsets[stream])}` : ""].filter(Boolean);
@@ -4160,7 +4307,18 @@ Click for who is on it and where it starts` }, name);
         playButton.replaceChildren(svg(playing ? "pause" : "play", 18));
         playButton.setAttribute("aria-label", playing ? "Pause" : "Play");
       }
-      for (const { seg, line } of lineEls) line.classList.toggle("playing", playing && t >= seg.start_s && t < seg.end_s);
+      let current = null;
+      for (const { seg, line } of lineEls) {
+        const on = playing && t >= seg.start_s && t < seg.end_s;
+        line.classList.toggle("playing", on);
+        if (on && !current) current = line;
+      }
+      // Following: the line being played is kept in the middle of the window, unless the person has just
+      // scrolled away to read something else.
+      if (followPlayback && playing && current && current !== followed && performance.now() > followPausedUntil) {
+        followed = current;
+        current.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      }
       applyMix(t);
       // Playing from a line of the transcript opens the tracks too.
       if (playing && tracksOpenFor !== id) setTracksOpen(true);
@@ -4178,6 +4336,7 @@ Click for who is on it and where it starts` }, name);
     const fold = el("button", { class: "icon-only tracks-fold", type: "button", title: "Hide the tracks", "aria-label": "Hide the tracks",
       onclick: () => { player?.pause(); setTracksOpen(false); } }, svg("down", 16));
     player = makePlayer(session, duration, onTick);
+    player.onFrame = applyMix;
     const rateText = (r) => `${r}×`;
     const speedSelect = el("select", { class: "speed", title: "Playback speed (< slower, > faster)", "aria-label": "Playback speed" },
       PLAY_RATES.map((r) => el("option", { value: String(r), selected: r === playRate }, rateText(r))));
@@ -4206,7 +4365,7 @@ Click for who is on it and where it starts` }, name);
       playButton, mini,
       el("button", { class: "pill", "aria-label": "Forward 5 seconds", title: "Forward 5 seconds (Alt + →)", onclick: () => player?.seek(player.t + 5) }, "+5"),
       el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item (→)", onclick: nextClip }, svg("skip-forward", 16)),
-      timeLabel, speedSelect, fitButton, el("span", { class: "grow" }), mixLabel,
+      timeLabel, speedSelect, fitButton, el("span", { class: "grow" }), followButton, mixLabel,
       meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id, meta.created), "aria-label": "Import a recording" }, svg("import", 14), el("span", { class: "wide-only" }, "Import")), fold));
     player.prevClip = prevClip;
     player.nextClip = nextClip;
@@ -4437,16 +4596,106 @@ function showImport(tracks, id, meetingStart) {
 /// The menu on an imported track's name.
 /// The button beside a track's M that lifts it for playback: louder, and evened out so it can go louder
 /// without distorting. It changes what you hear, not the transcript, and is kept with the meeting.
+/// Spans [start, end] sorted, with overlapping ones joined.
+function spanMerge(spans) {
+  const out = [];
+  for (const [a, b] of spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])) {
+    const last = out.at(-1);
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else out.push([a, b]);
+  }
+  return out;
+}
+
+/// `spans` with `holes` taken out of them.
+function spanMinus(spans, holes) {
+  const out = [];
+  for (const [a, b] of spans) {
+    let from = a;
+    for (const [h0, h1] of holes.filter(([h0, h1]) => h1 > a && h0 < b)) {
+      if (h0 > from) out.push([from, h0]);
+      from = Math.max(from, h1);
+    }
+    if (from < b) out.push([from, b]);
+  }
+  return out;
+}
+
+/// A track's hand edits to the mix with [a, b] played (or muted) over whatever was set there before;
+/// touching edits of the same kind join up.
+function addMixEdit(edits, a, b, play) {
+  const r = (x) => Math.round(x * 1000) / 1000;
+  const trimmed = edits.flatMap((e) => spanMinus([[e.from_s, e.to_s]], [[a, b]]).map(([f, t]) => ({ from_s: f, to_s: t, play: e.play })));
+  const all = [...trimmed, { from_s: a, to_s: b, play }].filter((e) => e.to_s - e.from_s > 0.005).sort((x, y) => x.from_s - y.from_s);
+  const out = [];
+  for (const e of all) {
+    const last = out.at(-1);
+    if (last && last.play === e.play && e.from_s - last.to_s < 0.005) last.to_s = Math.max(last.to_s, e.to_s);
+    else out.push({ ...e });
+  }
+  return out.map((e) => ({ from_s: r(e.from_s), to_s: r(e.to_s), play: e.play }));
+}
+
+/// A menu at the pointer, as from a right-click: `items` as for menuButton.
+function contextMenu(x, y, items) {
+  document.querySelector(".ctx-menu")?.remove();
+  const menu = el("div", { class: "menu", role: "menu" });
+  const wrap = el("div", { class: "export-menu ctx-menu" }, menu);
+  const close = () => {
+    wrap.remove();
+    document.removeEventListener("pointerdown", outside, true);
+    document.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("blur", close);
+  };
+  const outside = (e) => { if (!wrap.contains(e.target)) close(); };
+  const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+  for (const c of items) {
+    if (typeof c === "string") { menu.append(el("div", { class: "menu-label" }, c)); continue; }
+    const [text, detail, run] = c;
+    const item = el("button", { type: "button", role: "menuitem" }, el("strong", {}, text), detail ? el("small", {}, detail) : null);
+    item.addEventListener("click", (e) => { e.stopPropagation(); close(); run(); });
+    menu.append(item);
+  }
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  document.body.append(wrap);
+  const w = menu.offsetWidth;
+  const h = menu.offsetHeight;
+  Object.assign(menu.style, {
+    position: "fixed",
+    left: `${Math.max(8, Math.min(x, window.innerWidth - w - 8))}px`,
+    top: `${Math.max(8, y + h + 8 > window.innerHeight ? y - h : y)}px`,
+    right: "auto",
+  });
+  document.addEventListener("pointerdown", outside, true);
+  document.addEventListener("keydown", onKey, true);
+  window.addEventListener("blur", close);
+  menu.querySelector("button")?.focus();
+}
+
+const FLAT_LEVEL = { boost_db: 0, compress: false, low_cut_hz: 0, high_cut_hz: 0 };
+const isFlat = (l) => !l.boost_db && !l.compress && !l.low_cut_hz && !l.high_cut_hz;
+/// The stops on the cut sliders: none first, then cutting more as it moves right.
+const LOW_CUTS = [0, 40, 60, 80, 100, 150, 200, 300, 400, 500];
+const HIGH_CUTS = [0, 7000, 6000, 5000, 4000, 3000, 2500, 2000, 1500, 1000];
+const hzText = (hz) => (!hz ? "Off" : hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`);
+const nearestStop = (stops, hz) => stops.reduce((best, x, k) => (Math.abs(x - hz) < Math.abs(stops[best] - hz) ? k : best), 0);
+
 function levelButton(id, stream, name, saved) {
-  let level = { boost_db: 0, compress: false, ...saved };
+  let level = { ...FLAT_LEVEL, ...saved };
   const button = el("button", { class: "boost", type: "button", "aria-haspopup": "dialog" });
   const draw = () => {
-    const on = level.boost_db > 0 || level.compress;
+    const on = !isFlat(level);
     button.classList.toggle("on", on);
     button.textContent = level.boost_db > 0 ? `+${level.boost_db % 1 ? level.boost_db.toFixed(1) : level.boost_db}` : "dB";
-    if (level.compress) button.append(el("span", { class: "boost-c", "aria-hidden": "true" }));
-    const what = on ? `Lifted ${level.boost_db > 0 ? `${level.boost_db} dB` : ""}${level.boost_db > 0 && level.compress ? ", " : ""}${level.compress ? "compressed" : ""}` : "Not lifted";
-    button.title = `${what}. Click to make ${name} louder when it plays.`;
+    if (level.compress || level.low_cut_hz || level.high_cut_hz) button.append(el("span", { class: "boost-c", "aria-hidden": "true" }));
+    const parts = [
+      level.boost_db > 0 ? `lifted ${level.boost_db} dB` : "",
+      level.compress ? "compressed" : "",
+      level.low_cut_hz ? `bass cut below ${hzText(level.low_cut_hz)}` : "",
+      level.high_cut_hz ? `top cut above ${hzText(level.high_cut_hz)}` : "",
+    ].filter(Boolean);
+    const what = parts.length ? parts.join(", ").replace(/^./, (c) => c.toUpperCase()) : "As recorded";
+    button.title = `${what}. Click to change how ${name} sounds when it plays.`;
     button.setAttribute("aria-label", `Volume of ${name}: ${what}`);
   };
   draw();
@@ -4456,7 +4705,8 @@ function levelButton(id, stream, name, saved) {
     player?.setLevel(stream, { ...level });
     // Kept with the meeting once the slider rests.
     clearTimeout(saving);
-    saving = setTimeout(() => invoke("set_track_level", { id, name: stream, boostDb: level.boost_db, compress: level.compress }).catch(() => {}), 400);
+    saving = setTimeout(() => invoke("set_track_level", { id, name: stream, boostDb: level.boost_db, compress: level.compress,
+      lowCutHz: level.low_cut_hz, highCutHz: level.high_cut_hz }).catch(() => {}), 400);
   };
   button.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -4469,13 +4719,31 @@ function levelButton(id, stream, name, saved) {
     showValue();
     slider.addEventListener("input", () => { level.boost_db = Number(slider.value); showValue(); apply(); });
     compress.addEventListener("change", () => { level.compress = compress.checked; apply(); });
+    const cutRow = (label, stops, key, hint) => {
+      const out = el("span", { class: "mono" });
+      const range = el("input", { type: "range", min: "0", max: String(stops.length - 1), step: "1", value: String(nearestStop(stops, level[key])),
+        "aria-label": `${label} for ${name}` });
+      const show = () => { out.textContent = hzText(stops[Number(range.value)]); range.setAttribute("aria-valuetext", out.textContent); };
+      show();
+      range.addEventListener("input", () => { level[key] = stops[Number(range.value)]; show(); apply(); });
+      const row = el("label", { class: "boost-row", title: hint }, el("span", {}, label), range, out);
+      row.set = () => { range.value = String(nearestStop(stops, level[key])); show(); };
+      return row;
+    };
+    const lowRow = cutRow("Bass cut", LOW_CUTS, "low_cut_hz", "Cuts the bottom end: rumble, hum, traffic, a desk being knocked. Further right cuts more.");
+    const highRow = cutRow("Top cut", HIGH_CUTS, "high_cut_hz", "Cuts the top end: hiss and harshness. Further right cuts more, and voices get duller.");
     const reset = el("button", { class: "pill", type: "button" }, "Reset");
-    reset.addEventListener("click", () => { slider.value = "0"; compress.checked = false; level = { boost_db: 0, compress: false }; showValue(); apply(); });
+    reset.addEventListener("click", () => {
+      level = { ...FLAT_LEVEL };
+      slider.value = "0"; compress.checked = false; lowRow.set(); highRow.set();
+      showValue(); apply();
+    });
     const pop = el("div", { class: "boost-pop", role: "dialog", "aria-label": `Volume of ${name}` },
       el("strong", {}, name),
       el("label", { class: "boost-row" }, el("span", {}, "Lift"), slider, value),
       el("label", { class: "field check" }, compress, el("span", {}, "Compress",
         el("small", {}, "Brings quiet and loud parts closer together and holds back the peaks, so it can be lifted further without distorting."))),
+      lowRow, highRow,
       el("div", { class: "boost-foot" }, el("span", { class: "hint" }, "Only what you hear; the transcript stays as it is."), reset));
     pop.addEventListener("click", (ev) => ev.stopPropagation());
     pop.addEventListener("pointerdown", (ev) => ev.stopPropagation());

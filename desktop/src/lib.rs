@@ -1224,16 +1224,46 @@ fn save_prefs(
     .map(|_| ())
 }
 
-/// Lifts a track for playback: `boost_db` louder (0 to 24), and with `compress` evened out and its peaks
-/// held back, so it can be lifted further without distorting. Nothing changes in the transcript.
+/// Lifts a track for playback: `boost_db` louder (0 to 24), with `compress` evened out and its peaks held
+/// back, so it can be lifted further without distorting, and its bottom or top end cut (0 for none).
+/// Nothing changes in the transcript.
 #[tauri::command]
-fn set_track_level(state: State<AppState>, id: String, name: String, boost_db: f64, compress: bool) -> Result<(), String> {
+fn set_track_level(
+    state: State<AppState>,
+    id: String,
+    name: String,
+    boost_db: f64,
+    compress: bool,
+    low_cut_hz: Option<f64>,
+    high_cut_hz: Option<f64>,
+) -> Result<(), String> {
     let boost_db = (boost_db.clamp(0.0, library::MAX_BOOST_DB) * 2.0).round() / 2.0;
+    let hz = |x: Option<f64>| x.filter(|x| x.is_finite() && *x > 0.0).map(|x| x.clamp(20.0, 20_000.0).round()).unwrap_or(0.0);
+    let level = library::TrackLevel { boost_db, compress, low_cut_hz: hz(low_cut_hz), high_cut_hz: hz(high_cut_hz) };
     edit_session(&state, &id, |meta, _| {
-        if boost_db == 0.0 && !compress {
+        if level == library::TrackLevel::default() {
             meta.track_levels.remove(&name);
         } else {
-            meta.track_levels.insert(name.clone(), library::TrackLevel { boost_db, compress });
+            meta.track_levels.insert(name.clone(), level);
+        }
+        Ok(())
+    })
+}
+
+/// Sets where a track is played or muted by hand in the transcript mix, replacing what was set before.
+#[tauri::command]
+fn set_mix_edits(state: State<AppState>, id: String, name: String, edits: Vec<library::MixEdit>) -> Result<(), String> {
+    let mut edits: Vec<library::MixEdit> = edits
+        .into_iter()
+        .filter(|e| e.from_s.is_finite() && e.to_s.is_finite() && e.to_s - e.from_s > 0.005)
+        .map(|e| library::MixEdit { from_s: e.from_s.max(0.0), ..e })
+        .collect();
+    edits.sort_by(|a, b| a.from_s.total_cmp(&b.from_s));
+    edit_session(&state, &id, |meta, _| {
+        if edits.is_empty() {
+            meta.mix_edits.remove(&name);
+        } else {
+            meta.mix_edits.insert(name.clone(), edits);
         }
         Ok(())
     })
@@ -3104,7 +3134,7 @@ fn remove_track(state: State<AppState>, id: String, name: String) -> Result<(), 
     if imports::load(&dir).iter().any(|i| i.name == name) {
         imports::remove(&dir, &name)?;
         let mut meta = library::load_meta(&dir);
-        if meta.track_levels.remove(&name).is_some() {
+        if meta.track_levels.remove(&name).is_some() | meta.mix_edits.remove(&name).is_some() {
             library::write_json(&dir.join(library::META), &meta)?;
         }
         return Ok(());
@@ -3316,6 +3346,7 @@ pub fn run() {
             open_models_folder,
             save_markers,
             set_track_level,
+            set_mix_edits,
             edit_marker,
             label_action_item,
             keep_segment,

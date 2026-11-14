@@ -15,7 +15,7 @@
 //! its words from another microphone.
 
 use crate::keyphrases;
-use crate::library::{self, Marker, Meta, Segment};
+use crate::library::{self, Marker, Meta, MixEdit, Segment};
 use crate::notes;
 use std::fmt::Write as _;
 use std::fs;
@@ -139,8 +139,16 @@ fn minus(spans: &[(f64, f64)], holes: &[(f64, f64)]) -> Vec<(f64, f64)> {
 }
 
 /// Where a track is muted in the transcript mix: greyed out there (a doubled-up clip, or a line the script
-/// takes from another microphone that this one heard too), and not one of the script's own clips.
-pub fn quiet_spans(segments: &[Segment], stream: &str) -> Vec<(f64, f64)> {
+/// takes from another microphone that this one heard too), and not one of the script's own clips; then as
+/// the person played or muted it by hand.
+pub fn quiet_spans(segments: &[Segment], stream: &str, edits: &[MixEdit]) -> Vec<(f64, f64)> {
+    let plays: Vec<(f64, f64)> = edits.iter().filter(|e| e.play).map(|e| (e.from_s, e.to_s)).collect();
+    let mut quiet = minus(&transcript_quiet(segments, stream), &merged(plays));
+    quiet.extend(edits.iter().filter(|e| !e.play).map(|e| (e.from_s, e.to_s)));
+    merged(quiet)
+}
+
+fn transcript_quiet(segments: &[Segment], stream: &str) -> Vec<(f64, f64)> {
     let greyed: Vec<(f64, f64)> = segments
         .iter()
         .flat_map(|s| {
@@ -157,9 +165,13 @@ pub fn quiet_spans(segments: &[Segment], stream: &str) -> Vec<(f64, f64)> {
     minus(&merged(greyed), &merged(used))
 }
 
+fn edits_of<'a>(meta: &'a Meta, stream: &str) -> &'a [MixEdit] {
+    meta.mix_edits.get(stream).map(Vec::as_slice).unwrap_or(&[])
+}
+
 /// Where a track plays in the transcript mix, over the whole meeting.
-pub fn playing_spans(segments: &[Segment], stream: &str, duration_s: f64) -> Vec<(f64, f64)> {
-    minus(&[(0.0, duration_s)], &quiet_spans(segments, stream))
+pub fn playing_spans(segments: &[Segment], stream: &str, edits: &[MixEdit], duration_s: f64) -> Vec<(f64, f64)> {
+    minus(&[(0.0, duration_s)], &quiet_spans(segments, stream, edits))
 }
 
 /// The tracks summed, each muted where the transcript mix mutes it, with short fades at each mute.
@@ -409,12 +421,12 @@ pub fn export_meeting(m: &MeetingExport, format: &str) -> Result<PathBuf, String
         }
         used_names.push(file.clone());
         fs::copy(m.dir.join(format!("{stream}.wav")), audio.join(&file)).map_err(|e| e.to_string())?;
-        let quiet = quiet_spans(m.segments, stream);
+        let quiet = quiet_spans(m.segments, stream, edits_of(m.meta, stream));
         tracks.push(PackageTrack { stream: stream.clone(), name, file, playing: Vec::new() });
         pcm_tracks.push((pcm, quiet));
     }
     for t in &mut tracks {
-        t.playing = playing_spans(m.segments, &t.stream, duration_s);
+        t.playing = playing_spans(m.segments, &t.stream, edits_of(m.meta, &t.stream), duration_s);
     }
     let mix_file = "Transcript mix.wav";
     export::write_wav(&audio.join(mix_file), &render_mix(&pcm_tracks, rate), rate).map_err(|e| e.to_string())?;
@@ -554,9 +566,12 @@ mod tests {
 
     #[test]
     fn each_track_is_quiet_where_another_has_the_words() {
-        assert_eq!(quiet_spans(&meeting(), "input2"), [(1.0, 5.0)]);
-        assert_eq!(quiet_spans(&meeting(), "input1"), [(6.5, 7.0)]);
-        assert_eq!(playing_spans(&meeting(), "input1", 10.0), [(0.0, 6.5), (7.0, 10.0)]);
+        assert_eq!(quiet_spans(&meeting(), "input2", &[]), [(1.0, 5.0)]);
+        assert_eq!(quiet_spans(&meeting(), "input1", &[]), [(6.5, 7.0)]);
+        assert_eq!(playing_spans(&meeting(), "input1", &[], 10.0), [(0.0, 6.5), (7.0, 10.0)]);
+        // Played by hand from 4 s, as a word's start was cut off; and a cough muted at 8 s.
+        let edits = [MixEdit { from_s: 4.0, to_s: 5.0, play: true }, MixEdit { from_s: 8.0, to_s: 8.5, play: false }];
+        assert_eq!(quiet_spans(&meeting(), "input2", &edits), [(1.0, 4.0), (8.0, 8.5)]);
     }
 
     #[test]
