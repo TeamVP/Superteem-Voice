@@ -692,53 +692,7 @@
       ]
     }
   ],
-  "media": [
-    {
-      "path": "media/cover.jpg",
-      "alt": "The cover: Plutarch's Lives, translated by John Dryden, revised by Arthur Hugh Clough",
-      "caption": "",
-      "credit": "Made for this edition by Superteem",
-      "licence": "CC0-1.0",
-      "source": "",
-      "used_in": [
-        "book"
-      ]
-    },
-    {
-      "path": "media/timelines/plutarchs-world.png",
-      "alt": "Timeline from 540 BC to AD 140: Themistocles born about 524 BC, Salamis 480 BC, Caesar born 100 BC, Augustus 27 BC, Plutarch born about AD 46 and writing about AD 100",
-      "caption": "Themistocles, Caesar and Plutarch on one line: Plutarch is as far from Themistocles as we are from the first printed books",
-      "credit": "Made for this edition by Superteem",
-      "licence": "CC0-1.0",
-      "source": "",
-      "used_in": [
-        "plutarch-04-01-themistocles",
-        "plutarch-17-02-caesar"
-      ]
-    },
-    {
-      "path": "media/timelines/themistocles.png",
-      "alt": "Timeline of Themistocles: born about 524 BC, archon 493, Marathon 490, the fleet built 483, Salamis 480, Plataea 479, ostracised about 471, died about 459 BC",
-      "caption": "The life of Themistocles",
-      "credit": "Made for this edition by Superteem",
-      "licence": "CC0-1.0",
-      "source": "",
-      "used_in": [
-        "plutarch-04-01-themistocles"
-      ]
-    },
-    {
-      "path": "media/timelines/caesar.png",
-      "alt": "Timeline of Julius Caesar: born 100 BC, taken by pirates about 75, chief priest 63, consul 59, Gaul from 58, the Rubicon 49, Pharsalus 48, the calendar reformed 46, killed 44 BC",
-      "caption": "The life of Julius Caesar",
-      "credit": "Made for this edition by Superteem",
-      "licence": "CC0-1.0",
-      "source": "",
-      "used_in": [
-        "plutarch-17-02-caesar"
-      ]
-    }
-  ],
+  "media": "media/media.json",
   "files": [
     {
       "path": "chapters/00-preface/text.md",
@@ -1124,6 +1078,11 @@
       "path": "media/cover.jpg",
       "bytes": 86285,
       "sha256": "3ea848615d48dbf82a5649f85237d8c677e32b090d0e686dc76372f87006de6c"
+    },
+    {
+      "path": "media/media.json",
+      "bytes": 5541,
+      "sha256": "342644ab5bbe047b36f59a8996f0766f8d5344378239820872b9edffc20d3fb2"
     },
     {
       "path": "media/timelines/caesar.png",
