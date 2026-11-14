@@ -1462,6 +1462,40 @@ fn book_file_problems(id: String) -> Result<Vec<String>, String> {
     books::file_problems(&id)
 }
 
+/// Every bookmark in a book, by chapter.
+#[tauri::command]
+fn book_bookmarks(id: String) -> Result<std::collections::BTreeMap<String, Vec<notes::Bookmark>>, String> {
+    books::bookmarks(&id)
+}
+
+/// Writes a book's bookmarks to a file in the exports folder, the person's own under `author`; gives its path.
+#[tauri::command]
+async fn export_book_bookmarks(id: String, author: String) -> Result<String, String> {
+    blocking(move || exports::export_book_bookmarks(&id, &author).map(|p| p.to_string_lossy().into_owned())).await?
+}
+
+/// Takes in someone's bookmarks for a book; `author` names any that don't say who made them.
+#[tauri::command]
+fn import_book_bookmarks(id: String, file: books::BookmarkFile, author: String) -> Result<books::BookmarkImport, String> {
+    books::import_bookmarks(&id, file, &author)
+}
+
+/// Deletes every bookmark in a book that `author` made.
+#[tauri::command]
+fn remove_book_bookmarks_by(id: String, author: String) -> Result<usize, String> {
+    books::remove_bookmarks_by(&id, &author)
+}
+
+#[tauri::command]
+fn book_bookmark_view(id: String) -> books::BookmarkView {
+    books::bookmark_view(&id)
+}
+
+#[tauri::command]
+fn set_book_bookmark_view(id: String, view: books::BookmarkView) -> Result<(), String> {
+    books::set_bookmark_view(&id, view)
+}
+
 /// Where reading aloud last stopped in a book, or null.
 #[tauri::command]
 fn book_listen_place(id: String) -> Option<books::ListenPlace> {
@@ -3239,6 +3273,12 @@ pub fn run() {
             set_note_extras,
             set_book_details,
             open_external,
+            book_bookmarks,
+            export_book_bookmarks,
+            import_book_bookmarks,
+            remove_book_bookmarks_by,
+            book_bookmark_view,
+            set_book_bookmark_view,
             book_file_problems,
             set_book_listen_place,
             search_book,

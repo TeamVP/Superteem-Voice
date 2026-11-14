@@ -345,6 +345,9 @@ pub struct Bookmark {
     /// "c01" to "c15", or empty for no colour.
     pub color: String,
     pub created: u64,
+    /// Who made it, when someone else did and it came in an import; empty for the person's own.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub author: String,
 }
 
 /// The most bookmarks a note keeps, and the longest a label or quote is kept.
@@ -371,6 +374,7 @@ pub fn save_bookmarks(id: &str, mut marks: Vec<Bookmark>) -> Result<(), String> 
     };
     for m in &mut marks {
         clip(&mut m.label, MAX_LABEL);
+        m.author = clean_line(&m.author, 80);
         clip(&mut m.quote, MAX_QUOTE);
         clip(&mut m.prefix, 64);
         clip(&mut m.suffix, 64);

@@ -1627,6 +1627,31 @@ dialog.sheet.leave-dialog { max-width: 480px; }
 .leave-url { margin: 0 0 12px; padding: 6px 10px; border-radius: 8px; background: var(--raised); font: 13px ui-monospace, "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; user-select: all; }
 .leave-actions { flex-wrap: wrap; gap: 8px; align-items: center; }
 
+/* All a book's bookmarks: which show, by colour and maker; export; import. */
+dialog.sheet.bm-book-dialog { max-width: 560px; }
+.bm-book-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bm-book-head h2 { margin: 0; }
+.bm-book-section { padding: 12px 0; border-top: 1px solid var(--line); }
+.bm-book-section:first-child { border-top: none; }
+.bm-book-section h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.bm-book-section .hint { margin: 0 0 10px; }
+.bm-book-section .field input { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
+.bm-chip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
+.bm-chip-label { width: 100%; font-size: 13px; color: var(--soft); }
+.bm-chip-pair { display: inline-flex; align-items: center; }
+.bm-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 0; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; text-decoration: line-through; }
+.bm-chip.on { background: var(--raised); color: var(--text); border-color: color-mix(in srgb, var(--key) 45%, var(--line)); text-decoration: none; }
+.bm-chip small { color: var(--muted); font-size: 11px; }
+.bm-chip-swatch { width: 12px; height: 12px; border-radius: 50%; background: var(--bm); flex: none; }
+.bm-chip-swatch.none { background: transparent; border: 1.5px solid var(--muted); }
+.bm-chip:not(.on) .bm-chip-swatch { opacity: 0.4; }
+.bm-chip-remove { margin-left: 2px; color: var(--muted); }
+.bm-chip-remove.armed { color: var(--danger, #b85c5c); }
+.bm-import-preview { margin-top: 10px; }
+.bm-import-preview p { margin: 0 0 6px; }
+.bm-book-status { margin: 8px 0 0; overflow-wrap: anywhere; }
+.bm-pop-label small { display: block; }
+
 /* Above a book's contents: where reading aloud last stopped, to carry on from. */
 .listen-resume { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
 .listen-resume[hidden] { display: none; }

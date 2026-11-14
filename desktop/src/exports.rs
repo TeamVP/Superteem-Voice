@@ -508,6 +508,15 @@ pub fn export_translation(item: &crate::analysis::Item, language: &str, format: 
 }
 
 /// Shows an exported file or folder in File Explorer or Finder.
+/// A book's bookmarks as a file in the exports folder, to give someone: "<book> - bookmarks.json".
+pub fn export_book_bookmarks(id: &str, author: &str) -> Result<PathBuf, String> {
+    let file = crate::books::bookmark_file(id, author)?;
+    fs::create_dir_all(dir()).map_err(|e| e.to_string())?;
+    let path = fresh(&format!("{} - bookmarks", file_name(&file.title)), "json");
+    write(&path, &serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?)?;
+    Ok(path)
+}
+
 pub fn reveal(path: &Path) -> Result<(), String> {
     if !path.starts_with(dir()) {
         return Err("Only exports can be shown.".into());

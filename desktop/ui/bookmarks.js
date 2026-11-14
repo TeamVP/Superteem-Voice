@@ -227,15 +227,16 @@ const modKey = () => (platform === "macos" ? "⌘" : "Ctrl+");
 /// over. `noteId()` is the note's id, or null before it is saved; `ensureNote()` saves it and gives its id.
 /// `onRead(text, { toEnd, from })` reads text aloud, `from` being where in the text it begins. `onVoice()`,
 /// for a book with its own voice, changes which voice reads it. `listen`, in a book: { read(from), forget() },
-/// for the place reading aloud stopped, which setListen shows.
+/// for the place reading aloud stopped, which setListen shows. `isShown(mark)` says whether a bookmark is
+/// drawn, as a book's choice of colours and makers to show has it (see bookmarkFilter).
 /// Returns { create, reading, readingText, reload, redraw, setListen, listenFrom, textFrom }.
-function attachBookmarks({ surface, holder, noteId, ensureNote = async () => noteId(), onRead, onVoice, listen }) {
+function attachBookmarks({ surface, holder, noteId, ensureNote = async () => noteId(), onRead, onVoice, listen, isShown = () => true }) {
   const layer = el("div", { class: "bm-layer", "aria-hidden": "false" });
   holder.classList.add("bm-holder");
   surface.root.classList.add("bm-root");
   holder.append(layer);
 
-  let marks = [];         // { id, from, to, label, color, created }
+  let marks = [];         // { id, from, to, label, color, created, author }
   let shown = null;       // the id of the bookmark whose words and label are showing
   let point = null;       // where the person last clicked in the text, for reading aloud from there
   let loadedFor = null;
@@ -244,7 +245,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
   // ----- Keeping them
 
   const anchorOf = (m, text) => ({
-    id: m.id, label: m.label, color: m.color, created: m.created,
+    id: m.id, label: m.label, color: m.color, created: m.created, author: m.author ?? "",
     at: m.from,
     quote: text.slice(m.from, m.to),
     prefix: text.slice(Math.max(0, m.from - BOOKMARK_CONTEXT), m.from),
@@ -266,7 +267,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     const text = surface.text();
     marks = kept.map((a) => {
       const { from, to } = findBookmark(text, a);
-      return { id: a.id, label: a.label ?? "", color: a.color ?? "", created: a.created ?? 0, from, to };
+      return { id: a.id, label: a.label ?? "", color: a.color ?? "", created: a.created ?? 0, author: a.author ?? "", from, to };
     }).sort((x, y) => x.from - y.from);
     redraw();
   };
@@ -317,7 +318,8 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     const x = root.right - pad - base.left + (pad >= 22 ? 2 : 8);
     const size = 22;
     let below = -Infinity;
-    const all = listened ? [...marks, { id: LISTEN_ID, from: listened.from, to: listened.from, listen: true }].sort((p, q) => p.from - q.from) : marks;
+    const seen = marks.filter((m) => isShown(m));
+    const all = listened ? [...seen, { id: LISTEN_ID, from: listened.from, to: listened.from, listen: true }].sort((p, q) => p.from - q.from) : seen;
     for (const m of all) {
       const rects = rectsOf(m);
       if (!rects.length) continue;
@@ -371,7 +373,8 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
         layer.append(el("div", { class: "bm-point", style: `left:${first.left - base.left - 1}px;top:${first.top - base.top}px;height:${first.height}px;--bm:${tint}` }));
       }
       const pop = el("div", { class: "bm-pop", role: "dialog", "aria-label": "Bookmark", style: `right:${base.width - x + 6}px;top:${top - 4}px` },
-        m.label ? el("div", { class: "bm-pop-label" }, m.label) : el("div", { class: "bm-pop-label none" }, "No label"),
+        m.label ? el("div", { class: "bm-pop-label" }, m.label, m.author ? el("small", {}, `by ${m.author}`) : null)
+          : el("div", { class: "bm-pop-label none" }, m.author ? `No label · by ${m.author}` : "No label"),
         el("div", { class: "bm-pop-actions" },
           el("button", { class: "icon-only", type: "button", title: "Read aloud from here", "aria-label": "Read aloud from here", onclick: () => { show(null); onRead?.(textFrom(m.from, m.to), { toEnd: m.to <= m.from, from: m.to > m.from ? m.from : wordStart(m.from) }); } }, svg("speak", 16)),
           el("button", { class: "icon-only", type: "button", title: "Edit or delete the bookmark", "aria-label": "Edit bookmark", onclick: () => edit(m) }, svg("pen", 16))));
@@ -417,7 +420,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     // Spaces at either end of what was selected aren't part of it.
     while (to > from && /\s/.test(text[to - 1])) to--;
     while (from < to && /\s/.test(text[from])) from++;
-    const fresh = { id: `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, from, to, label: "", color: "", created: Math.floor(Date.now() / 1000) };
+    const fresh = { id: `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, from, to, label: "", color: "", author: "", created: Math.floor(Date.now() / 1000) };
     const result = await bookmarkDialog(fresh, text.slice(from, to), true);
     if (!result) return;
     try {
@@ -431,6 +434,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     marks.sort((x, y) => x.from - y.from);
     save();
     show(fresh.id);
+    if (!isShown({ ...fresh, ...result })) micToast("Added, but bookmarks like it are hidden. Hold the Bookmark button to show them.");
   }
 
   async function edit(m) {
@@ -662,4 +666,204 @@ function bookmarkDialog(m, quote, fresh) {
     label.focus();
     label.select();
   });
+}
+
+// ----- A book's bookmarks, all at once
+
+/// Runs `open` when `button` is held down for half a second, or right-clicked, instead of its click.
+function onHold(button, open) {
+  let held = false;
+  let timer = null;
+  button.addEventListener("pointerdown", (e) => {
+    held = false;
+    clearTimeout(timer);
+    if (e.button === 0) timer = setTimeout(() => { held = true; open(); }, 500);
+  });
+  for (const type of ["pointerup", "pointerleave", "pointercancel"]) button.addEventListener(type, () => clearTimeout(timer));
+  button.addEventListener("contextmenu", (e) => { e.preventDefault(); clearTimeout(timer); if (!held) open(); });
+  // The click that ends a hold isn't a press.
+  button.addEventListener("click", (e) => { if (held) { held = false; e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+}
+
+/// Which of a book's bookmarks are shown, by colour and by who made them: { view, isShown(mark), load(), set(view) }.
+/// `isShown` can be given to attachBookmarks before the choice has loaded; everything shows until it has.
+function bookmarkFilter(bookId) {
+  const f = {
+    view: { hidden_colours: [], hidden_authors: [] },
+    isShown: (m) => !f.view.hidden_colours.includes(m.color ?? "") && !f.view.hidden_authors.includes(m.author ?? ""),
+    async load() { f.view = await invoke("book_bookmark_view", { id: bookId }).catch(() => f.view); return f.view; },
+    async set(view) {
+      f.view = view;
+      await invoke("set_book_bookmark_view", { id: bookId, view }).catch((e) => micToast(`Not kept: ${e}`));
+    },
+  };
+  return f;
+}
+
+/// The name a person's own bookmarks go out under, remembered on this device.
+const bookmarkAuthor = {
+  get() { try { return localStorage.getItem("bookmark-author") ?? ""; } catch { return ""; } },
+  set(name) { try { localStorage.setItem("bookmark-author", name); } catch {} },
+};
+
+/// All the bookmarks in a book, opened by holding the Bookmark button: show or hide them by colour and by
+/// who made them, export them all to give to someone, import someone's, and delete an import. `filter` is the
+/// book's bookmarkFilter; `onChange("view")` after the choice of what shows changes, `onChange("marks")` after
+/// bookmarks were imported or deleted.
+async function bookBookmarksDialog(book, filter, onChange) {
+  const plural = (n, one, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+  const were = (n, rest) => `${n.toLocaleString()} ${n === 1 ? "was" : "were"} ${rest}`;
+  const title = book.title || "this book";
+  const dialog = el("dialog", { class: "sheet bm-book-dialog", "aria-label": `Bookmarks in ${title}` });
+  const body = el("div", { class: "bm-book-body" });
+  const status = el("p", { class: "hint bm-book-status", "aria-live": "polite" });
+  dialog.append(el("div", { class: "bm-book-head" }, el("h2", {}, `Bookmarks in ${title}`),
+    el("button", { class: "icon-only", type: "button", title: "Close", "aria-label": "Close", onclick: () => dialog.close() }, svg("close", 16))),
+    body, status);
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+
+  const say = (...parts) => status.replaceChildren(...parts);
+
+  async function draw() {
+    const [byNote] = await Promise.all([invoke("book_bookmarks", { id: book.id }).catch(() => ({})), filter.load()]);
+    const all = Object.values(byNote).flat();
+    const chapters = Object.keys(byNote).length;
+    const count = (key, value) => all.filter((m) => (m[key] ?? "") === value).length;
+    const colours = [...new Set(all.map((m) => m.color ?? ""))].sort((a, b) => (a || "z").localeCompare(b || "z"));
+    const authors = [...new Set(all.map((m) => m.author ?? ""))].sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
+    const view = filter.view;
+    const hiddenCount = all.filter((m) => !filter.isShown(m)).length;
+
+    const toggle = async (list, value) => {
+      const next = { ...view, [list]: view[list].includes(value) ? view[list].filter((v) => v !== value) : [...view[list], value] };
+      await filter.set(next);
+      onChange?.("view");
+      draw();
+    };
+    const chip = (on, label, n, list, value, swatch) => el("button", {
+      class: "bm-chip" + (on ? " on" : ""), type: "button", "aria-pressed": String(on),
+      title: on ? `Showing. Press to hide ${label.toLowerCase()} bookmarks.` : `Hidden. Press to show ${label.toLowerCase()} bookmarks.`,
+      onclick: () => toggle(list, value),
+    }, swatch ?? null, el("span", {}, label), el("small", {}, String(n)));
+
+    const showing = el("section", { class: "bm-book-section" },
+      el("h3", {}, "Show"),
+      all.length ? el("p", { class: "hint" }, `${plural(all.length, "bookmark")} in ${plural(chapters, "chapter")}.`
+        + (hiddenCount ? ` ${hiddenCount.toLocaleString()} ${hiddenCount === 1 ? "is" : "are"} hidden.` : " All are showing."))
+        : el("p", { class: "hint" }, "No bookmarks in this book yet. Select some words or click in the text, then press Bookmark."),
+      colours.length ? el("div", { class: "bm-chip-row", role: "group", "aria-label": "By colour" },
+        el("span", { class: "bm-chip-label" }, "By colour"),
+        ...colours.map((c) => {
+          const name = BOOKMARK_COLOURS.find(([k]) => k === c)?.[2] ?? "No colour";
+          const hex = bookmarkColour(c);
+          return chip(!view.hidden_colours.includes(c), name, count("color", c), "hidden_colours", c,
+            el("span", { class: "bm-chip-swatch" + (hex ? "" : " none"), style: hex ? `--bm:${hex}` : "" }));
+        })) : null,
+      authors.length ? el("div", { class: "bm-chip-row", role: "group", "aria-label": "By who made them" },
+        el("span", { class: "bm-chip-label" }, "By who made them"),
+        ...authors.map((a) => {
+          const row = el("span", { class: "bm-chip-pair" }, chip(!view.hidden_authors.includes(a), a || "You", count("author", a), "hidden_authors", a));
+          if (a) {
+            const remove = el("button", { class: "icon-only bm-chip-remove", type: "button", title: `Delete ${a}'s bookmarks`, "aria-label": `Delete ${a}'s bookmarks` }, svg("trash", 14));
+            remove.addEventListener("click", async () => {
+              if (!remove.dataset.armed) {
+                remove.dataset.armed = "1";
+                remove.classList.add("armed");
+                say(`Press the bin again to delete all ${plural(count("author", a), "bookmark")} by ${a}. They can be imported again from their file.`);
+                setTimeout(() => { delete remove.dataset.armed; remove.classList.remove("armed"); }, 4000);
+                return;
+              }
+              try {
+                const n = await invoke("remove_book_bookmarks_by", { id: book.id, author: a });
+                say(`Deleted ${plural(n, "bookmark")} by ${a}.`);
+                onChange?.("marks");
+                draw();
+              } catch (e) { say(el("span", { class: "danger" }, String(e))); }
+            });
+            row.append(remove);
+          }
+          return row;
+        })) : null,
+      hiddenCount ? el("button", { class: "link", type: "button", onclick: async () => {
+        await filter.set({ hidden_colours: [], hidden_authors: [] });
+        onChange?.("view");
+        draw();
+      } }, "Show them all") : null);
+
+    // Export: every bookmark in the book, the person's own under the name they give.
+    const name = el("input", { type: "text", value: bookmarkAuthor.get(), placeholder: "Your name", maxlength: "80", "aria-label": "Your name, as others will see it" });
+    const exportButton = el("button", { class: "pill with-icon", type: "button", disabled: !all.length }, svg("export", 14), all.length ? `Export all ${plural(all.length, "bookmark")}` : "Export");
+    exportButton.addEventListener("click", async () => {
+      const who = name.value.trim();
+      if (!who && authors.includes("")) { name.focus(); return say("Add your name first, so people who import them know whose they are."); }
+      bookmarkAuthor.set(who);
+      exportButton.disabled = true;
+      try {
+        const path = await invoke("export_book_bookmarks", { id: book.id, author: who });
+        say(`Saved to ${path}. `, el("button", { class: "link inline", type: "button", onclick: () => invoke("reveal_export", { path }).catch((e) => say(String(e))) }, "Show in folder"));
+      } catch (e) {
+        say(el("span", { class: "danger" }, String(e)));
+      }
+      exportButton.disabled = false;
+    });
+    const exporting = el("section", { class: "bm-book-section" },
+      el("h3", {}, "Give them to someone"),
+      el("p", { class: "hint" }, "Saves every bookmark in the book to one file. Anyone with the book can import it."),
+      el("label", { class: "field" }, "Your name, as others will see it", name),
+      exportButton);
+
+    // Import: a file someone gave, previewed before anything is added.
+    const picker = el("input", { type: "file", accept: ".json,application/json", hidden: true });
+    const preview = el("div", { class: "bm-import-preview" });
+    const importButton = el("button", { class: "pill with-icon", type: "button" }, svg("import", 14), "Import bookmarks…");
+    importButton.addEventListener("click", () => picker.click());
+    picker.addEventListener("change", async () => {
+      const chosen = picker.files?.[0];
+      picker.value = "";
+      if (!chosen) return;
+      let file;
+      try {
+        file = JSON.parse(await chosen.text());
+      } catch {
+        return preview.replaceChildren(el("p", { class: "danger" }, "That file can't be read as bookmarks."));
+      }
+      if (file?.kind !== "superteem-bookmarks" || typeof file.notes !== "object") {
+        return preview.replaceChildren(el("p", { class: "danger" }, "That isn't a file of bookmarks exported from Superteem."));
+      }
+      const incoming = Object.entries(file.notes).flatMap(([note, list]) => (Array.isArray(list) ? list.map((m) => ({ ...m, note })) : []));
+      const makers = [...new Set(incoming.map((m) => m.author || "someone"))];
+      const shared = incoming.filter((m) => book.notes?.includes(m.note)).length;
+      const go = el("button", { class: "primary pill", type: "button", disabled: !shared }, shared ? `Import ${plural(shared, "bookmark")}` : "Nothing to import");
+      go.addEventListener("click", async () => {
+        go.disabled = true;
+        try {
+          const r = await invoke("import_book_bookmarks", { id: book.id, file, author: "" });
+          preview.replaceChildren();
+          say([`Imported ${plural(r.added, "bookmark")}.`, r.already ? `${were(r.already, "already here")}.` : "",
+            r.elsewhere ? `${were(r.elsewhere, "for chapters not in this book")}.` : ""].filter(Boolean).join(" "));
+          onChange?.("marks");
+          draw();
+        } catch (e) {
+          go.disabled = false;
+          say(el("span", { class: "danger" }, String(e)));
+        }
+      });
+      preview.replaceChildren(
+        el("p", {}, `${plural(incoming.length, "bookmark")} by ${makers.join(", ")}${file.title ? ` for “${file.title}”` : ""}.`),
+        file.book && file.book !== book.id ? el("p", { class: "hint" }, `These were made for another book. Only those in chapters this book has (${shared.toLocaleString()}) can come in.`) : null,
+        file.version && book.version && file.version !== book.version
+          ? el("p", { class: "hint" }, `They were made in version ${file.version}; this is version ${book.version}. Where the text changed, a few may land near their place rather than on it.`) : null,
+        el("div", { class: "actions" }, el("span", { class: "grow" }),
+          el("button", { class: "pill", type: "button", onclick: () => preview.replaceChildren() }, "Cancel"), go));
+    });
+    const importing = el("section", { class: "bm-book-section" },
+      el("h3", {}, "Take in someone's"),
+      el("p", { class: "hint" }, "Adds their bookmarks beside yours, marked with their name. Yours stay as they are."),
+      importButton, picker, preview);
+
+    body.replaceChildren(showing, exporting, importing);
+  }
+  await draw();
 }

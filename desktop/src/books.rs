@@ -365,6 +365,139 @@ pub fn set_details(id: &str, d: BookDetails) -> Result<(), String> {
     write(&mut book, true)
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// A book's bookmarks, all its chapters' at once: to pass to someone else, to take in theirs, and which to show
+
+/// Every bookmark in a book, by chapter, as a file to give someone. Bookmarks of the person's own carry
+/// `author`, the name they gave; those they imported keep who made them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BookmarkFile {
+    /// Always "superteem-bookmarks", so another kind of file isn't taken for one.
+    pub kind: String,
+    pub format: u32,
+    pub book: String,
+    pub title: String,
+    /// The version of the book they were made in, when it has one.
+    pub version: u32,
+    pub exported: u64,
+    /// Chapter (note id) to its bookmarks.
+    pub notes: std::collections::BTreeMap<String, Vec<notes::Bookmark>>,
+}
+
+pub const BOOKMARK_FILE_KIND: &str = "superteem-bookmarks";
+
+/// Every bookmark in the book, for showing which colours and people there are; by chapter.
+pub fn bookmarks(id: &str) -> Result<std::collections::BTreeMap<String, Vec<notes::Bookmark>>, String> {
+    let book = load(id)?;
+    Ok(book.notes.iter().filter_map(|n| notes::bookmarks(n).ok().filter(|m| !m.is_empty()).map(|m| (n.clone(), m))).collect())
+}
+
+/// The book's bookmarks as a file to give someone; the person's own carry `author`.
+pub fn bookmark_file(id: &str, author: &str) -> Result<BookmarkFile, String> {
+    let book = load(id)?;
+    let author = notes::clean_line(author, 80);
+    let mut all = bookmarks(id)?;
+    for marks in all.values_mut() {
+        for m in marks.iter_mut().filter(|m| m.author.is_empty()) {
+            m.author = author.clone();
+        }
+    }
+    Ok(BookmarkFile { kind: BOOKMARK_FILE_KIND.into(), format: 1, book: book.id.clone(), title: title_of(&book), version: book.version, exported: library::now(), notes: all })
+}
+
+/// What an import did: how many bookmarks came in, how many were already here, and how many were for
+/// chapters this book doesn't have.
+#[derive(Debug, Default, Serialize)]
+pub struct BookmarkImport {
+    pub added: usize,
+    pub already: usize,
+    pub elsewhere: usize,
+}
+
+/// Takes in someone's bookmarks for this book, beside the person's own. One already here (the same one, or
+/// the same place, words and maker) isn't added twice. Bookmarks keep who made them; any without a maker
+/// get `author`, so they never pass for the person's own.
+pub fn import_bookmarks(id: &str, file: BookmarkFile, author: &str) -> Result<BookmarkImport, String> {
+    if file.kind != BOOKMARK_FILE_KIND {
+        return Err("That isn't a file of bookmarks.".into());
+    }
+    let book = load(id)?;
+    let fallback = match notes::clean_line(author, 80) {
+        a if a.is_empty() => "Someone else".to_string(),
+        a => a,
+    };
+    let mut result = BookmarkImport::default();
+    for (note, incoming) in file.notes {
+        if !book.notes.contains(&note) {
+            result.elsewhere += incoming.len();
+            continue;
+        }
+        let mut marks = notes::bookmarks(&note)?;
+        for mut m in incoming {
+            if m.author.trim().is_empty() {
+                m.author = fallback.clone();
+            }
+            let same = |x: &notes::Bookmark| x.id == m.id || (x.at == m.at && x.quote == m.quote && x.author == m.author);
+            if marks.iter().any(same) {
+                result.already += 1;
+                continue;
+            }
+            if m.id.is_empty() || marks.iter().any(|x| x.id == m.id) {
+                m.id = format!("i{}{}", library::now(), marks.len());
+            }
+            marks.push(m);
+            result.added += 1;
+        }
+        notes::save_bookmarks(&note, marks)?;
+    }
+    Ok(result)
+}
+
+/// Deletes every bookmark in the book made by `author` (someone else's, from an import).
+pub fn remove_bookmarks_by(id: &str, author: &str) -> Result<usize, String> {
+    if author.trim().is_empty() {
+        return Err("Your own bookmarks are deleted one at a time.".into());
+    }
+    let mut removed = 0;
+    for (note, marks) in bookmarks(id)? {
+        let kept: Vec<_> = marks.iter().filter(|m| m.author != author).cloned().collect();
+        if kept.len() != marks.len() {
+            removed += marks.len() - kept.len();
+            notes::save_bookmarks(&note, kept)?;
+        }
+    }
+    Ok(removed)
+}
+
+/// Which bookmarks a book shows: those of any colour or maker listed here are hidden. Kept beside the book,
+/// as `<id>.marks-shown.json`. A colour is "c01" to "c15", or "" for none; a maker is a name, or "" for the
+/// person's own.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BookmarkView {
+    pub hidden_colours: Vec<String>,
+    pub hidden_authors: Vec<String>,
+}
+
+fn view_path(id: &str) -> Result<PathBuf, String> {
+    Ok(path(id)?.with_extension("marks-shown.json"))
+}
+
+pub fn bookmark_view(id: &str) -> BookmarkView {
+    view_path(id).ok().and_then(|p| library::read_json(&p).ok()).unwrap_or_default()
+}
+
+pub fn set_bookmark_view(id: &str, view: BookmarkView) -> Result<(), String> {
+    load(id)?;
+    let file = view_path(id)?;
+    if view == BookmarkView::default() {
+        let _ = std::fs::remove_file(file);
+        return Ok(());
+    }
+    library::write_json(&file, &view)
+}
+
 /// Adds a note at the end, once.
 pub fn add_note(id: &str, note: &str) -> Result<(), String> {
     notes::load(note)?;
@@ -410,6 +543,7 @@ pub fn delete(id: &str) -> Result<(), String> {
     let book = load(id)?;
     reading_only(&book)?;
     let _ = std::fs::remove_file(place_path(id)?);
+    let _ = std::fs::remove_file(view_path(id)?);
     let _ = std::fs::remove_dir_all(files_dir(id)?);
     std::fs::remove_file(path(id)?).map_err(|e| e.to_string())
 }
@@ -740,6 +874,18 @@ mod tests {
         let book: Book = library::read_json(&dir.join(format!("{EXAMPLE_ID}.json"))).unwrap();
         assert!(book.links.iter().any(|l| l.url == book.source), "its source is a link it may open");
         assert!(book.links.iter().all(|l| outside_address(&l.url) && l.url.starts_with("https://")));
+    }
+
+    #[test]
+    fn a_bookmark_file_reads_back() {
+        let mark = notes::Bookmark { id: "b1".into(), at: 4, quote: "Theseus".into(), author: "Alex".into(), ..Default::default() };
+        let file = BookmarkFile { kind: BOOKMARK_FILE_KIND.into(), format: 1, book: "b".into(), notes: [("n".to_string(), vec![mark.clone()])].into(), ..Default::default() };
+        let back: BookmarkFile = serde_json::from_str(&serde_json::to_string(&file).unwrap()).unwrap();
+        assert_eq!(back.notes["n"][0].author, "Alex");
+        assert_eq!(back.notes["n"][0].quote, "Theseus");
+        // One of the person's own has no author in its file.
+        let own = serde_json::to_string(&notes::Bookmark { id: "b2".into(), ..Default::default() }).unwrap();
+        assert!(!own.contains("author"));
     }
 
     #[test]

@@ -1277,9 +1277,12 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
       return whole();
     }, READ_CHAPTER, { lang, voice: (l) => bookVoice(book, l), pronounce,
       startOf: () => ({ chapter: 0, at: startAt }), onEnd: keepWhereStopped, menu: listenMenu });
-    const mark = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or where you clicked", "aria-label": "Bookmark" }, svg("bookmark", 16));
+    const mark = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or where you clicked. Hold for all the book's bookmarks", "aria-label": "Bookmark" }, svg("bookmark", 16));
     mark.addEventListener("mousedown", (e) => e.preventDefault());
     mark.addEventListener("click", () => marks?.create());
+    // Which bookmarks show, by colour and maker; held, the button opens all the book's bookmarks.
+    const filter = bookmarkFilter(book.id);
+    onHold(mark, () => bookBookmarksDialog(book, filter, (what) => (what === "marks" ? marks?.reload() : marks?.redraw())));
     const notes = commentary(note.commentary, note.title || chapter.title, book);
     const bar = el("div", { class: "book-contents-bar" },
       el("span", { class: "book-bar-links" }, el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"), notes.link),
@@ -1296,7 +1299,8 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     marks = attachBookmarks({ surface, holder: bodyHolder, noteId: () => note.id,
       onRead: (text, { from = 0 } = {}) => speak.readText(text, lang(), { chapter: 0, at: from }),
       onVoice: book.voice && isDesktop() ? () => changeBookVoice(book, lang(), speak.isReading() ? speak.readOn : null) : null,
-      listen: { read: readFrom, forget: () => place.forget() } });
+      listen: { read: readFrom, forget: () => place.forget() }, isShown: filter.isShown });
+    filter.load().then(() => marks.redraw());
     place.watch((p) => {
       marks.setListen(p?.note === note.id ? p : null);
       speak.describe(stoppedHere() != null ? READ_ON : READ_CHAPTER);
@@ -1517,6 +1521,8 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
     let lastClicked = null;
     const chapterText = (a) => `${HEADING}${a.heading}\n${a.surface.text()}`;
     const place = listenPlace(book.id);
+    const readFilter = bookmarkFilter(book.id);
+    readFilter.load().then(() => { for (const a of attached) a.marks?.redraw(); });
     // Where reading starts ({ chapter, at }), so where it stops can be found.
     let startPlace = { chapter: 0, at: 0 };
     const stoppedIn = () => {
@@ -1603,7 +1609,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
         const i = attached.indexOf(a);
         speak.readText(toEnd ? [text, ...attached.slice(i + 1).map(chapterText)].join("\n\n") : text, undefined, { chapter: i, at: from });
       }, onVoice: book.voice && isDesktop() ? () => changeBookVoice(book, null, speak.isReading() ? speak.readOn : null) : null,
-      listen: { read: (from) => readOnFrom(attached.indexOf(a), from), forget: () => place.forget() } });
+      listen: { read: (from) => readOnFrom(attached.indexOf(a), from), forget: () => place.forget() }, isShown: readFilter.isShown });
       a.bodyEl.addEventListener("click", () => { lastClicked = a; });
     }
     place.watch((p) => {
@@ -2024,9 +2030,27 @@ function renderNote(data, dictate) {
       } },
     ]);
   });
-  const markButton = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or the cursor's place", "aria-label": "Bookmark" }, svg("bookmark", 16), menuText("Bookmark"));
+  const markButton = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or the cursor's place. In a book, hold for all its bookmarks", "aria-label": "Bookmark" }, svg("bookmark", 16), menuText("Bookmark"));
   markButton.addEventListener("mousedown", (e) => e.preventDefault());
   markButton.addEventListener("click", () => marks?.create());
+  // A note in a book shows the book's choice of bookmarks, and holding Bookmark opens all of them.
+  let noteFilter = null;
+  const noteBook = async () => {
+    const inBook = note.id ? (await invoke("list_books", { query: "" }).catch(() => [])).find((b) => b.notes.includes(note.id)) : null;
+    return inBook ? invoke("get_book", { id: inBook.id }).catch(() => null) : null;
+  };
+  noteBook().then(async (book) => {
+    if (!book) return;
+    noteFilter = bookmarkFilter(book.id);
+    await noteFilter.load();
+    marks?.redraw();
+  });
+  onHold(markButton, async () => {
+    const book = await noteBook();
+    if (!book) return micToast("Holding Bookmark opens all of a book's bookmarks, for a note that's in a book.");
+    noteFilter ??= bookmarkFilter(book.id);
+    bookBookmarksDialog(book, noteFilter, (what) => (what === "marks" ? marks?.reload() : marks?.redraw()));
+  });
   // On a phone, Export, Archive and Delete sit behind one "more" button, so the top bar keeps to one line.
   const more = moreMenu([extras, exporter, archive, remove]);
   foot.append(el("span", { class: "grow" }), talk, live);
@@ -2059,7 +2083,7 @@ function renderNote(data, dictate) {
       el("div", { class: "note" }, title, stackSlot, searchBar, chip, editorHolder, noteEnd, ...jumps),
       foot)),
     chat?.panel));
-  marks = attachBookmarks({ surface: ed.surface, holder: editorHolder, noteId: () => mine.id, ensureNote: () => mine.save(),
+  marks = attachBookmarks({ surface: ed.surface, holder: editorHolder, noteId: () => mine.id, ensureNote: () => mine.save(), isShown: (m) => noteFilter?.isShown(m) ?? true,
     onRead: (text) => speakNote.readText(text) });
   note.syncStack();
   chat?.sync();
