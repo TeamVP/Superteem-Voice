@@ -38,6 +38,10 @@ pub struct Note {
     /// then shown above the note. Never read aloud with it.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub commentary: String,
+    /// Who wrote this note, when it isn't the book's author (a preface by its translator, a chapter by a
+    /// guest); empty for the book's own.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub author: String,
 }
 
 impl Note {
@@ -293,6 +297,11 @@ pub fn clean_pronounce(words: std::collections::BTreeMap<String, String>) -> std
         .collect()
 }
 
+/// One line as typed: its spaces tidied, and kept to `max` characters.
+pub fn clean_line(text: &str, max: usize) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(max).collect()
+}
+
 /// Commentary as typed, trimmed and kept to a length.
 pub fn clean_commentary(text: String) -> String {
     let text = text.trim();
@@ -302,10 +311,14 @@ pub fn clean_commentary(text: String) -> String {
     }
 }
 
-/// Changes a note's commentary or pronunciations, whichever is given. Not its text, so no version is kept.
-pub fn set_extras(id: &str, commentary: Option<String>, pronounce: Option<std::collections::BTreeMap<String, String>>) -> Result<(), String> {
+/// Changes a note's commentary, pronunciations or author, whichever is given. Not its text, so no version is
+/// kept.
+pub fn set_extras(id: &str, commentary: Option<String>, pronounce: Option<std::collections::BTreeMap<String, String>>, author: Option<String>) -> Result<(), String> {
     crate::books::protect(id)?;
     let mut note = load(id)?;
+    if let Some(name) = author {
+        note.author = clean_line(&name, 200);
+    }
     if let Some(text) = commentary {
         note.commentary = clean_commentary(text);
     }

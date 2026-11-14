@@ -1396,11 +1396,18 @@ fn serve_note_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Resp
             .expect("a plain response")
     };
     let path = percent_decode(request.uri().path());
-    let mut parts = path.trim_start_matches('/').splitn(2, '/');
+    let path = path.trim_start_matches('/');
+    // A book's own files, such as its cover, are at _book/<book>/<file>.
+    let (book, path) = match path.strip_prefix("_book/") {
+        Some(rest) => (true, rest),
+        None => (false, path),
+    };
+    let mut parts = path.splitn(2, '/');
     let (Some(id), Some(file)) = (parts.next(), parts.next()) else {
         return respond(404, "text/plain", Vec::new());
     };
-    match notes::file_path(id, file).and_then(|p| std::fs::read(p).map_err(|e| e.to_string())) {
+    let found = if book { books::file_path(id, file) } else { notes::file_path(id, file) };
+    match found.and_then(|p| std::fs::read(p).map_err(|e| e.to_string())) {
         Ok(bytes) => respond(200, notes::media_type(file), bytes),
         Err(_) => respond(404, "text/plain", Vec::new()),
     }
@@ -1429,8 +1436,14 @@ fn set_book_extras(id: String, commentary: Option<String>, pronounce: Option<std
 
 /// Changes a note's commentary and/or pronunciations; a field left out stays as it is.
 #[tauri::command]
-fn set_note_extras(id: String, commentary: Option<String>, pronounce: Option<std::collections::BTreeMap<String, String>>) -> Result<(), String> {
-    notes::set_extras(&id, commentary, pronounce)
+fn set_note_extras(id: String, commentary: Option<String>, pronounce: Option<std::collections::BTreeMap<String, String>>, author: Option<String>) -> Result<(), String> {
+    notes::set_extras(&id, commentary, pronounce, author)
+}
+
+/// Changes who wrote a book, who translated it, what it is, its language, where it came from and its licence.
+#[tauri::command]
+fn set_book_details(id: String, details: books::BookDetails) -> Result<(), String> {
+    books::set_details(&id, details)
 }
 
 /// Where reading aloud last stopped in a book, or null.
@@ -3208,6 +3221,7 @@ pub fn run() {
             book_listen_place,
             set_book_extras,
             set_note_extras,
+            set_book_details,
             set_book_listen_place,
             search_book,
             book_for_note,

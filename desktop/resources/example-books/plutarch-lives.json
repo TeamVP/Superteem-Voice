@@ -1,6 +1,45 @@
 {
   "id": "plutarch-lives",
   "title": "Plutarch's Lives",
+  "author": "Plutarch",
+  "translator": "John Dryden and others (1683–86), revised by Arthur Hugh Clough (1859)",
+  "description": "Paired lives of famous Greeks and Romans, from Theseus and Romulus to Dion and Brutus, each pair usually followed by a comparison of the two, and four single lives at the end.",
+  "language": "en",
+  "source": "https://www.gutenberg.org/ebooks/674",
+  "licence": "public-domain",
+  "version": 6,
+  "changes": [
+    {
+      "version": 1,
+      "date": "2026-11-13",
+      "summary": "Added to the library, with each life as a chapter under its book."
+    },
+    {
+      "version": 2,
+      "date": "2026-11-13",
+      "summary": "Built into the app, so it appears on every device, Android included."
+    },
+    {
+      "version": 3,
+      "date": "2026-11-14",
+      "summary": "Suggests a voice to read it, and how to say the names the voices get wrong."
+    },
+    {
+      "version": 4,
+      "date": "2026-11-14",
+      "summary": "Names respelled from what the voice actually says, and left alone where it already says them well."
+    },
+    {
+      "version": 5,
+      "date": "2026-11-14",
+      "summary": "Commentary on the book and on Theseus, and Theseus's own pronunciations."
+    },
+    {
+      "version": 6,
+      "date": "2026-11-14",
+      "summary": "Says who wrote and translated it, where the text came from and that it's in the public domain. The preface names its author."
+    }
+  ],
   "voice": "vits-piper-en_GB-alan-medium",
   "voice_why": "A measured British narrator, suited to a long classical text.",
   "pronounce": {
@@ -183,7 +222,7 @@
     "Xenophon": "Zenafunn",
     "Xerxes": "Zurkseez"
   },
-  "commentary": "Plutarch, a Greek writer living under Roman rule around 100 AD, wrote these lives in pairs: a Greek and a Roman whose characters or fortunes seemed alike, usually followed by a short comparison of the two.\n\nHe says plainly that he is writing lives, not histories. He cares less about battles and dates than about character: a passing remark or a small habit, he thought, can show more of a person than the sieges they won. Read him for the people, and treat his facts with care, since he often records more than one version of a story and lets the reader choose.\n\nThis is the Dryden translation as revised by Arthur Hugh Clough in the 1860s, so the English is Victorian, and the names are often the Latin forms (Hercules, Jupiter, Neptune) rather than the Greek ones (Heracles, Zeus, Poseidon).",
+  "commentary": "Plutarch, a Greek writer living under Roman rule around 100 AD, wrote these lives in pairs: a Greek and a Roman whose characters or fortunes seemed alike, usually followed by a short comparison of the two.\n\nHe says plainly that he is writing lives, not histories. He cares less about battles and dates than about character: a passing remark or a small habit, he thought, can show more of a person than the sieges they won. Read him for the people, and treat his facts with care, since he often records more than one version of a story and lets the reader choose.\n\nThis is the Dryden translation as revised by Arthur Hugh Clough and published in 1859, so the English is Victorian, and the names are often the Latin forms (Hercules, Jupiter, Neptune) rather than the Greek ones (Heracles, Zeus, Poseidon).",
   "created": 1763030400,
   "updated": 1763030400,
   "notes": [

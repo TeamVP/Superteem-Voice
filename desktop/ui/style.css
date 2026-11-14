@@ -1586,6 +1586,32 @@ dialog.sheet.extras-dialog { max-width: 560px; }
 .pron-empty[hidden] { display: none; }
 .pron-add { margin: 2px 0 14px; }
 
+/* A book's cover beside its title, who wrote it, and its About panel. */
+.book-cover { width: 44px; height: 62px; object-fit: cover; border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 0.25); flex: none; }
+.book-byline { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+.about-cover { float: right; width: 96px; margin: 4px 0 8px 14px; border-radius: 6px; box-shadow: 0 1px 4px rgb(0 0 0 / 0.25); }
+.about-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 8px 0; font-size: 14px; }
+.about-facts dt { color: var(--muted); }
+.about-facts dd { margin: 0; overflow-wrap: anywhere; }
+.about-changes { margin: 8px 0 6px; font-size: 14px; }
+.about-changes summary { cursor: pointer; color: var(--key); }
+.about-changes ol { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.details-dialog .field input, .details-dialog .field textarea, .details-dialog .field select { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); margin: 0; }
+.extras-dialog .field input[type="text"] { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
+
+/* Footnotes: a small number in the text that goes to its note at the end of the chapter, and back. */
+.fn-ref { line-height: 0; }
+.fn-go { border: none; background: none; padding: 0 2px; min-height: 0; color: var(--key); font-size: 0.75em; font-weight: 600; cursor: pointer; }
+.fn-go:hover { text-decoration: underline; }
+.footnotes { margin-top: 2em; padding-top: 0.6em; border-top: 1px solid var(--line); font-size: 14px; color: var(--soft); }
+.footnotes h3 { margin: 0 0 0.5em; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.footnotes ol { padding-left: 1.6em; margin: 0; }
+.footnotes li { margin: 0 0 0.5em; border-radius: 4px; }
+.fn-back { border: none; background: none; padding: 0 4px; min-height: 0; color: var(--key); cursor: pointer; }
+.fn-flash { animation: fn-flash 1.4s ease-out; }
+@keyframes fn-flash { from { background: var(--highlight); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .fn-flash { animation: none; } }
+
 /* Above a book's contents: where reading aloud last stopped, to carry on from. */
 .listen-resume { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
 .listen-resume[hidden] { display: none; }

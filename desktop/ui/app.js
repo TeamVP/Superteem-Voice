@@ -750,29 +750,196 @@ function noteScrollButtons(topEl, { floor = null, cover = null } = {}) {
   return [up, down];
 }
 
+/// Where a note's files, and a book's (under _book/), are served to the page.
+const noteFileBase = () => (platform === "windows" || platform === "android" ? "http://stvnote.localhost/" : "stvnote://localhost/");
+const bookCover = (book) => (book.cover ? `${noteFileBase()}_book/${encodeURIComponent(book.id)}/${encodeURIComponent(book.cover)}` : null);
+
+/// A link that shows and hides a panel, for a book's or a note's commentary and About. Gives { link, panel }.
+function toggledPanel({ label, hide, about, head, content }) {
+  const panel = el("aside", { class: "commentary", hidden: true, "aria-label": about });
+  const link = el("button", { class: "link commentary-link", type: "button", "aria-expanded": "false", title: about }, label);
+  const toggle = (open) => {
+    panel.hidden = !open;
+    link.setAttribute("aria-expanded", String(open));
+    link.textContent = open ? hide : label;
+    if (open) panel.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  };
+  link.addEventListener("click", () => toggle(panel.hidden));
+  panel.append(el("div", { class: "commentary-head" }, el("span", {}, head),
+    el("button", { class: "icon-only", type: "button", title: `Hide ${head.toLowerCase()}`, "aria-label": `Hide ${head.toLowerCase()}`, onclick: () => toggle(false) }, svg("close", 16))), content);
+  return { link, panel };
+}
+
+/// Markdown as HTML in an element, or as paragraphs of plain text if it can't be read.
+function markdownInto(node, markdown, fileUrl = () => "") {
+  try {
+    node.innerHTML = NoteEditor.toHTML(markdown, fileUrl);
+  } catch {
+    node.append(...markdown.split(/\n{2,}/).filter((p) => p.trim()).map((p) => el("p", {}, p)));
+  }
+  return node;
+}
+
 /// Commentary on a book or a note (Markdown): hidden until its link is pressed, then shown in a panel where
 /// `panel` is put, at the top of the book or the note. Never read aloud with the text. Gives { link, panel },
 /// both null when there is none.
 function commentary(markdown, about) {
   if (!markdown?.trim()) return { link: null, panel: null };
-  const body = el("div", { class: "commentary-body" });
-  try {
-    body.innerHTML = NoteEditor.toHTML(markdown, () => "");
-  } catch {
-    body.append(...markdown.split(/\n{2,}/).filter((p) => p.trim()).map((p) => el("p", {}, p)));
-  }
-  const panel = el("aside", { class: "commentary", hidden: true, "aria-label": `Commentary on ${about}` });
-  const link = el("button", { class: "link commentary-link", type: "button", "aria-expanded": "false", title: `Commentary on ${about}` }, "Commentary");
-  const toggle = (open) => {
-    panel.hidden = !open;
-    link.setAttribute("aria-expanded", String(open));
-    link.textContent = open ? "Hide commentary" : "Commentary";
-    if (open) panel.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  return toggledPanel({ label: "Commentary", hide: "Hide commentary", about: `Commentary on ${about}`, head: "Commentary",
+    content: markdownInto(el("div", { class: "commentary-body" }), markdown) });
+}
+
+/// Licences a book can say it has, as people know them.
+const LICENCES = [
+  ["public-domain", "Public domain"],
+  ["cc0-1.0", "CC0: no rights reserved"],
+  ["cc-by-4.0", "Creative Commons Attribution 4.0"],
+  ["cc-by-sa-4.0", "Creative Commons Attribution-ShareAlike 4.0"],
+  ["cc-by-nc-4.0", "Creative Commons Attribution-NonCommercial 4.0"],
+  ["all-rights-reserved", "All rights reserved"],
+];
+const licenceName = (key) => LICENCES.find(([k]) => k === key)?.[1] ?? key;
+
+/// "14 Nov 2026" from "2026-11-14".
+const dayText = (date) => {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(date ?? "") ? new Date(`${date}T12:00:00`) : null;
+  return d ? d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : date ?? "";
+};
+
+/// What a book says about itself: its cover, who wrote and translated it, its language, licence and source,
+/// and each version's changes. Gives { link, panel }, both null when it says nothing.
+function aboutBook(book) {
+  const source = book.source && (/^https?:\/\//.test(book.source)
+    ? el("button", { class: "link inline", type: "button", onclick: () => invoke("open_link", { url: book.source }).catch(() => micToast("That link can't be opened.")) }, book.source)
+    : book.source);
+  const rows = [
+    ["Author", book.author], ["Translation", book.translator], ["Language", book.language && languageName(book.language)],
+    ["Licence", book.licence && licenceName(book.licence)], ["Source", source], ["Version", book.version ? String(book.version) : ""],
+  ].filter(([, v]) => v);
+  const changes = [...(book.changes ?? [])].sort((a, b) => b.version - a.version);
+  const cover = bookCover(book);
+  if (!rows.length && !book.description && !changes.length && !cover) return { link: null, panel: null };
+  const content = el("div", { class: "commentary-body about-book" },
+    cover ? el("img", { class: "about-cover", src: cover, alt: `The cover of ${book.title || "this book"}` }) : null,
+    book.description ? el("p", {}, book.description) : null,
+    rows.length ? el("dl", { class: "about-facts" }, ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])) : null,
+    changes.length ? el("details", { class: "about-changes" }, el("summary", {}, "What's changed"),
+      el("ol", {}, ...changes.map((c) => el("li", {}, el("strong", {}, `Version ${c.version}`), c.date ? ` · ${dayText(c.date)}` : "", el("br"), c.summary)))) : null);
+  return toggledPanel({ label: "About this book", hide: "Hide about", about: `About ${book.title || "this book"}`, head: "About this book", content });
+}
+
+/// "by A. H. Clough" under a chapter written by someone other than the book's author.
+const chapterBy = (author, book) => (author && author !== book.author ? el("p", { class: "book-byline" }, `by ${author}`) : "");
+
+/// A chapter's text into `body`: Markdown or plain text, with footnotes as Markdown writes them, [^1] in the
+/// text and a line "[^1]: what it says" anywhere. Each becomes a small number that goes to the notes at the
+/// end of the chapter, and back. Neither is read aloud or bookmarked (they're marked data-noread).
+function chapterInto(body, text, format, noteId) {
+  const defs = new Map();
+  const src = (text ?? "").replace(/^\[\^([^\]\s]+)\]:[ \t]*(.*(?:\n(?:[ \t]{2,}|\t)\S.*)*)\n?/gm, (_, id, said) => {
+    defs.set(id, said.replace(/\n[ \t]+/g, " ").trim());
+    return "";
+  });
+  const order = [];
+  const marked = defs.size ? src.replace(/\[\^([^\]\s]+)\](?!:)/g, (whole, id) => {
+    if (!defs.has(id)) return whole;
+    if (!order.includes(id)) order.push(id);
+    return `${id}`;
+  }) : src;
+  if (format === "md") markdownInto(body, marked, (file) => `${noteFileBase()}${noteId}/${encodeURIComponent(file)}`);
+  else body.append(...marked.split(/\n{2,}/).filter((p) => p.trim()).map((p) => el("p", {}, p)));
+  if (!defs.size) return body;
+  for (const id of defs.keys()) if (!order.includes(id)) order.push(id);
+  const key = (id) => `fn-${noteId}-${id}`.replace(/[^\w-]/g, "_");
+  const flash = (node) => {
+    if (!node) return;
+    node.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    node.classList.remove("fn-flash");
+    void node.offsetWidth;
+    node.classList.add("fn-flash");
   };
-  link.addEventListener("click", () => toggle(panel.hidden));
-  panel.append(el("div", { class: "commentary-head" }, el("span", {}, "Commentary"),
-    el("button", { class: "icon-only", type: "button", title: "Hide the commentary", "aria-label": "Hide the commentary", onclick: () => toggle(false) }, svg("close", 16))), body);
-  return { link, panel };
+  const plain = (md) => md.replace(/[*_`[\]]/g, "");
+  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  const found = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.data.includes("")) found.push(n);
+  for (const n of found) {
+    const frag = document.createDocumentFragment();
+    n.data.split(/([^]*)/).forEach((part, i) => {
+      if (i % 2 === 0) { if (part) frag.append(part); return; }
+      const num = order.indexOf(part) + 1;
+      const go = el("button", { type: "button", class: "fn-go", id: `${key(part)}-ref`, title: plain(defs.get(part)), "aria-label": `Footnote ${num}` }, String(num));
+      go.addEventListener("click", () => flash(body.querySelector(`#${key(part)}`)));
+      frag.append(el("sup", { class: "fn-ref", "data-noread": "" }, go));
+    });
+    n.replaceWith(frag);
+  }
+  const items = order.map((id, i) => {
+    const said = markdownInto(el("div"), defs.get(id));
+    const only = said.children.length === 1 && said.firstElementChild.tagName === "P" ? said.firstElementChild : said;
+    const back = body.querySelector(`#${key(id)}-ref`);
+    return el("li", { id: key(id), value: String(i + 1) }, el("span", {}, ...only.childNodes),
+      back ? el("button", { type: "button", class: "fn-back", title: "Back to the text", "aria-label": "Back to the text", onclick: () => { flash(back); back.focus(); } }, "↩") : null);
+  });
+  body.append(el("section", { class: "footnotes", "data-noread": "", "aria-label": "Footnotes" }, el("h3", {}, "Notes"), el("ol", {}, ...items)));
+  return body;
+}
+
+/// Asks for one line of text, such as a chapter's author. Gives it, or null when cancelled.
+function lineDialog(heading, label, value, hint) {
+  return new Promise((done) => {
+    let result = null;
+    const input = el("input", { type: "text", value: value ?? "", "aria-label": label, maxlength: "200" });
+    const finish = (v) => { result = v; dialog.close(); };
+    const dialog = el("dialog", { class: "sheet extras-dialog", "aria-label": heading },
+      el("h2", {}, heading),
+      el("label", { class: "field" }, label, hint ? el("small", {}, hint) : null, input),
+      el("div", { class: "actions" }, el("span", { class: "grow" }),
+        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
+        el("button", { class: "primary pill", type: "button", onclick: () => finish(input.value.trim()) }, "Save")));
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); finish(input.value.trim()); } });
+    dialog.addEventListener("close", () => { dialog.remove(); done(result); });
+    document.body.append(dialog);
+    dialog.showModal();
+    input.focus();
+    input.select();
+  });
+}
+
+/// Asks what a book says about itself. Gives the details, or null when cancelled.
+function bookDetailsDialog(book) {
+  return new Promise((done) => {
+    let result = null;
+    const field = (label, key, hint, attrs = {}) => {
+      const input = el(attrs.rows ? "textarea" : "input", { ...(attrs.rows ? {} : { type: "text" }), "aria-label": label, ...attrs });
+      input.value = book[key] ?? "";
+      return [key, input, el("label", { class: "field" }, label, hint ? el("small", {}, hint) : null, input)];
+    };
+    const licence = el("select", { "aria-label": "Licence" }, el("option", { value: "" }, "Not said"),
+      ...LICENCES.map(([k, name]) => el("option", { value: k, selected: book.licence === k }, name)));
+    if (book.licence && !LICENCES.some(([k]) => k === book.licence)) licence.append(el("option", { value: book.licence, selected: true }, book.licence));
+    const fields = [
+      field("Author", "author", "Who wrote it, as it should be shown."),
+      field("Translation", "translator", "Who translated it, if it's a translation."),
+      field("What it is", "description", "A sentence or two.", { rows: "3", maxlength: "1000" }),
+      field("Language", "language", "A language code, such as en, fr or mi.", { maxlength: "20" }),
+      field("Source", "source", "Where the text came from: a web address, or the printed edition.", { maxlength: "500" }),
+    ];
+    const finish = () => {
+      result = Object.fromEntries([...fields.map(([k, input]) => [k, input.value.trim()]), ["licence", licence.value]]);
+      dialog.close();
+    };
+    const dialog = el("dialog", { class: "sheet extras-dialog details-dialog", "aria-label": "About this book" },
+      el("h2", {}, "About this book"),
+      ...fields.map(([, , f]) => f),
+      el("label", { class: "field" }, "Licence", el("small", {}, "Who may copy it. A book shared in the library needs one."), licence),
+      el("div", { class: "actions" }, el("span", { class: "grow" }),
+        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
+        el("button", { class: "primary pill", type: "button", onclick: finish }, "Save")));
+    dialog.addEventListener("close", () => { dialog.remove(); done(result); });
+    document.body.append(dialog);
+    dialog.showModal();
+    fields[0][1].focus();
+  });
 }
 
 /// Asks for commentary on a book or a note, as Markdown. Gives the text ("" to remove it), or null when
@@ -914,17 +1081,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     if (view !== mine) return;
     const chapter = contents[index];
     const kicker = [chapter.part, chapter.label].filter(Boolean).join(" · ");
-    const body = el("div", { class: "book-chapter-body" });
-    const fileBase = platform === "windows" || platform === "android" ? "http://stvnote.localhost/" : "stvnote://localhost/";
-    if (note.format === "md") {
-      try {
-        body.innerHTML = NoteEditor.toHTML(note.body, (file) => `${fileBase}${note.id}/${encodeURIComponent(file)}`);
-      } catch {
-        body.textContent = note.body;
-      }
-    } else {
-      body.append(...note.body.split(/\n{2,}/).filter((p) => p.trim()).map((p) => el("p", {}, p)));
-    }
+    const body = chapterInto(el("div", { class: "book-chapter-body" }), note.body, note.format, note.id);
     const turn = () => el("div", { class: "book-turn" },
       el("button", { class: "pill", disabled: index === 0, onclick: () => openBook(book.id, { chapter: contents[index - 1].id }) }, "Previous"),
       el("span", { class: "book-kicker" }, `${index + 1} of ${contents.length}`),
@@ -1000,7 +1157,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
       bar,
       notes.panel ?? "",
       kicker ? el("p", { class: "book-kicker" }, kicker) : "",
-      heading,
+      heading, chapterBy(note.author, book),
       turn(), bodyHolder, turn(),
       ...noteScrollButtons(heading, { cover: bar }));
     main.replaceChildren(page);
@@ -1029,17 +1186,21 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     rows.push(el("div", { class: "row" },
       el("span", { class: "book-num" + (c.label ? " chapter" : "") }, c.label || String(i + 1)),
       el("button", { class: "label link-label", onclick: () => openBook(book.id, { chapter: c.id }) }, c.title,
-        el("small", {}, wordsText(c.words)))));
+        el("small", {}, [wordsText(c.words), c.author && c.author !== book.author ? `by ${c.author}` : ""].filter(Boolean).join(" · ")))));
   });
   const list = el("div", { class: "group book-notes" }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "This book has no chapters.")));
   const search = bookSearch(book.id, list, (hit, snippet) => openBook(book.id, { chapter: hit.id, find: snippet }));
   const notes = commentary(book.commentary, book.title || "this book");
+  const about = aboutBook(book);
+  const cover = bookCover(book);
   const page = el("div", { class: "page book book-read" },
-    el("div", { class: "book-head" }, el("span", { class: "book-icon" }, svg("book", 22)),
+    el("div", { class: "book-head" },
+      cover ? el("img", { class: "book-cover", src: cover, alt: "" }) : el("span", { class: "book-icon" }, svg("book", 22)),
       el("h1", { class: "book-locked-title" }, book.title || "Untitled book"),
       el("span", { class: "reader-pill", title: "For reading: the chapters stay as they are" }, "Reader")),
-    notes.link ? el("div", { class: "book-links" }, notes.link) : "",
-    notes.panel ?? "",
+    book.author ? el("p", { class: "book-byline" }, `by ${book.author}`) : "",
+    notes.link || about.link ? el("div", { class: "book-links" }, about.link, notes.link) : "",
+    about.panel ?? "", notes.panel ?? "",
     listenResume(book.id, contents, (c, how) => openBook(book.id, { chapter: c.id, listen: how })),
     search.bar, search.results, list);
   main.replaceChildren(page);
@@ -1200,13 +1361,25 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
     const words = await pronounceDialog(about(), book.pronounce, { fresh: selectedWord(), voice: chosen && chosen !== "default" ? chosen : null });
     if (words) saveExtras({ pronounce: words });
   });
+  const aboutPanel = aboutBook(book);
+  const editDetails = el("button", { class: "link commentary-link", type: "button", title: "Who wrote it, what it is, where it came from and its licence" }, svg("pen", 13), "Details");
+  editDetails.addEventListener("click", async () => {
+    const details = await bookDetailsDialog(book);
+    if (!details) return;
+    try {
+      await invoke("set_book_details", { id, details });
+      reopen();
+    } catch (e) {
+      micToast(String(e));
+    }
+  });
+  const cover = bookCover(book);
   const page = el("div", { class: "page book" },
-    el("div", { class: "book-head" }, el("span", { class: "book-icon" }, svg("book", 22)), title, remove),
-    el("div", { class: "book-links" }, bookNotes.link, editCommentary, editPronounce), bookNotes.panel ?? "", modes);
+    el("div", { class: "book-head" }, cover ? el("img", { class: "book-cover", src: cover, alt: "" }) : el("span", { class: "book-icon" }, svg("book", 22)), title, remove),
+    el("div", { class: "book-links" }, aboutPanel.link, bookNotes.link, editDetails, editCommentary, editPronounce), aboutPanel.panel ?? "", bookNotes.panel ?? "", modes);
 
   if (reading) {
     // All the notes one after another, each under its title, which opens it.
-    const fileBase = platform === "windows" || platform === "android" ? "http://stvnote.localhost/" : "stvnote://localhost/";
     if (!chapters.length) page.append(el("p", { class: "hint" }, "This book has no notes yet."));
     // Read aloud reads the whole book; or what is selected, or from where it was last clicked to the end.
     const attached = [];
@@ -1281,21 +1454,12 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
         part = c.part;
         page.append(el("h2", { class: "book-part" }, c.part));
       }
-      const body = el("div", { class: "book-chapter-body" });
-      if (c.format === "md") {
-        try {
-          body.innerHTML = NoteEditor.toHTML(c.body, (file) => `${fileBase}${c.id}/${encodeURIComponent(file)}`);
-        } catch {
-          body.textContent = c.body;
-        }
-      } else {
-        body.append(...c.body.split(/\n{2,}/).filter((p) => p.trim()).map((p) => el("p", {}, p)));
-      }
+      const body = chapterInto(el("div", { class: "book-chapter-body" }), c.body, c.format, c.id);
       const heading = c.label ? `${c.label}. ${c.title}` : c.title;
       const holder = el("div", { class: "book-chapter-holder" }, body);
       const notes = commentary(c.commentary, c.title);
       page.append(el("section", { class: "book-chapter" },
-        el("h2", {}, el("button", { class: "link", onclick: () => openNote(c.id) }, heading)),
+        el("h2", {}, el("button", { class: "link", onclick: () => openNote(c.id) }, heading)), chapterBy(c.author, book),
         notes.link ? el("div", { class: "book-links" }, notes.link) : "", notes.panel ?? "", holder));
       attached.push({ c, heading, bodyEl: body, holder });
     }
@@ -1673,12 +1837,13 @@ function renderNote(data, dictate) {
   // The note's own pronunciations, changed in place when they're edited, so reading aloud has them at once.
   const notePronounce = { ...(data?.pronounce ?? {}) };
   let noteCommentary = data?.commentary ?? "";
+  let noteAuthor = data?.author ?? "";
   const speakNote = readAloudButton(() => marks?.readingText() ?? `${HEADING}${title.value}\n${ed.text()}`,
     "Read the note aloud (from where you click, or what you select)", { lang: noteLanguage, pronounce: notePronounce });
   const noteAbout = () => title.value.trim() || "this note";
   const saveNoteExtras = async (change) => {
     const id = await note.save();
-    await invoke("set_note_extras", { id, commentary: null, pronounce: null, ...change });
+    await invoke("set_note_extras", { id, commentary: null, pronounce: null, author: null, ...change });
   };
   const editNoteCommentary = async () => {
     const text = await commentaryDialog(noteAbout(), noteCommentary);
@@ -1714,6 +1879,17 @@ function renderNote(data, dictate) {
     showContextMenu(Math.max(8, r.right - 240), r.bottom + 6, [
       { icon: "commentary", text: noteCommentary ? "Edit commentary…" : "Add commentary…", run: editNoteCommentary },
       { icon: "speak", text: `${pronounceCount(notePronounce)}…`, run: () => editNotePronounce(word) },
+      { icon: "pen", text: noteAuthor ? `Author: ${noteAuthor}…` : "Author…", run: async () => {
+        const name = await lineDialog("Who wrote this note", "Author", noteAuthor,
+          "In a book, leave it empty when it's the book's own author; fill it in for a preface by the translator or a guest chapter.");
+        if (name == null || name === noteAuthor) return;
+        try {
+          await saveNoteExtras({ author: name });
+          noteAuthor = name;
+        } catch (e) {
+          micToast(String(e));
+        }
+      } },
     ]);
   });
   const markButton = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or the cursor's place", "aria-label": "Bookmark" }, svg("bookmark", 16), menuText("Bookmark"));

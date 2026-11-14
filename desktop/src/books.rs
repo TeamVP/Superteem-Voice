@@ -64,6 +64,49 @@ pub struct Book {
     /// Notes about the book as a whole (Markdown), hidden until asked for, then shown above its contents.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub commentary: String,
+    /// Who wrote it, as it should be shown ("Plutarch").
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub author: String,
+    /// Who translated it, and from which edition, as it should be shown; empty when it isn't a translation.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub translator: String,
+    /// What the book is, in a sentence or two.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// The language it's written in, as a code ("en").
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub language: String,
+    /// Where the text came from: a web address or a description of the printed edition.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub source: String,
+    /// Who may copy it: "public-domain", a Creative Commons code such as "cc-by-4.0", or
+    /// "all-rights-reserved"; empty when not said.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub licence: String,
+    /// The cover: an image file kept in the book's own folder (`books/<id>.files/`); empty for none.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub cover: String,
+    /// Counts up each time the book's content is published again; 0 for a book that isn't published.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub version: u32,
+    /// What changed in each version, newest last.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<BookChange>,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+/// One version of a book, in its changelog.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BookChange {
+    pub version: u32,
+    /// "2026-11-14"; empty when not known.
+    pub date: String,
+    /// What changed, in a sentence or two.
+    pub summary: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -93,6 +136,8 @@ pub struct Chapter {
     pub pronounce: std::collections::BTreeMap<String, String>,
     /// The note's commentary (Markdown); empty for none.
     pub commentary: String,
+    /// Who wrote this chapter, when not the book's author; empty for the book's own.
+    pub author: String,
 }
 
 /// A chapter as the contents list shows it, without the text.
@@ -103,6 +148,7 @@ pub struct ChapterHead {
     pub part: String,
     pub label: String,
     pub words: usize,
+    pub author: String,
 }
 
 fn dir() -> PathBuf {
@@ -221,6 +267,30 @@ pub fn set_extras(id: &str, commentary: Option<String>, pronounce: Option<std::c
     write(&mut book, true)
 }
 
+/// What a book says about itself, as its About panel shows and its page changes.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BookDetails {
+    pub author: String,
+    pub translator: String,
+    pub description: String,
+    pub language: String,
+    pub source: String,
+    pub licence: String,
+}
+
+pub fn set_details(id: &str, d: BookDetails) -> Result<(), String> {
+    let mut book = load(id)?;
+    reading_only(&book)?;
+    book.author = notes::clean_line(&d.author, 200);
+    book.translator = notes::clean_line(&d.translator, 300);
+    book.description = notes::clean_line(&d.description, 1000);
+    book.language = notes::clean_line(&d.language, 20);
+    book.source = notes::clean_line(&d.source, 500);
+    book.licence = notes::clean_line(&d.licence, 60);
+    write(&mut book, true)
+}
+
 /// Adds a note at the end, once.
 pub fn add_note(id: &str, note: &str) -> Result<(), String> {
     notes::load(note)?;
@@ -266,6 +336,7 @@ pub fn delete(id: &str) -> Result<(), String> {
     let book = load(id)?;
     reading_only(&book)?;
     let _ = std::fs::remove_file(place_path(id)?);
+    let _ = std::fs::remove_dir_all(files_dir(id)?);
     std::fs::remove_file(path(id)?).map_err(|e| e.to_string())
 }
 
@@ -312,6 +383,7 @@ pub fn chapters(id: &str) -> Result<Vec<Chapter>, String> {
                 label,
                 pronounce: n.pronounce,
                 commentary: n.commentary,
+                author: n.author,
             }
         })
         .collect())
@@ -325,7 +397,7 @@ pub fn contents(id: &str) -> Result<Vec<ChapterHead>, String> {
         .into_iter()
         .map(|n| {
             let (part, label) = place(&book, &n.id);
-            ChapterHead { words: n.body.split_whitespace().count(), title: notes::display_title(&n), id: n.id, part, label }
+            ChapterHead { words: n.body.split_whitespace().count(), title: notes::display_title(&n), id: n.id, part, label, author: n.author }
         })
         .collect())
 }
@@ -424,6 +496,20 @@ pub struct ListenPlace {
     pub created: u64,
 }
 
+/// The book's own files, such as its cover.
+fn files_dir(id: &str) -> Result<PathBuf, String> {
+    Ok(path(id)?.with_extension("files"))
+}
+
+/// A file of the book's own, by its name: only a plain name, so nothing outside the book's folder.
+pub fn file_path(id: &str, file: &str) -> Result<PathBuf, String> {
+    let plain = !file.is_empty() && !file.starts_with('.') && !file.contains(['/', '\\', ':']) && file != "..";
+    if !plain {
+        return Err("That file isn't the book's.".into());
+    }
+    Ok(files_dir(id)?.join(file))
+}
+
 fn place_path(id: &str) -> Result<PathBuf, String> {
     Ok(path(id)?.with_extension("listened.json"))
 }
@@ -471,7 +557,9 @@ pub fn forget_note(note: &str) {
 /// Copies the example book into this device's library, and stamps it with now so it shows as just
 /// added. `resource_dir` is unused: the book is compiled in, which is the only place Android can read it.
 pub fn install_example(_resource_dir: Option<&std::path::Path>) {
-    if crate::prefs::load().example_books >= EXAMPLE_BOOK {
+    // A newer copy than the one installed, by the book's own version, replaces it.
+    let installed = load(EXAMPLE_ID).map(|b| b.version).unwrap_or(0);
+    if crate::prefs::load().example_books >= EXAMPLE_BOOK && installed >= EXAMPLE_BOOK {
         return;
     }
     if let Err(e) = install_bundled(library::now()) {
@@ -511,10 +599,8 @@ fn install_bundled(now: u64) -> Result<(), String> {
     library::write_json(&book_file, &book)
 }
 
-/// 3: the book suggests a voice. 4: names respelled so the voice says them right: whole syllables it reads
-/// as words, unstressed lead-ins ("de Ryus"), and none where it already says the name well. 5: commentary on
-/// the book and on Theseus, and Theseus's own pronunciations.
-const EXAMPLE_BOOK: u32 = 5;
+/// The example book's version, which is its `version`: what changed in each is in its `changes`.
+const EXAMPLE_BOOK: u32 = 6;
 const EXAMPLE_ID: &str = "plutarch-lives";
 
 fn example_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf> {
@@ -549,6 +635,26 @@ mod tests {
             assert!(word.chars().all(char::is_alphabetic), "{word} is one word");
             assert!(!said.trim().is_empty() && said != word, "{word} has a spelling for the voice");
             assert!(words.contains(word.as_str()), "{word} is in the book");
+        }
+    }
+
+    #[test]
+    fn the_example_book_says_what_it_is_and_which_version() {
+        let dir = example_dir(None).expect("the example book is beside the crate");
+        let book: Book = library::read_json(&dir.join(format!("{EXAMPLE_ID}.json"))).unwrap();
+        assert_eq!(book.version, EXAMPLE_BOOK, "the book's version is the one the app installs");
+        assert_eq!(book.changes.last().map(|c| c.version), Some(book.version));
+        assert!(book.changes.windows(2).all(|w| w[0].version < w[1].version));
+        assert!(!book.author.is_empty() && !book.source.is_empty() && book.licence == "public-domain");
+        let preface: notes::Note = library::read_json(&dir.join("notes").join("plutarch-00-preface.json")).unwrap();
+        assert_eq!(preface.author, "A. H. Clough");
+    }
+
+    #[test]
+    fn a_books_files_stay_in_its_folder() {
+        assert!(file_path("b1", "cover.jpg").is_ok());
+        for bad in ["", "../b2.json", "a/b.jpg", "..", ".hidden", "c:x"] {
+            assert!(file_path("b1", bad).is_err(), "{bad}");
         }
     }
 

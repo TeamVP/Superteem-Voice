@@ -56,6 +56,8 @@ function domSurface(root) {
     let block = null;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      // Footnote numbers and notes aren't part of the text read aloud or bookmarked.
+      if (n.parentElement?.closest("[data-noread]")) continue;
       let b = n.parentElement;
       while (b && b !== root && !BLOCK.test(b.tagName)) b = b.parentElement;
       if (segs.length && b !== block) text += "\n";
