@@ -1561,7 +1561,8 @@ function paragraphOf(node, root) {
 /// is on. `surfaceFor(k)` gives the surface of chapter k (see domSurface); the reading's start says which
 /// chapter and where it began ({ chapter, at }), and each piece's `part` how many chapters on from there it is.
 /// It also marks the paragraph being read, subtly (see .reading-para), whether or not it follows.
-function readingFollower(surfaceFor) {
+/// `onAt(k, at)`, if given, is told where in chapter k each piece begins, and onAt(null) once reading stops.
+function readingFollower(surfaceFor, onAt = null) {
   let run = null, chapter = -1, cursor = 0, last = 0, lit = null;
   const light = (block) => {
     if (block === lit) return;
@@ -1571,7 +1572,9 @@ function readingFollower(surfaceFor) {
   };
   return (piece) => {
     const now = reading;
-    if (!piece || !now) return light(null);
+    if (!piece || !now) { onAt?.(null); return light(null); }
+    // Where reading was shown to start from (see domSurface's reveal) has served once reading is under way.
+    if (window.CSS?.highlights) CSS.highlights.delete("search-hit");
     const start = now.start ?? {};
     const k = (start.chapter ?? 0) + (piece.part ?? 0);
     if (now !== run || k !== chapter) {
@@ -1590,6 +1593,7 @@ function readingFollower(surfaceFor) {
     if (i < 0) return light(null);
     last = i;
     cursor = i + piece.text.length;
+    onAt?.(k, i);
     const range = surface.range(i, cursor);
     light(paragraphOf(range.startContainer, surface.root));
     if (followsReading() && Date.now() - scrolledByHand > 5000) scrollToMiddle(range);

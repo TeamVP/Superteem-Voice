@@ -234,7 +234,7 @@ const modKey = () => (platform === "macos" ? "⌘" : "Ctrl+");
 /// for a book with its own voice, changes which voice reads it. `listen`, in a book: { read(from), forget() },
 /// for the place reading aloud stopped, which setListen shows. `isShown(mark)` says whether a bookmark is
 /// drawn, as a book's choice of colours and makers to show has it (see bookmarkFilter).
-/// Returns { create, reading, readingText, reload, redraw, setListen, listenFrom, textFrom }.
+/// Returns { create, reading, readingText, reload, redraw, setListen, readingAt, listenFrom, textFrom }.
 function attachBookmarks({ surface, holder, noteId, ensureNote = async () => noteId(), onRead, onVoice, listen, isShown = () => true }) {
   const layer = el("div", { class: "bm-layer", "aria-hidden": "false" });
   holder.classList.add("bm-holder");
@@ -246,6 +246,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
   let point = null;       // where the person last clicked in the text, for reading aloud from there
   let loadedFor = null;
   let listened = null;    // where reading aloud last stopped, when it's in this text: { place, from }
+  let live = null;        // while reading aloud in this text, where the words being read begin
 
   // ----- Keeping them
 
@@ -324,7 +325,9 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     const size = 22;
     let below = -Infinity;
     const seen = marks.filter((m) => isShown(m));
-    const all = listened ? [...seen, { id: LISTEN_ID, from: listened.from, to: listened.from, listen: true }].sort((p, q) => p.from - q.from) : seen;
+    // While reading aloud, the speaker goes along with the words being read; after, it's where reading stopped.
+    const at = live ?? listened?.from;
+    const all = at != null ? [...seen, { id: LISTEN_ID, from: at, to: at, listen: true, live: live != null }].sort((p, q) => p.from - q.from) : seen;
     for (const m of all) {
       const rects = rectsOf(m);
       if (!rects.length) continue;
@@ -333,14 +336,15 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
       below = top + size;
       const open = shown === m.id;
       if (m.listen) {
+        const what = m.live ? "Reading aloud here" : "Where you stopped listening";
         const flag = el("button", {
           class: "bm-flag listen" + (open ? " on" : ""), type: "button", style: `left:${x}px;top:${top}px`,
-          title: "Where you stopped listening", "aria-label": "Where you stopped listening", "aria-expanded": String(open),
+          title: what, "aria-label": what, "aria-expanded": String(open),
         }, svg("speak", 13));
         flag.addEventListener("mousedown", (e) => e.preventDefault());
-        flag.addEventListener("click", () => show(open ? null : m.id));
+        if (!m.live) flag.addEventListener("click", () => show(open ? null : m.id));
         layer.append(flag);
-        if (!open) continue;
+        if (!open || m.live) continue;
         layer.append(el("div", { class: "bm-point listen", style: `left:${first.left - base.left - 1}px;top:${first.top - base.top}px;height:${first.height}px` }));
         const pop = el("div", { class: "bm-pop", role: "dialog", "aria-label": "Where you stopped listening" },
           el("div", { class: "bm-pop-label" }, "You stopped listening here", el("small", {}, agoText(listened.place.created))),
@@ -492,6 +496,13 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     if (!listened && shown === LISTEN_ID) shown = null;
     redraw();
   }
+  /// Where in this text the words being read aloud begin, for the speaker to follow; null when not reading here.
+  function readingAt(from) {
+    if (from === live) return;
+    live = from;
+    if (live != null && shown === LISTEN_ID) shown = null;
+    redraw();
+  }
   /// Where reading aloud stopped in this text, or null; null too at its very end, where nothing is left to read.
   function listenFrom() {
     if (!listened) return null;
@@ -535,7 +546,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
   });
 
   reload();
-  return { create, reading, readingText, reload, redraw, setListen, listenFrom, textFrom };
+  return { create, reading, readingText, reload, redraw, setListen, readingAt, listenFrom, textFrom };
 }
 
 const LISTEN_ID = "listened";

@@ -1349,7 +1349,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
       startAt = 0;
       return whole();
     }, READ_CHAPTER, { lang, voice: (l) => bookVoice(book, l), pronounce, speed: bookSpeed,
-      onPiece: readingFollower((k) => (k === 0 ? surface : null)),
+      onPiece: readingFollower((k) => (k === 0 ? surface : null), (k, at) => marks?.readingAt(k === 0 ? at : null)),
       startOf: () => ({ chapter: 0, at: startAt }), onEnd: keepWhereStopped, menu: listenMenu });
     const mark = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or where you clicked. Hold for all the book's bookmarks", "aria-label": "Bookmark" }, svg("bookmark", 16));
     mark.addEventListener("mousedown", (e) => e.preventDefault());
@@ -1646,7 +1646,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
       // Each chapter is read with its own pronunciations on top of the book's, from the one reading starts in,
       // and the person's own on top (see bookWords).
       pronounce: () => attached.slice(startPlace.chapter).map((a) => bookWords(book, a.c)),
-      onPiece: readingFollower((k) => attached[k]?.surface),
+      onPiece: readingFollower((k) => attached[k]?.surface, (k, at) => attached.forEach((a, j) => a.marks?.readingAt(j === k ? at : null))),
       startOf: () => startPlace,
       onEnd: (r) => {
         const stop = stoppedAt(attached.map((a) => a.surface.text()), r);
