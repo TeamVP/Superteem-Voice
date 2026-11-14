@@ -1549,14 +1549,29 @@ function scrollToMiddle(range) {
   scroller.scrollBy({ top: off, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 
+/// The paragraph (or heading, list item, quote) a node is in, inside `root`; null when there's none.
+function paragraphOf(node, root) {
+  for (let n = node.nodeType === Node.TEXT_NODE ? node.parentElement : node; n && n !== root; n = n.parentElement) {
+    if (/^(P|H[1-6]|LI|BLOCKQUOTE|PRE|TD|TH|DT|DD|FIGCAPTION)$/.test(n.tagName)) return n;
+  }
+  return null;
+}
+
 /// An `onPiece` for readAloudButton that keeps what's being read in the middle of the window, while following
 /// is on. `surfaceFor(k)` gives the surface of chapter k (see domSurface); the reading's start says which
 /// chapter and where it began ({ chapter, at }), and each piece's `part` how many chapters on from there it is.
+/// It also marks the paragraph being read, subtly (see .reading-para), whether or not it follows.
 function readingFollower(surfaceFor) {
-  let run = null, chapter = -1, cursor = 0, last = 0;
+  let run = null, chapter = -1, cursor = 0, last = 0, lit = null;
+  const light = (block) => {
+    if (block === lit) return;
+    lit?.classList.remove("reading-para");
+    lit = block;
+    lit?.classList.add("reading-para");
+  };
   return (piece) => {
     const now = reading;
-    if (!piece || !now) return;
+    if (!piece || !now) return light(null);
     const start = now.start ?? {};
     const k = (start.chapter ?? 0) + (piece.part ?? 0);
     if (now !== run || k !== chapter) {
@@ -1569,13 +1584,15 @@ function readingFollower(surfaceFor) {
       chapter = k;
     }
     const surface = surfaceFor(k);
-    if (!surface?.root.isConnected) return;
+    if (!surface?.root.isConnected) return light(null);
     const i = surface.text().indexOf(piece.text, cursor);
     // A title read out isn't in the text.
-    if (i < 0) return;
+    if (i < 0) return light(null);
     last = i;
     cursor = i + piece.text.length;
-    if (followsReading() && Date.now() - scrolledByHand > 5000) scrollToMiddle(surface.range(i, cursor));
+    const range = surface.range(i, cursor);
+    light(paragraphOf(range.startContainer, surface.root));
+    if (followsReading() && Date.now() - scrolledByHand > 5000) scrollToMiddle(range);
   };
 }
 

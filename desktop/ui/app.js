@@ -1011,7 +1011,7 @@ function pronounceDialog(about, words, { fresh = "", inherited = null, voice = n
           const mine = w && (book == null || sound.value.trim() !== book);
           clash.classList.toggle("mine", !!mine);
           clash.replaceChildren(...(!mine ? [] : book == null ? ["Your own word."] : [`Your own way. The book says “${book}”.`,
-            el("button", { class: "link", type: "button", onclick: () => { sound.value = book; showClash(); } }, "Put the book's back")]));
+            el("button", { class: "link", type: "button", onclick: () => { sound.value = book; showClash(); } }, "Reset")]));
           clash.hidden = !mine;
           return;
         }
@@ -1028,11 +1028,30 @@ function pronounceDialog(about, words, { fresh = "", inherited = null, voice = n
       sound.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addRow().querySelector("input").focus(); } });
       word.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sound.focus(); } });
       rows.append(row);
+      // A new word is shown, whatever's being searched for.
+      if (search.value) { search.value = ""; filter(); }
       showEmpty();
       return row;
     };
     const empty = el("p", { class: "hint pron-empty" }, "No words yet.");
-    const showEmpty = () => { empty.hidden = rows.children.length > 0; };
+    // A long list can be searched, by the word or how it sounds.
+    const search = el("input", { type: "search", class: "pron-search", placeholder: "Search words", "aria-label": "Search words", autocomplete: "off", spellcheck: "false" });
+    const filter = () => {
+      const q = search.value.trim().toLowerCase();
+      let shown = 0;
+      for (const row of rows.children) {
+        const hit = !q || [...row.querySelectorAll("input")].some((i) => i.value.toLowerCase().includes(q));
+        row.hidden = !hit;
+        if (hit) shown++;
+      }
+      empty.textContent = q ? "No words match." : "No words yet.";
+      empty.hidden = shown > 0;
+    };
+    search.addEventListener("input", filter);
+    const showEmpty = () => {
+      search.hidden = rows.children.length <= 10 && !search.value;
+      filter();
+    };
     for (const [w, s] of Object.entries(words ?? {}).sort(([a], [b]) => a.localeCompare(b))) addRow(w, s);
     const first = fresh && !(fresh in (words ?? {})) ? addRow(fresh, "") : null;
     showEmpty();
@@ -1048,20 +1067,14 @@ function pronounceDialog(about, words, { fresh = "", inherited = null, voice = n
     const theirs = Object.keys(inherited ?? {}).length;
     const dialog = el("dialog", { class: "sheet extras-dialog pron-dialog", "aria-label": "Pronunciation" },
       el("h2", {}, `Pronunciation in ${about}`),
-      el("p", { class: "hint" }, "For words the voice says wrong. Write the word as it is in the text, then spell it the way it sounds: "
-        + "a few chunks joined by hyphens usually sound more natural than one syllable at a time, as in Themistocles → Thur-mistic-klees. "
-        + "Whole words, matching capitals; Themistocles's is covered too."),
-      defaults ? el("p", { class: "hint" }, "Your changes are kept on this device and used instead of the book's, which stays as it is. "
-        + "Take one of the book's words out to have it said as it's written.") : null,
+      el("p", { class: "hint" }, "Fix words the voice says wrong. Type the word as written, then spell it as it sounds. "
+        + "A few hyphenated chunks work best, like Themistocles → Thur-mistic-klees."),
+      defaults ? el("p", { class: "hint" }, "Your changes stay on this device and replace the book's. "
+        + "Remove a word to have it read as written.") : null,
       theirs ? el("p", { class: "hint" }, `The book's own ${theirs} word${theirs === 1 ? " is" : "s are"} used too. A word here is said this way in this note only, even when the book says it another way.`) : null,
-      rows, empty,
-      el("button", { class: "pill with-icon pron-add", type: "button", onclick: () => addRow().querySelector("input").focus() }, svg("plus", 14), "Add a word"),
-      defaults ? el("button", { class: "link pron-reset", type: "button", onclick: () => {
-        rows.replaceChildren();
-        for (const [w, s] of Object.entries(defaults).sort(([a], [b]) => a.localeCompare(b))) addRow(w, s);
-        showEmpty();
-      } }, "Put all the book's back") : null,
+      search, rows, empty,
       el("div", { class: "actions" },
+        el("button", { class: "pill with-icon pron-add", type: "button", onclick: () => addRow().querySelector("input").focus() }, svg("plus", 14), "Add a word"),
         el("span", { class: "grow" }),
         el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
         el("button", { class: "primary pill", type: "button", onclick: () => finish(read()) }, "Save")));
@@ -1552,7 +1565,9 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
     const text = await commentaryDialog(about(), book.commentary);
     if (text != null && text !== (book.commentary ?? "")) saveExtras({ commentary: text });
   });
-  const editPronounce = el("button", { class: "link commentary-link", type: "button", title: "How the voice says words it gets wrong, in this book" }, svg("speak", 13), pronounceCount(book.pronounce));
+  // Just a cog; what it is, and how many words it has, show on hover and to a screen reader.
+  const pronounceWhat = `${pronounceCount(book.pronounce)}: how the voice says words it gets wrong, in this book`;
+  const editPronounce = el("button", { class: "link commentary-link", type: "button", title: pronounceWhat, "aria-label": pronounceWhat }, svg("cog", 14));
   // A word selected in the text starts a new row.
   editPronounce.addEventListener("mousedown", (e) => e.preventDefault());
   editPronounce.addEventListener("click", async () => {

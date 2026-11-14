@@ -1613,6 +1613,17 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 .book-snippet { display: block; text-align: left; border: none; background: transparent; padding: 6px 10px 6px 18px; border-radius: 8px; color: var(--soft); font-size: 14px; line-height: 1.5; cursor: pointer; }
 .book-hit-head:hover, .book-snippet:hover, .book-hit-head:focus-visible, .book-snippet:focus-visible { background: var(--hover); }
 .book-snippet mark { background: var(--tint); color: var(--text); border-radius: 2px; }
+/* The paragraph being read aloud: a faint wash of the key colour, padded out by a shadow so the text doesn't move. */
+.reading-para {
+  background: color-mix(in srgb, var(--key) 7%, transparent);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--key) 7%, transparent);
+  border-radius: 3px;
+  transition: background-color 0.4s, box-shadow 0.4s;
+}
+:root[data-theme="dark"] .reading-para { background: color-mix(in srgb, var(--key) 16%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--key) 16%, transparent); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .reading-para { background: color-mix(in srgb, var(--key) 16%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--key) 16%, transparent); }
+}
 ::highlight(search-hit) { background-color: var(--tint); color: var(--text); }
 :root[data-theme="dark"] .book-snippet mark { background: var(--key-2); }
 :root[data-theme="dark"] ::highlight(search-hit) { background-color: var(--key-2); }
@@ -1641,7 +1652,8 @@ dialog.sheet.extras-dialog { max-width: 560px; }
 .pron-row .read-aloud.on, .pron-row .icon-only.on { color: var(--key); }
 .pron-arrow { color: var(--muted); }
 .pron-empty[hidden] { display: none; }
-.pron-add { margin: 2px 0 14px; }
+.pron-row[hidden], .pron-search[hidden] { display: none; }
+.pron-search { width: 100%; box-sizing: border-box; margin: 6px 0 2px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
 .pron-row .pron-replaces { grid-column: 1 / -1; margin: -2px 0 2px; }
 .pron-replaces { color: var(--muted); font-size: 12px; }
 .pron-replaces[hidden] { display: none; }
@@ -1670,7 +1682,6 @@ dialog.sheet.extras-dialog { max-width: 560px; }
 /* A word the person said their own way, over the book's, and the button that puts the book's back. */
 .pron-replaces.mine { color: var(--accent-text); }
 .pron-replaces .link { font-size: 12px; margin-left: 6px; }
-.pron-reset { margin: 2px 0 14px 6px; }
 
 /* A book's cover beside its title, who wrote it, and its About panel. */
 .book-cover { width: 44px; height: 62px; object-fit: cover; border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 0.25); flex: none; }
