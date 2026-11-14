@@ -3187,7 +3187,10 @@ function makePlayer(session, duration, onTick) {
     const wet = ctx.createGain();
     wet.gain.value = 0;
     const out = ctx.createGain();
-    const chain = { source, lowCut, highCut, compressor, gain, limiter, dry, wet, out };
+    // The nodes are kept apart from the chain's own state (`liftable`, `state`), which aren't nodes: a
+    // second change once tried to disconnect those too, threw, and left the track silent.
+    const nodes = [source, lowCut, highCut, compressor, gain, limiter, dry, wet, out];
+    const chain = { nodes, source, lowCut, highCut, compressor, gain, limiter, dry, wet, out };
     chains.set(stream, chain);
     return chain;
   };
@@ -3196,7 +3199,7 @@ function makePlayer(session, duration, onTick) {
     if (!chains.has(stream) && isFlat(level)) return;
     const chain = chainFor(stream);
     const { source, lowCut, highCut, compressor, gain, limiter, dry, wet, out } = chain;
-    for (const node of Object.values(chain)) node.disconnect();
+    for (const node of chain.nodes) node.disconnect();
     chain.liftable = !!(level.boost_db || level.compress);
     gain.gain.value = 10 ** ((level.boost_db || 0) / 20);
     lowCut.frequency.value = level.low_cut_hz || 20;
