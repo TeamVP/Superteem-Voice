@@ -1171,8 +1171,8 @@ function renderNote(data, dictate) {
   const ed = NoteEditor.create({
     element: editorHolder,
     placeholder: isPhone()
-      ? "Start typing, or press Dictate and talk. Your words appear at the cursor each time you pause, and it stops by itself when you finish."
-      : "Start typing, or press Dictate (Ctrl + Space) and talk. Your words appear at the cursor each time you pause, and it stops by itself when you finish.",
+      ? "Start typing, or press Dictate and talk."
+      : "Start typing, or press Dictate (Ctrl + Space) and talk.",
     host: {
       onChange: () => changed(),
       onSearchJump: () => closeSearch(),
