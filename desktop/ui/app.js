@@ -4070,7 +4070,9 @@ Click for who is on it and where it starts` }, name);
       if (open) requestAnimationFrame(() => player && onTick(player.t, player.playing));
     };
     tracks.classList.toggle("open", tracksOpenFor === id);
-    const mini = el("span", { class: "tracks-mini" }, el("strong", {}, "Recording"), el("span", { class: "mono hint" }, clock(duration)));
+    // Tapping "Recording" or its length opens the tracks too, without playing.
+    const mini = el("button", { class: "tracks-mini", type: "button", title: "Show the tracks", "aria-label": "Show the tracks",
+      onclick: () => setTracksOpen(true) }, el("strong", {}, "Recording"), el("span", { class: "mono hint" }, clock(duration)));
     const fold = el("button", { class: "icon-only tracks-fold", type: "button", title: "Hide the tracks", "aria-label": "Hide the tracks",
       onclick: () => { player?.pause(); setTracksOpen(false); } }, svg("down", 16));
     player = makePlayer(session, duration, onTick);
