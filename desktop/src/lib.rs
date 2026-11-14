@@ -2518,6 +2518,29 @@ fn set_book_voice(book: String, voice: String) -> Result<(), String> {
     .map(|_| ())
 }
 
+/// Keeps the person's own pronunciations for a book or one of its chapters (`key`, its id): { written: said },
+/// or none to go back to the book's own.
+#[tauri::command]
+fn set_my_pronounce(key: String, words: std::collections::BTreeMap<String, String>) -> Result<(), String> {
+    if key.is_empty() || key.len() > 200 {
+        return Err("That isn't a book or a chapter.".into());
+    }
+    let words: std::collections::BTreeMap<String, String> = words
+        .into_iter()
+        .map(|(w, s)| (w.trim().chars().take(60).collect::<String>(), s.trim().chars().take(120).collect::<String>()))
+        .filter(|(w, s)| !w.is_empty() && !s.is_empty())
+        .take(2000)
+        .collect();
+    prefs::update(|p| {
+        if words.is_empty() {
+            p.my_pronounce.remove(&key);
+        } else {
+            p.my_pronounce.insert(key, words);
+        }
+    })
+    .map(|_| ())
+}
+
 /// Speech for `text` in a natural voice (`voice`, else the main one) at `speed`, else the chosen speed, as a
 /// WAV for the page to play. (A book gives its own reading speed.)
 #[tauri::command]
@@ -2810,6 +2833,7 @@ fn save_voice_settings(
     read_speakers: Option<bool>,
     use_gpu: Option<bool>,
     voice_for: Option<(String, String)>,
+    follow_reading: Option<bool>,
 ) -> Result<(), String> {
     if let Some((lang, v)) = &voice_for {
         prefs::check_language(lang)?;
@@ -2846,6 +2870,9 @@ fn save_voice_settings(
         }
         if let Some(g) = use_gpu {
             p.use_gpu = Some(g);
+        }
+        if let Some(f) = follow_reading {
+            p.follow_reading = Some(f);
         }
         if let Some((lang, v)) = voice_for {
             if v.is_empty() {
@@ -3426,6 +3453,7 @@ pub fn run() {
             add_tts_voice,
             reading_voice,
             set_book_voice,
+            set_my_pronounce,
             get_languages,
             save_languages,
             set_line_language,

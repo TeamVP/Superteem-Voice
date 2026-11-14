@@ -107,6 +107,12 @@ pub struct Prefs {
     /// The voice each book reads in, by book id, once its suggested voice has been offered: a natural
     /// voice's id, or "default" for the voice that reads everything else.
     pub book_voices: std::collections::BTreeMap<String, String>,
+    /// The person's own way of saying words in a book, kept on this device: by a book's id (for the whole
+    /// book) or a chapter's (for that chapter alone), each { written: said }. They win over the book's own,
+    /// and a chapter's over the book's. A word said as it's written takes a book's way of saying it out.
+    pub my_pronounce: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    /// Scroll a book's text to keep what's being read aloud in the middle of the window. Unset: yes.
+    pub follow_reading: Option<bool>,
     /// The languages new notes and meetings start in; empty for the primary one alone.
     pub default_languages: Vec<String>,
     /// Languages notes and meetings are translated into when asked, or after processing when

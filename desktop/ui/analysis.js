@@ -786,7 +786,7 @@ function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPie
     const said = pronounceNow();
     const prefer = voice ? await voice(language ?? langNow()) : null;
     if (prefer === false) return;
-    readAloud(button, words, language ?? langNow(), { voice: prefer, pronounce: said, speed, start, onEnd });
+    readAloud(button, words, language ?? langNow(), { onPiece, voice: prefer, pronounce: said, speed, start, onEnd });
   };
   /// Changes what the button says it does, as where reading would start from changes.
   button.describe = (words) => {
@@ -1136,11 +1136,15 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
         el("p", { class: "hint" }, `Read by ${prefs.system_voice || "this device's voice"}. Choose it, and its pitch, in Settings › Reading aloud.`));
     }
 
-    // Pronunciation: the book's, and this chapter's, which win where both say a word.
-    const bookWords = book.pronounce ?? {};
-    const own = chapter?.pronounce ?? {};
-    const ownWords = Object.keys(own).sort((a, b) => a.localeCompare(b));
-    const replaced = ownWords.filter((w) => w in bookWords);
+    // Following: the text scrolls to keep what's read in the middle of the window.
+    const follow = el("input", { type: "checkbox", checked: followsReading() });
+    follow.addEventListener("change", () => setFollowReading(follow.checked));
+    const followGroup = el("div", { class: "book-setting" },
+      el("label", { class: "check-row" }, follow, el("span", {}, "Scroll to follow the reading",
+        el("small", { class: "hint" }, "Keeps what's being read in the middle of the window. Scroll yourself and it waits a few seconds before following again."))));
+
+    // Pronunciation: the book's, this chapter's (which win where both say a word), and the person's own.
+    const pronGroup = el("div", { class: "book-setting" });
     const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
     const hear = (text) => {
       const b = el("button", { class: "icon-only", type: "button", title: "Hear it", "aria-label": "Hear it" }, svg("speak", 14));
@@ -1152,37 +1156,62 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
       });
       return b;
     };
-    const words = el("div", { class: "pron-list" }, ownWords.map((w) => el("div", { class: "pron-item" },
-      el("span", { class: "pron-word" }, w), el("span", { class: "pron-arrow", "aria-hidden": "true" }, "→"),
-      el("span", { class: "pron-said" }, own[w], w in bookWords ? el("small", { class: "pron-replaces" }, `instead of the book's “${bookWords[w]}”`) : null),
-      hear(own[w]))));
     const chapterName = chapter?.title || "this chapter";
-    const pronGroup = el("div", { class: "book-setting" },
-      el("h3", {}, "Pronunciation"),
-      el("p", { class: "hint" }, Object.keys(bookWords).length
-        ? `The book says ${plural(Object.keys(bookWords).length, "name", "names")} its own way, so the voice gets them right.`
-        : "The book doesn't change how the voice says any words."),
-      chapter ? el("p", { class: "hint" }, ownWords.length
-        ? `${chapterName} has ${plural(ownWords.length, "word", "words")} of its own${replaced.length
-          ? `. ${plural(replaced.length, "is one", "are ones")} the book says too: in this chapter, ${chapterName}'s way is used instead`
-          : ", used on top of the book's"}.`
-        : `${chapterName} uses the book's.`) : null,
-      ownWords.length ? el("details", { class: "pron-details", open: replaced.length > 0 && ownWords.length <= 12 }, el("summary", {}, `${chapterName}'s words`), words) : null);
+    const drawPron = () => {
+      const bookList = book.pronounce ?? {};
+      const own = chapter?.pronounce ?? {};
+      const mineBook = myPronounce(book.id);
+      const mineHere = chapter ? myPronounce(chapter.id) : {};
+      const ownWords = Object.keys(own);
+      const replaced = ownWords.filter((w) => w in bookList);
+      // What the list shows: the chapter's own words and the person's, as they're said now.
+      const said = bookWords(book, chapter);
+      const listed = [...new Set([...ownWords, ...Object.keys(chapter ? mineHere : mineBook)])].sort((a, b) => a.localeCompare(b));
+      // The person's own for the book win over a chapter's too.
+      const yours = (w) => w in mineHere || w in mineBook;
+      const list = el("div", { class: "pron-list" }, listed.map((w) => el("div", { class: "pron-item" },
+        el("span", { class: "pron-word" }, w), el("span", { class: "pron-arrow", "aria-hidden": "true" }, "→"),
+        el("span", { class: "pron-said" }, said[w] ?? "as written",
+          yours(w) ? el("small", { class: "pron-replaces" }, "your own") : w in bookList ? el("small", { class: "pron-replaces" }, `instead of the book's “${bookList[w]}”`) : null),
+        hear(said[w] ?? w))));
+      const nMine = Object.keys(mineBook).length + Object.keys(mineHere).length;
+      const change = (forChapter) => el("button", { class: "pill with-icon", type: "button", onclick: async () => {
+        if (await myPronounceDialog(book, forChapter ? chapter : null, { lang })) drawPron();
+      } }, svg("pen", 13), forChapter ? `Change words in ${chapterName}…` : "Change words in the book…");
+      pronGroup.replaceChildren(
+        el("h3", {}, "Pronunciation"),
+        el("p", { class: "hint" }, Object.keys(bookList).length
+          ? `The book says ${plural(Object.keys(bookList).length, "name", "names")} its own way, so the voice gets them right.`
+          : "The book doesn't change how the voice says any words."),
+        chapter ? el("p", { class: "hint" }, ownWords.length
+          ? `${chapterName} has ${plural(ownWords.length, "word", "words")} of its own${replaced.length
+            ? `. ${plural(replaced.length, "is one", "are ones")} the book says too: in this chapter, ${chapterName}'s way is used instead`
+            : ", used on top of the book's"}.`
+          : `${chapterName} uses the book's.`) : null,
+        el("p", { class: "hint" }, nMine
+          ? `You've changed ${plural(nMine, "word", "words")}. Yours are kept on this device and win over the book's; the book itself stays as it is.`
+          : "Change any word to say it your way. Yours are kept on this device and win over the book's."),
+        listed.length ? el("details", { class: "pron-details", open: listed.length <= 12 && (replaced.length > 0 || nMine > 0) },
+          el("summary", {}, chapter ? `${chapterName}'s words` : "Your words"), list) : null,
+        el("div", { class: "pron-change" }, chapter ? change(true) : null, change(false)));
+    };
+    drawPron();
 
     const sampleText = () => {
-      const name = ownWords.find((w) => w in bookWords) ?? ownWords[0] ?? Object.keys(bookWords)[0];
+      const own = Object.keys(chapter?.pronounce ?? {});
+      const name = own.find((w) => w in (book.pronounce ?? {})) ?? own[0] ?? Object.keys(book.pronounce ?? {})[0];
       return `This is how ${book.title || "this book"} sounds, read aloud at this speed${name ? `, with names like ${name}` : ""}.`;
     };
     sample.addEventListener("click", () => {
       if (reading?.button === sample) return stopReading();
       stopReading();
-      readAloud(sample, sampleText(), lang, { voice: chosenVoice(), speed: bookSpeed, pronounce: { ...bookWords, ...own } });
+      readAloud(sample, sampleText(), lang, { voice: chosenVoice(), speed: bookSpeed, pronounce: bookWords(book, chapter) });
     });
 
     const everything = el("button", { class: "link", type: "button" }, "Reading aloud for everything else");
     const dialog = el("dialog", { class: "sheet extras-dialog book-reading-dialog", "aria-label": "Reading aloud settings" },
       el("h2", {}, `Reading ${book.title || "this book"} aloud`),
-      speedGroup, voiceGroup, pronGroup,
+      speedGroup, followGroup, voiceGroup, pronGroup,
       el("div", { class: "actions" }, everything, el("span", { class: "grow" }), sample,
         el("button", { class: "primary pill", type: "button", onclick: () => dialog.close() }, "Done")));
     let toSettings = false;
@@ -1318,6 +1347,137 @@ const READ_SPEED = { min: 0.5, max: 3 };
 /// How fast books are read aloud: their own speed, kept apart from everything else's, normal until changed.
 const bookSpeed = () => prefs.book_read_speed ?? 1;
 
+// ---------- The person's own pronunciations in a book
+
+/// The person's own way of saying words, kept on this device, for a book or a chapter (`key`, its id).
+const myPronounce = (key) => (key && prefs.my_pronounce?.[key]) || {};
+
+/// How the voice says words in `book`, or in its chapter `note`: the book's own, the chapter's on top, then
+/// the person's own for the book, and for the chapter, on top of those. A word they said as it's written is
+/// read as it's written.
+function bookWords(book, note = null) {
+  const out = { ...book?.pronounce, ...note?.pronounce, ...myPronounce(book?.id), ...(note ? myPronounce(note.id) : {}) };
+  for (const w of Object.keys(out)) if (out[w] === w) delete out[w];
+  return out;
+}
+
+async function saveMyPronounce(key, words) {
+  await invoke("set_my_pronounce", { key, words });
+  const all = { ...prefs.my_pronounce };
+  if (Object.keys(words).length) all[key] = words; else delete all[key];
+  prefs.my_pronounce = all;
+}
+
+/// Whether `word` is in `text` as a whole word (or with 's), as respeller finds it.
+const hasWord = (text, word) => new RegExp(`(?<![\\p{L}\\p{M}])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{M}])`, "u").test(text ?? "");
+
+/// Lets the person change how words are said in `book`, or in its chapter `chapter` (a note), for themselves:
+/// on this device, over what the book says, which stays as it is. A chapter shows its own words and the
+/// book's that are in it. Gives true when something changed.
+async function myPronounceDialog(book, chapter = null, { lang = null } = {}) {
+  const key = chapter ? chapter.id : book.id;
+  // What's said without the person's own changes here: for a chapter, the book's with theirs for the book.
+  const base = chapter ? { ...book.pronounce, ...chapter.pronounce, ...myPronounce(book.id) } : { ...book.pronounce };
+  const mine = myPronounce(key);
+  const shownWords = new Set(Object.keys(mine));
+  for (const w of Object.keys(base)) if (!chapter || w in (chapter.pronounce ?? {}) || hasWord(chapter.body, w)) shownWords.add(w);
+  const defaults = {};
+  const words = {};
+  for (const w of shownWords) {
+    if (base[w] && base[w] !== w) defaults[w] = base[w];
+    const said = mine[w] ?? base[w];
+    if (said && said !== w) words[w] = said;
+  }
+  const chosen = prefs.book_voices?.[book.id];
+  const about = chapter ? chapter.title || "this chapter" : book.title || "this book";
+  const result = await pronounceDialog(about, words, { fresh: selectedWord(), defaults, voice: chosen && chosen !== "default" ? chosen : null, lang });
+  if (!result) return false;
+  const next = {};
+  for (const [w, s] of Object.entries(result)) if (defaults[w] !== s) next[w] = s;
+  // One of the book's taken out is said as it's written.
+  for (const w of Object.keys(defaults)) if (!(w in result)) next[w] = w;
+  if (JSON.stringify(next) === JSON.stringify(mine)) return false;
+  try {
+    await saveMyPronounce(key, next);
+  } catch (e) {
+    micToast(`They weren't saved: ${e}`);
+    return false;
+  }
+  return true;
+}
+
+// ---------- Following what's read aloud
+
+/// Whether a book's text scrolls to keep what's read aloud in the middle of the window. On until turned off.
+const followsReading = () => prefs.follow_reading !== false;
+
+async function setFollowReading(on) {
+  try {
+    await saveReading({ followReading: on });
+  } catch (e) {
+    micToast(`That wasn't saved: ${e}`);
+  }
+}
+
+/// The Read aloud menu's item that turns following on or off.
+const followItem = () => ({ icon: followsReading() ? "check" : null, text: "Scroll to follow the reading", run: () => setFollowReading(!followsReading()) });
+
+/// When the person last scrolled themselves: following waits a few seconds after, so it doesn't pull them back.
+let scrolledByHand = 0;
+for (const type of ["wheel", "touchmove"]) addEventListener(type, () => { scrolledByHand = Date.now(); }, { capture: true, passive: true });
+addEventListener("keydown", (e) => { if (/^(PageUp|PageDown|ArrowUp|ArrowDown|Home|End)$/.test(e.key) && !e.target.closest?.("input, textarea, select, [contenteditable]")) scrolledByHand = Date.now(); }, true);
+
+/// The element that scrolls `node`, or the page.
+function scrollerOf(node) {
+  for (let n = node; n && n !== document.body; n = n.parentElement) {
+    const y = getComputedStyle(n).overflowY;
+    if ((y === "auto" || y === "scroll") && n.scrollHeight > n.clientHeight) return n;
+  }
+  return document.scrollingElement;
+}
+
+/// Scrolls so the first line of `range` is about in the middle of the window, unless it's near there already.
+function scrollToMiddle(range) {
+  const rect = [...range.getClientRects()].find((r) => r.height) ?? range.getBoundingClientRect();
+  if (!rect.height) return;
+  const node = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer;
+  const scroller = scrollerOf(node);
+  const view = scroller === document.scrollingElement ? { top: 0, height: innerHeight } : scroller.getBoundingClientRect();
+  const off = rect.top + rect.height / 2 - (view.top + view.height / 2);
+  if (Math.abs(off) < view.height * 0.1) return;
+  scroller.scrollBy({ top: off, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+
+/// An `onPiece` for readAloudButton that keeps what's being read in the middle of the window, while following
+/// is on. `surfaceFor(k)` gives the surface of chapter k (see domSurface); the reading's start says which
+/// chapter and where it began ({ chapter, at }), and each piece's `part` how many chapters on from there it is.
+function readingFollower(surfaceFor) {
+  let run = null, chapter = -1, cursor = 0, last = 0;
+  return (piece) => {
+    const now = reading;
+    if (!piece || !now) return;
+    const start = now.start ?? {};
+    const k = (start.chapter ?? 0) + (piece.part ?? 0);
+    if (now !== run || k !== chapter) {
+      // Going on from where it was, in another voice: from the piece it was saying.
+      const same = run && now.start === run.start && k === chapter;
+      run = now;
+      if (same) cursor = last;
+      // (A little before where it began: reading starts at the start of the word it was in.)
+      else cursor = k === (start.chapter ?? 0) ? Math.max(0, (start.at ?? 0) - 60) : 0;
+      chapter = k;
+    }
+    const surface = surfaceFor(k);
+    if (!surface?.root.isConnected) return;
+    const i = surface.text().indexOf(piece.text, cursor);
+    // A title read out isn't in the text.
+    if (i < 0) return;
+    last = i;
+    cursor = i + piece.text.length;
+    if (followsReading() && Date.now() - scrolledByHand > 5000) scrollToMiddle(surface.range(i, cursor));
+  };
+}
+
 /// One line for the Settings row: which voice, at what speed.
 async function readingAloudSummary() {
   const status = await invoke("tts_status").catch(() => null);
@@ -1333,6 +1493,7 @@ async function saveReading(change) {
     ...(change.voice != null && { tts_voice: change.voice }),
     ...(change.speed != null && { read_speed: change.speed }),
     ...(change.bookSpeed != null && { book_read_speed: change.bookSpeed }),
+    ...(change.followReading != null && { follow_reading: change.followReading }),
     ...(change.pitch != null && { read_pitch: change.pitch }),
     ...(change.systemVoice != null && { system_voice: change.systemVoice }),
     ...(change.readSpeakers != null && { read_speakers: change.readSpeakers }),

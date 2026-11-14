@@ -983,9 +983,10 @@ function commentaryDialog(about, text) {
 /// Asks how to say words the voices get wrong: each word as written, and how to spell it for the voice, with
 /// a button to hear it. `words` is { written: said }; `fresh`, a word to start a new row with (one selected in
 /// the text); `inherited`, for a note in a book, the book's own, shown so they aren't typed again; `voice`, the
-/// voice to try them in (null for the usual one); `lang` the language. Gives the new { written: said }, or
-/// null when cancelled.
-function pronounceDialog(about, words, { fresh = "", inherited = null, voice = null, lang = null } = {}) {
+/// voice to try them in (null for the usual one); `lang` the language. `defaults`, when the words are the
+/// person's own over a book they can't change: how the book says them, so a row says when theirs differs and
+/// can put the book's back. Gives the new { written: said }, or null when cancelled.
+function pronounceDialog(about, words, { fresh = "", inherited = null, voice = null, lang = null, defaults = null } = {}) {
   return new Promise((done) => {
     let result = null;
     const rows = el("div", { class: "pron-rows" });
@@ -1000,14 +1001,26 @@ function pronounceDialog(about, words, { fresh = "", inherited = null, voice = n
         const text = sound.value.trim() || word.value.trim();
         if (text) readAloud(hear, text, lang, { voice });
       });
-      // A word the book says too: the book's way, which this one replaces here.
+      // A word the book says too: the book's way, which this one replaces here. Over a book the person can't
+      // change, whether this way is theirs, with a button to put the book's back.
       const clash = el("small", { class: "pron-replaces" });
       const showClash = () => {
-        const theirs = inherited?.[word.value.trim()];
+        const w = word.value.trim();
+        if (defaults) {
+          const book = defaults[w];
+          const mine = w && (book == null || sound.value.trim() !== book);
+          clash.classList.toggle("mine", !!mine);
+          clash.replaceChildren(...(!mine ? [] : book == null ? ["Your own word."] : [`Your own way. The book says “${book}”.`,
+            el("button", { class: "link", type: "button", onclick: () => { sound.value = book; showClash(); } }, "Put the book's back")]));
+          clash.hidden = !mine;
+          return;
+        }
+        const theirs = inherited?.[w];
         clash.textContent = theirs ? `The book says “${theirs}”. This note's way is used here instead.` : "";
         clash.hidden = !theirs;
       };
       word.addEventListener("input", showClash);
+      sound.addEventListener("input", showClash);
       showClash();
       const row = el("div", { class: "pron-row" }, word, el("span", { class: "pron-arrow", "aria-hidden": "true" }, "→"), sound, hear,
         el("button", { class: "icon-only", type: "button", title: "Take this word out", "aria-label": "Take this word out", onclick: () => { row.remove(); showEmpty(); } }, svg("close", 16)), clash);
@@ -1035,11 +1048,19 @@ function pronounceDialog(about, words, { fresh = "", inherited = null, voice = n
     const theirs = Object.keys(inherited ?? {}).length;
     const dialog = el("dialog", { class: "sheet extras-dialog pron-dialog", "aria-label": "Pronunciation" },
       el("h2", {}, `Pronunciation in ${about}`),
-      el("p", { class: "hint" }, "For words the voice says wrong. Write the word as it is in the text, then spell it the way it sounds, "
-        + "as you'd write it for someone who'd never seen it: Phocion → Foe shee on. Whole words, matching capitals; Phocion's is covered too."),
+      el("p", { class: "hint" }, "For words the voice says wrong. Write the word as it is in the text, then spell it the way it sounds: "
+        + "a few chunks joined by hyphens usually sound more natural than one syllable at a time, as in Themistocles → Thur-mistic-klees. "
+        + "Whole words, matching capitals; Themistocles's is covered too."),
+      defaults ? el("p", { class: "hint" }, "Your changes are kept on this device and used instead of the book's, which stays as it is. "
+        + "Take one of the book's words out to have it said as it's written.") : null,
       theirs ? el("p", { class: "hint" }, `The book's own ${theirs} word${theirs === 1 ? " is" : "s are"} used too. A word here is said this way in this note only, even when the book says it another way.`) : null,
       rows, empty,
       el("button", { class: "pill with-icon pron-add", type: "button", onclick: () => addRow().querySelector("input").focus() }, svg("plus", 14), "Add a word"),
+      defaults ? el("button", { class: "link pron-reset", type: "button", onclick: () => {
+        rows.replaceChildren();
+        for (const [w, s] of Object.entries(defaults).sort(([a], [b]) => a.localeCompare(b))) addRow(w, s);
+        showEmpty();
+      } }, "Put all the book's back") : null,
       el("div", { class: "actions" },
         el("span", { class: "grow" }),
         el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
@@ -1199,6 +1220,25 @@ function listenHeading(p, where, inThis) {
   return { heading: `You stopped listening ${at}`, sub: [p.quote ? `“${shortQuote(p.quote)}”` : "At the start of the chapter", agoText(p.created)].join(" · ") };
 }
 
+/// A book's, or one of its chapter's, Pronunciation button: how the voice says the names in it, which the
+/// person can change for themselves (see myPronounceDialog). Shows how many they've changed.
+function pronounceLink(book, chapter = null, lang = null) {
+  const count = () => Object.keys(myPronounce(chapter ? chapter.id : book.id)).length;
+  const button = el("button", { class: "link commentary-link", type: "button",
+    title: chapter ? "How the voice says the names in this chapter: change any for yourself" : "How the voice says the names in this book: change any for yourself" });
+  const draw = () => button.replaceChildren(svg("cog", 13), count() ? `Pronunciation (${count()} yours)` : "Pronunciation");
+  draw();
+  // A word selected in the text starts a new row.
+  button.addEventListener("mousedown", (e) => e.preventDefault());
+  button.addEventListener("click", async () => {
+    if (await myPronounceDialog(book, chapter, { lang: typeof lang === "function" ? lang() : lang })) {
+      draw();
+      micToast(reading ? "Saved. They're used from the next time you press Read aloud." : "Saved on this device.");
+    }
+  });
+  return button;
+}
+
 const READ_CHAPTER = "Read the chapter aloud (from where you click, or what you select). Hold for more";
 const READ_ON = "Read on from where you stopped listening (or from where you click, or what you select). Hold for more";
 
@@ -1235,7 +1275,8 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     const bodyHolder = el("div", { class: "book-chapter-holder" }, body);
     const lang = () => itemLanguages(note)[0];
     // The note's own pronunciations go on top of the book's: where both say a word, the note's way is used.
-    const pronounce = { ...book.pronounce, ...note.pronounce };
+    // The person's own, kept on this device, go on top of both (see bookWords), as reading starts.
+    const pronounce = () => bookWords(book, note);
     const place = listenPlace(book.id);
     let marks = null;
     let surface = null;
@@ -1279,6 +1320,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
         "-",
         { icon: "trash", text: "Forget where you stopped", disabled: !p, run: () => { place.forget(); micToast("Forgotten. Read aloud starts at the top of the chapter again."); } },
         "-",
+        followItem(),
         { icon: "cog", text: "Settings…", run: () => bookReadingDialog(book, { button: speak, chapter: note, lang: lang() }) },
       ];
     };
@@ -1292,6 +1334,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
       startAt = 0;
       return whole();
     }, READ_CHAPTER, { lang, voice: (l) => bookVoice(book, l), pronounce, speed: bookSpeed,
+      onPiece: readingFollower((k) => (k === 0 ? surface : null)),
       startOf: () => ({ chapter: 0, at: startAt }), onEnd: keepWhereStopped, menu: listenMenu });
     const mark = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or where you clicked. Hold for all the book's bookmarks", "aria-label": "Bookmark" }, svg("bookmark", 16));
     mark.addEventListener("mousedown", (e) => e.preventDefault());
@@ -1301,7 +1344,8 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     onHold(mark, () => bookBookmarksDialog(book, filter, (what) => (what === "marks" ? marks?.reload() : marks?.redraw()), { chapter: note.id }));
     const notes = commentary(note.commentary, note.title || chapter.title, book);
     const bar = el("div", { class: "book-contents-bar" },
-      el("span", { class: "book-bar-links" }, el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"), notes.link),
+      el("span", { class: "book-bar-links" }, el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"), notes.link,
+        pronounceLink(book, note, lang)),
       el("span", { class: "top-actions" }, mark, speak));
     const page = el("div", { class: "page book book-read" },
       bar,
@@ -1351,9 +1395,9 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
       // The pill sits in the heading's line, so its bottom rests on the title's baseline.
       el("h1", { class: "book-locked-title" }, book.title || "Untitled book",
         el("span", { class: "reader-pill", title: "For reading: the chapters stay as they are" }, "Reader"))),
-    book.author || notes.link || about.link ? el("div", { class: "book-meta" },
+    el("div", { class: "book-meta" },
       book.author ? el("p", { class: "book-byline" }, `by ${book.author}`) : "",
-      notes.link || about.link ? el("div", { class: "book-links" }, about.link, notes.link) : "") : "",
+      el("div", { class: "book-links" }, about.link, notes.link, pronounceLink(book))),
     about.panel ?? "", notes.panel ?? "",
     listenResume(book.id, contents, (c, how) => openBook(book.id, { chapter: c.id, listen: how })),
     search.bar, search.results, list);
@@ -1581,8 +1625,10 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
     }, READ_BOOK, {
       voice: (l) => bookVoice(book, l),
       speed: bookSpeed,
-      // Each chapter is read with its own pronunciations on top of the book's, from the one reading starts in.
-      pronounce: () => attached.slice(startPlace.chapter).map((a) => ({ ...book.pronounce, ...a.c.pronounce })),
+      // Each chapter is read with its own pronunciations on top of the book's, from the one reading starts in,
+      // and the person's own on top (see bookWords).
+      pronounce: () => attached.slice(startPlace.chapter).map((a) => bookWords(book, a.c)),
+      onPiece: readingFollower((k) => attached[k]?.surface),
       startOf: () => startPlace,
       onEnd: (r) => {
         const stop = stoppedAt(attached.map((a) => a.surface.text()), r);
@@ -1603,6 +1649,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
           "-",
           { icon: "trash", text: "Forget where you stopped", disabled: !p, run: () => { place.forget(); micToast("Forgotten. Read aloud starts at the top of the book again."); } },
           "-",
+          followItem(),
           { icon: "cog", text: "Settings…", run: () => bookReadingDialog(book, { button: speak }) },
         ];
       },

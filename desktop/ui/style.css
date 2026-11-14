@@ -1519,7 +1519,8 @@ body.note-chat-float .chat-head { padding-left: 8px; }
   position: sticky; top: 0; z-index: 6; margin: -40px -40px 0; padding: 14px 40px 10px;
   background: var(--bg); border-bottom: 1px solid var(--line);
 }
-.book-bar-links { display: inline-flex; align-items: center; gap: 18px; min-width: 0; }
+.book-bar-links { display: inline-flex; align-items: center; gap: 18px; min-width: 0; flex-wrap: wrap; row-gap: 4px; }
+.book-bar-links .commentary-link { display: inline-flex; align-items: center; gap: 5px; }
 @media (max-width: 720px) { .book-contents-bar { margin: -12px -16px 0; padding: 8px 16px; } }
 
 /* Commentary on a book or a note: a link, and the panel it opens at the top. */
@@ -1660,6 +1661,15 @@ dialog.sheet.extras-dialog { max-width: 560px; }
 .pron-said { display: flex; flex-direction: column; overflow-wrap: anywhere; }
 .pron-item .icon-only.on { color: var(--key); }
 .book-reading-dialog .actions { flex-wrap: wrap; }
+.pron-change { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+.book-reading-dialog .check-row { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.book-reading-dialog .check-row input { margin: 3px 0 0; accent-color: var(--key); }
+.book-reading-dialog .check-row span { display: flex; flex-direction: column; gap: 2px; }
+.book-reading-dialog .check-row small.hint { margin: 0; }
+/* A word the person said their own way, over the book's, and the button that puts the book's back. */
+.pron-replaces.mine { color: var(--accent-text); }
+.pron-replaces .link { font-size: 12px; margin-left: 6px; }
+.pron-reset { margin: 2px 0 14px 6px; }
 
 /* A book's cover beside its title, who wrote it, and its About panel. */
 .book-cover { width: 44px; height: 62px; object-fit: cover; border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 0.25); flex: none; }

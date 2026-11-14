@@ -818,7 +818,7 @@ fn install_bundled(now: u64) -> Result<(), String> {
 }
 
 /// The example book's version, which is its `version`: what changed in each is in its `changes`.
-const EXAMPLE_BOOK: u32 = 8;
+const EXAMPLE_BOOK: u32 = 9;
 const EXAMPLE_ID: &str = "plutarch-lives";
 
 fn example_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf> {
@@ -943,7 +943,7 @@ mod tests {
     fn themistocles_and_caesar_have_commentary_and_their_own_way_of_saying_names() {
         let dir = example_dir(None).expect("the example book is beside the crate");
         let book: Book = library::read_json(&dir.join(format!("{EXAMPLE_ID}.json"))).unwrap();
-        for (file, overrides) in [("plutarch-04-01-themistocles", "Themistocles"), ("plutarch-17-02-caesar", "Caius")] {
+        for (file, overrides) in [("plutarch-04-01-themistocles", "Eurybiades"), ("plutarch-17-02-caesar", "Caius")] {
             let note: notes::Note = library::read_json(&dir.join("notes").join(format!("{file}.json"))).unwrap();
             // The commentary says when, in our calendar.
             assert!(note.commentary.contains(" BC"), "{file} says when");

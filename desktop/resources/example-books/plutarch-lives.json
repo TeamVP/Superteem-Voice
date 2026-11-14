@@ -7,7 +7,7 @@
   "language": "en",
   "source": "https://www.gutenberg.org/ebooks/674",
   "licence": "public-domain",
-  "version": 8,
+  "version": 9,
   "changes": [
     {
       "version": 1,
@@ -48,6 +48,11 @@
       "version": 8,
       "date": "2026-11-14",
       "summary": "Themistocles and Caesar gain commentary, with when each lived in our own calendar and what else was happening in the world, and their own pronunciations of the names in them. Where a chapter says a name its own way, that's used in place of the book's."
+    },
+    {
+      "version": 9,
+      "date": "2026-11-14",
+      "summary": "Easier, more natural ways of saying the names in Themistocles and Caesar, and Themistocles said as Thur-mistic-klees."
     }
   ],
   "links": [
@@ -224,7 +229,7 @@
     "Teribazus": "Teri bayzus",
     "Thales": "Thayleez",
     "Thebans": "Theebons",
-    "Themistocles": "Thuh-mistic-kleez",
+    "Themistocles": "Thur-mistic-klees",
     "Thermodon": "Thurmadonn",
     "Thermopylae": "Thuh-moppilee",
     "Theseus": "Theeceeus",
