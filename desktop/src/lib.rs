@@ -1730,11 +1730,16 @@ async fn dictate_cancel(session: Option<u64>) -> Result<(), String> {
     blocking(listen::dictate_cancel).await?
 }
 
-/// Reads text aloud with the system's voice, for platforms whose web view has none (Android).
+/// The slowest and fastest anything is read aloud: half and three times normal.
+const READ_SPEED: (f32, f32) = (0.5, 3.0);
+
+/// Reads text aloud with the system's voice, for platforms whose web view has none (Android): at `speed`,
+/// else the chosen speed.
 #[tauri::command]
-async fn speak_text(text: String, language: Option<String>) -> Result<(), String> {
+async fn speak_text(text: String, language: Option<String>, speed: Option<f32>) -> Result<(), String> {
     let p = prefs::load();
-    let (rate, pitch) = (p.read_speed.unwrap_or(1.0), p.read_pitch.unwrap_or(1.0));
+    let rate = speed.filter(|s| s.is_finite()).unwrap_or(p.read_speed.unwrap_or(1.0)).clamp(READ_SPEED.0, READ_SPEED.1);
+    let pitch = p.read_pitch.unwrap_or(1.0);
     let language = language.unwrap_or_default();
     blocking(move || recorder::speak(&text, rate, pitch, &language)).await?
 }
@@ -2483,11 +2488,11 @@ fn set_book_voice(book: String, voice: String) -> Result<(), String> {
     .map(|_| ())
 }
 
-/// Speech for `text` in a natural voice (`voice`, else the main one) at the chosen speed, as a WAV for the
-/// page to play.
+/// Speech for `text` in a natural voice (`voice`, else the main one) at `speed`, else the chosen speed, as a
+/// WAV for the page to play. (A book gives its own reading speed.)
 #[tauri::command]
-async fn natural_speak(text: String, voice: Option<String>) -> Result<tauri::ipc::Response, String> {
-    let speed = prefs::load().read_speed.unwrap_or(1.0);
+async fn natural_speak(text: String, voice: Option<String>, speed: Option<f32>) -> Result<tauri::ipc::Response, String> {
+    let speed = speed.filter(|s| s.is_finite()).unwrap_or_else(|| prefs::load().read_speed.unwrap_or(1.0)).clamp(READ_SPEED.0, READ_SPEED.1);
     let wav = blocking(move || match voice {
         Some(id) => tts::speak_as(&tts::find_voice(&id)?, &text, speed),
         None => tts::speak(&text, speed),
@@ -2769,6 +2774,7 @@ fn save_voice_settings(
     natural: Option<bool>,
     voice: Option<String>,
     speed: Option<f32>,
+    book_speed: Option<f32>,
     pitch: Option<f32>,
     system_voice: Option<String>,
     read_speakers: Option<bool>,
@@ -2793,8 +2799,11 @@ fn save_voice_settings(
         if let Some(n) = natural {
             p.natural_voice = n && tts::ready(&tts::chosen_in(p, &tts::voices()));
         }
-        if let Some(s) = speed {
-            p.read_speed = Some(s.clamp(0.5, 2.0));
+        if let Some(s) = speed.filter(|s| s.is_finite()) {
+            p.read_speed = Some(s.clamp(READ_SPEED.0, READ_SPEED.1));
+        }
+        if let Some(s) = book_speed.filter(|s| s.is_finite()) {
+            p.book_read_speed = Some(s.clamp(READ_SPEED.0, READ_SPEED.1));
         }
         if let Some(s) = pitch {
             p.read_pitch = Some(s.clamp(0.5, 2.0));

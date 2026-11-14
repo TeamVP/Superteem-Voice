@@ -708,13 +708,16 @@ let reading = null;
 /// `pieces()`, instead of text, gives the pieces to say already split (see speechPieces), and `onPiece` is
 /// told each as it's said, then null when reading ends. `voice(lang)`, before each reading, gives the voice
 /// to read in instead of the usual one (a book's own; see bookVoice), or false to not read. `pronounce`: a
-/// book's own pronunciations (see respeller).
+/// book's own pronunciations (see respeller), or a function giving them as reading starts (straight after
+/// `startOf()`): a list of them, one for each chapter, when what's read goes on through chapters (see CHAPTER).
+/// `speed`: how fast to read (1 is normal), or a function giving it, looked at as it reads; unset for the
+/// speed in Settings. A book reads at its own (see bookSpeed).
 /// `startOf()`, asked straight after `text()`, says where in the page that text begins (anything the page
 /// likes; readText takes one too), and `onEnd(reading)` is told when a reading ends, stopped or finished:
 /// { start, pieces, at (the piece to go on from; pieces.length when it read to the end), heard (about how
 /// many words were heard), finished }. `menu()` gives the items of a menu (see showContextMenu) shown when
 /// the button is held down, or right-clicked.
-function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPiece, voice, pronounce, startOf, onEnd, menu } = {}) {
+function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPiece, voice, pronounce, speed, startOf, onEnd, menu } = {}) {
   const button = label
     ? el("button", { class: "pill with-icon read-aloud", type: "button", title: what, "aria-pressed": "false" }, svg("play", 14), label)
     : el("button", { class: "icon-only read-aloud", type: "button", title: what, "aria-label": what, "aria-pressed": "false" },
@@ -724,6 +727,7 @@ function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPie
   if (label) button.reading = (on) => button.replaceChildren(svg(on ? "pause" : "play", 14), on ? "Stop" : label);
   button.addEventListener("mousedown", (e) => e.preventDefault());
   const langNow = () => (typeof lang === "function" ? lang() : lang);
+  const pronounceNow = () => (typeof pronounce === "function" ? pronounce() : pronounce);
   // Held down for half a second (or right-clicked), the button shows its menu instead of reading.
   let held = false;
   if (menu) {
@@ -759,28 +763,30 @@ function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPie
     const words = pieces ? null : text();
     const start = startOf?.();
     const given = pieces?.();
+    const said = pronounceNow();
     const prefer = voice ? await voice(langNow()) : null;
     if (prefer === false) return;
-    readAloud(button, words, langNow(), { pieces: given, onPiece, voice: prefer, pronounce, start, onEnd });
+    readAloud(button, words, langNow(), { pieces: given, onPiece, voice: prefer, pronounce: said, speed, start, onEnd });
   });
   button.isReading = () => reading?.button === button;
   /// Goes on reading from the piece being said, in the voice `voice` now gives: after the voice is changed.
   button.readOn = async () => {
     if (reading?.button !== button) return;
-    const { pieces: all, index = 0, onPiece: follow, start } = reading;
+    const { pieces: all, index = 0, onPiece: follow, start, pronounce: said } = reading;
     stopReading();
     // The old reading lets go of the button first.
     await new Promise((resolve) => setTimeout(resolve, 60));
     const prefer = voice ? await voice(langNow()) : null;
     if (prefer === false || !all?.length) return;
-    readAloud(button, null, langNow(), { pieces: all.slice(index), onPiece: follow, voice: prefer, pronounce, start, onEnd });
+    readAloud(button, null, langNow(), { pieces: all.slice(index), onPiece: follow, voice: prefer, pronounce: said, speed, start, onEnd });
   };
   /// Reads `text` now, in place of whatever is being read: "Read aloud from here". `start` as startOf gives.
   button.readText = async (words, language, start) => {
     stopReading();
+    const said = pronounceNow();
     const prefer = voice ? await voice(language ?? langNow()) : null;
     if (prefer === false) return;
-    readAloud(button, words, language ?? langNow(), { voice: prefer, pronounce, start, onEnd });
+    readAloud(button, words, language ?? langNow(), { voice: prefer, pronounce: said, speed, start, onEnd });
   };
   /// Changes what the button says it does, as where reading would start from changes.
   button.describe = (words) => {
@@ -793,6 +799,10 @@ function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPie
 
 /// Marks a line of text to read aloud as a heading, so it has a pause before and after it.
 const HEADING = "\u2063";
+/// Marks a line as a heading that starts the next chapter, in text that reads on through a book's chapters:
+/// each piece knows which chapter it's in (its `part`, counted from the first), so each chapter's own
+/// pronunciations are used for it.
+const CHAPTER = "\u2064";
 
 /// Pauses, in milliseconds at normal speed: after a sentence, after a paragraph (a line), and around a
 /// heading; `line` is added on top wherever the text breaks a line (the end of a paragraph or heading, or a
@@ -804,13 +814,16 @@ const PAUSE = { phrase: 150, sentence: 350, paragraph: 700, heading: 800, line: 
 function speechPieces(text) {
   const pieces = [];
   const lines = (text ?? "").replace(/\r/g, "").split("\n");
+  let part = 0;
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i].trim();
     if (!raw) { if (pieces.length) pieces.at(-1).after = Math.max(pieces.at(-1).after, PAUSE.paragraph + PAUSE.line); continue; }
     // A line marked as one, or written as one in Markdown.
-    if (raw.startsWith(HEADING) || /^#{1,6}\s/.test(raw)) {
-      const heading = raw.replace(HEADING, "").replace(/^#{1,6}\s+/, "").trim();
-      if (heading) pieces.push({ text: heading, before: PAUSE.heading + PAUSE.line, after: PAUSE.heading + PAUSE.line });
+    // A chapter's title, once something has been read, starts the next chapter.
+    if (raw.startsWith(CHAPTER) && pieces.length) part += 1;
+    if (raw.startsWith(HEADING) || raw.startsWith(CHAPTER) || /^#{1,6}\s/.test(raw)) {
+      const heading = raw.replace(HEADING, "").replace(CHAPTER, "").replace(/^#{1,6}\s+/, "").trim();
+      if (heading) pieces.push({ text: heading, before: PAUSE.heading + PAUSE.line, after: PAUSE.heading + PAUSE.line, part });
       continue;
     }
     // Sentences end at . ! ? and their Chinese forms, which have no space after them.
@@ -818,9 +831,9 @@ function speechPieces(text) {
     sentences.forEach((sentence, n) => {
       const last = n === sentences.length - 1;
       const parts = sentence.length > 280 ? sentence.split(/(?<=[,;，；])\s*/).filter(Boolean) : [sentence];
-      parts.forEach((part, m) => {
+      parts.forEach((bit, m) => {
         const end = m === parts.length - 1;
-        pieces.push({ text: part, before: 0, after: !end ? PAUSE.phrase : last ? PAUSE.paragraph + PAUSE.line : PAUSE.sentence });
+        pieces.push({ text: bit, before: 0, after: !end ? PAUSE.phrase : last ? PAUSE.paragraph + PAUSE.line : PAUSE.sentence, part });
       });
     });
   }
@@ -851,18 +864,23 @@ function pause(ms, mine) {
 /// Says the text a sentence at a time, with a pause after each and longer ones around headings and between
 /// paragraphs. Short pieces also keep long text going where a voice gives up after a while, and let it stop
 /// between them.
-async function readAloud(button, text, lang, { pieces: given, onPiece, voice: prefer, pronounce, start, onEnd } = {}) {
+async function readAloud(button, text, lang, { pieces: given, onPiece, voice: prefer, pronounce, speed, start, onEnd } = {}) {
   const pieces = given ?? speechPieces(text);
   if (!pieces.length) return;
-  // What the voice is given: the piece, with the book's own pronunciations. onPiece still gets the words
-  // as written.
-  const said = respeller(pronounce);
+  // What the voice is given: the piece, with the book's own pronunciations, or with those of the chapter it's
+  // in when there's a list, one for each chapter. onPiece still gets the words as written.
+  const byPart = Array.isArray(pronounce) ? pronounce.map(respeller) : null;
+  const whole = byPart ? null : respeller(pronounce);
+  const said = (piece) => (byPart ? byPart[Math.min(piece.part ?? 0, byPart.length - 1)] ?? ((t) => t) : whole)(piece.text);
+  // How fast: the speed given, looked at for each piece so a change while reading is heard from the next,
+  // else the one in Settings.
+  const rate = () => Math.min(READ_SPEED.max, Math.max(READ_SPEED.min, Number(typeof speed === "function" ? speed() : speed) || prefs.read_speed || 1));
   // The gap between two pieces: the longer of what the first wants after it and the next before it, in
   // proportion to the speed: at half speed twice as long, at double speed half as long. (Read at each gap,
   // so changing the speed while reading takes effect at once.)
-  const gap = (i) => (i + 1 < pieces.length ? Math.max(pieces[i].after, pieces[i + 1].before) : 0) / Math.max(0.5, prefs.read_speed ?? 1);
+  const gap = (i) => (i + 1 < pieces.length ? Math.max(pieces[i].after, pieces[i + 1].before) : 0) / rate();
   // Where it is, so it can go on from there in another voice (see readOn).
-  const mine = { button, cancelled: false, onPiece, what: button.dataset.what || "Read aloud", pieces, index: 0, start, at: 0, heard: 0, began: 0 };
+  const mine = { button, cancelled: false, onPiece, what: button.dataset.what || "Read aloud", pieces, index: 0, start, at: 0, heard: 0, began: 0, pronounce };
   // Each piece heard to its end counts all its words; one stopped part way, about as many as were said by then.
   const heardAll = (i) => { mine.heard += wordCount(pieces[i].text); mine.at = i + 1; mine.began = 0; };
   reading = mine;
@@ -877,10 +895,10 @@ async function readAloud(button, text, lang, { pieces: given, onPiece, voice: pr
     const voice = isDesktop() ? await invoke("reading_voice", { language: lang ?? null, prefer: prefer ?? null }).catch(() => null) : null;
     if (voice) {
       // The natural voice makes the next piece while this one plays, so there's no gap between them.
-      let next = invoke("natural_speak", { text: said(pieces[0].text), voice: voice.id });
+      let next = invoke("natural_speak", { text: said(pieces[0]), voice: voice.id, speed: rate() });
       for (let i = 0; i < pieces.length && !mine.cancelled; i++) {
         const wav = await next;
-        if (i + 1 < pieces.length) next = invoke("natural_speak", { text: said(pieces[i + 1].text), voice: voice.id });
+        if (i + 1 < pieces.length) next = invoke("natural_speak", { text: said(pieces[i + 1]), voice: voice.id, speed: rate() });
         if (mine.cancelled) break;
         mine.index = mine.at = i;
         onPiece?.(pieces[i], voice);
@@ -894,7 +912,7 @@ async function readAloud(button, text, lang, { pieces: given, onPiece, voice: pr
         mine.index = mine.at = i;
         onPiece?.(pieces[i], null);
         mine.began = Date.now();
-        await systemSay(said(pieces[i].text), lang);
+        await systemSay(said(pieces[i]), lang, rate());
         if (!mine.cancelled) heardAll(i);
         await pause(gap(i), mine);
       }
@@ -905,7 +923,7 @@ async function readAloud(button, text, lang, { pieces: given, onPiece, voice: pr
   if (mine.began && mine.at < pieces.length) {
     // About two and a half words a second at normal speed.
     const seconds = (Date.now() - mine.began) / 1000;
-    mine.heard += Math.min(wordCount(pieces[mine.at].text), Math.floor(seconds * 2.5 * (prefs.read_speed ?? 1)));
+    mine.heard += Math.min(wordCount(pieces[mine.at].text), Math.floor(seconds * 2.5 * rate()));
   }
   mine.finished = !mine.cancelled && mine.at >= pieces.length;
   try { onEnd?.(mine); } catch (e) { console.error(e); }
@@ -1024,14 +1042,171 @@ function bookVoiceDialog(book, usual, suggested, busy, current) {
   });
 }
 
-/// Says `text` in the system's voice chosen in Settings, at the chosen speed and pitch. (Named apart from
+/// The speeds a book offers to read at, as buttons; any other between READ_SPEED's is on the slider.
+const BOOK_SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+/// Settings for reading a book aloud, from Read aloud's menu: how fast books are read (kept for every book, and
+/// normal until changed), which voice reads this one, a sample to hear both, and how it says names: the book's
+/// own, and `chapter`'s (a note, when reading one chapter), which are used instead of the book's where both
+/// say a word. `button`: the Read aloud button, which goes on in a newly chosen voice from where it is. `lang`:
+/// the language read.
+async function bookReadingDialog(book, { button = null, chapter = null, lang = null } = {}) {
+  const status = isDesktop() ? await invoke("tts_status").catch(() => null) : null;
+  const usual = isDesktop() ? await invoke("reading_voice", { language: lang ?? null, prefer: null }).catch(() => null) : null;
+  return new Promise((done) => {
+    const sample = el("button", { class: "pill with-icon", type: "button" }, svg("speak", 14), "Hear it");
+    sample.dataset.what = "Hear it";
+    const chosenVoice = () => {
+      const c = prefs.book_voices?.[book.id];
+      return c && c !== "default" ? c : null;
+    };
+
+    // Speed: buttons for the usual few, and a slider for anything between.
+    const shown = el("span", { class: "value" }, speedText(bookSpeed()));
+    const slider = el("input", { type: "range", min: String(READ_SPEED.min), max: String(READ_SPEED.max), step: "0.05", value: String(bookSpeed()), "aria-label": "Reading speed" });
+    const chips = BOOK_SPEEDS.map((v) => el("button", { class: "pill speed-chip", type: "button", "data-speed": String(v), "aria-pressed": "false" }, v === 1 ? "1× normal" : `${v}×`));
+    const mark = (v) => {
+      shown.textContent = speedText(v);
+      slider.value = String(v);
+      for (const c of chips) {
+        const on = Math.abs(Number(c.dataset.speed) - v) < 0.01;
+        c.classList.toggle("on", on);
+        c.setAttribute("aria-pressed", String(on));
+      }
+    };
+    const setSpeed = async (v) => {
+      v = Math.min(READ_SPEED.max, Math.max(READ_SPEED.min, Math.round(v * 100) / 100));
+      mark(v);
+      try {
+        await saveReading({ bookSpeed: v });
+      } catch (e) {
+        micToast(`The speed wasn't saved: ${e}`);
+      }
+    };
+    for (const c of chips) c.addEventListener("click", () => setSpeed(Number(c.dataset.speed)));
+    slider.addEventListener("input", () => mark(Number(slider.value)));
+    slider.addEventListener("change", () => setSpeed(Number(slider.value)));
+    mark(bookSpeed());
+    const speedGroup = el("div", { class: "book-setting" },
+      el("h3", {}, "Speed"),
+      el("p", { class: "hint" }, "How fast books are read aloud. It's kept for every book, apart from how fast notes and transcripts are read, and changes what's being read from its next sentence."),
+      el("div", { class: "speed-chips", role: "group", "aria-label": "Reading speed" }, chips),
+      el("div", { class: "slider" }, slider, shown));
+
+    // Voice: the person's usual one, the book's suggested one (downloaded when chosen) and any other natural
+    // voice on this device that speaks the book's language.
+    let voiceGroup;
+    const voices = status?.supported ? status.voices.filter((v) => !lang || !v.langs || v.langs.includes(lang)) : [];
+    const suggested = book.voice ? voices.find((v) => v.id === book.voice) : null;
+    if (voices.length) {
+      const usualName = usual ? usual.name : prefs.system_voice || "The system's voice";
+      const select = el("select", { "aria-label": "Voice for this book" },
+        el("option", { value: "default" }, `My usual voice: ${usualName}`),
+        voices.filter((v) => v.ready || v.id === book.voice).map((v) => el("option", { value: v.id },
+          `${v.name}, ${voiceKind(v)}${v.id === book.voice ? " (this book's own)" : ""}${v.ready ? "" : ` — download${v.size ? `, ${Math.round(v.size / 1e6)} MB` : ""}`}`)));
+      select.value = prefs.book_voices?.[book.id] ?? "default";
+      const voiceStatus = el("p", { class: "hint book-voice-status" });
+      select.addEventListener("change", async () => {
+        const id = select.value;
+        const v = voices.find((x) => x.id === id);
+        select.disabled = true;
+        try {
+          if (v && !v.ready) {
+            voiceStatus.replaceChildren(el("span", { class: "spinner" }), " ", `Downloading ${v.name}… `, el("span", { "data-tts-progress": v.id }, ""));
+            await invoke("download_tts", { id: v.id });
+            v.ready = true;
+          }
+          if (await saveBookVoice(book, id)) {
+            voiceStatus.textContent = "";
+            if (button?.isReading()) button.readOn();
+          }
+        } catch (e) {
+          voiceStatus.textContent = `${v?.name ?? "The voice"} couldn't be downloaded: ${e}`;
+          select.value = prefs.book_voices?.[book.id] ?? "default";
+        }
+        select.disabled = false;
+      });
+      voiceGroup = el("div", { class: "book-setting" },
+        el("h3", {}, "Voice"),
+        el("p", { class: "hint" }, suggested ? `This book suggests ${suggested.name}. The voice chosen here reads only this book.` : "The voice chosen here reads only this book."),
+        select, voiceStatus);
+    } else {
+      voiceGroup = el("div", { class: "book-setting" },
+        el("h3", {}, "Voice"),
+        el("p", { class: "hint" }, `Read by ${prefs.system_voice || "this device's voice"}. Choose it, and its pitch, in Settings › Reading aloud.`));
+    }
+
+    // Pronunciation: the book's, and this chapter's, which win where both say a word.
+    const bookWords = book.pronounce ?? {};
+    const own = chapter?.pronounce ?? {};
+    const ownWords = Object.keys(own).sort((a, b) => a.localeCompare(b));
+    const replaced = ownWords.filter((w) => w in bookWords);
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+    const hear = (text) => {
+      const b = el("button", { class: "icon-only", type: "button", title: "Hear it", "aria-label": "Hear it" }, svg("speak", 14));
+      b.dataset.what = "Hear it";
+      b.addEventListener("click", async () => {
+        if (reading?.button === b) return stopReading();
+        stopReading();
+        readAloud(b, text, lang, { voice: chosenVoice(), speed: bookSpeed });
+      });
+      return b;
+    };
+    const words = el("div", { class: "pron-list" }, ownWords.map((w) => el("div", { class: "pron-item" },
+      el("span", { class: "pron-word" }, w), el("span", { class: "pron-arrow", "aria-hidden": "true" }, "→"),
+      el("span", { class: "pron-said" }, own[w], w in bookWords ? el("small", { class: "pron-replaces" }, `instead of the book's “${bookWords[w]}”`) : null),
+      hear(own[w]))));
+    const chapterName = chapter?.title || "this chapter";
+    const pronGroup = el("div", { class: "book-setting" },
+      el("h3", {}, "Pronunciation"),
+      el("p", { class: "hint" }, Object.keys(bookWords).length
+        ? `The book says ${plural(Object.keys(bookWords).length, "name", "names")} its own way, so the voice gets them right.`
+        : "The book doesn't change how the voice says any words."),
+      chapter ? el("p", { class: "hint" }, ownWords.length
+        ? `${chapterName} has ${plural(ownWords.length, "word", "words")} of its own${replaced.length
+          ? `. ${plural(replaced.length, "is one", "are ones")} the book says too: in this chapter, ${chapterName}'s way is used instead`
+          : ", used on top of the book's"}.`
+        : `${chapterName} uses the book's.`) : null,
+      ownWords.length ? el("details", { class: "pron-details", open: replaced.length > 0 && ownWords.length <= 12 }, el("summary", {}, `${chapterName}'s words`), words) : null);
+
+    const sampleText = () => {
+      const name = ownWords.find((w) => w in bookWords) ?? ownWords[0] ?? Object.keys(bookWords)[0];
+      return `This is how ${book.title || "this book"} sounds, read aloud at this speed${name ? `, with names like ${name}` : ""}.`;
+    };
+    sample.addEventListener("click", () => {
+      if (reading?.button === sample) return stopReading();
+      stopReading();
+      readAloud(sample, sampleText(), lang, { voice: chosenVoice(), speed: bookSpeed, pronounce: { ...bookWords, ...own } });
+    });
+
+    const everything = el("button", { class: "link", type: "button" }, "Reading aloud for everything else");
+    const dialog = el("dialog", { class: "sheet extras-dialog book-reading-dialog", "aria-label": "Reading aloud settings" },
+      el("h2", {}, `Reading ${book.title || "this book"} aloud`),
+      speedGroup, voiceGroup, pronGroup,
+      el("div", { class: "actions" }, everything, el("span", { class: "grow" }), sample,
+        el("button", { class: "primary pill", type: "button", onclick: () => dialog.close() }, "Done")));
+    let toSettings = false;
+    everything.addEventListener("click", () => { toSettings = true; dialog.close(); });
+    dialog.addEventListener("close", () => {
+      if (reading?.button === sample || dialog.contains(reading?.button)) stopReading();
+      dialog.remove();
+      if (toSettings) showReadingSettings();
+      done();
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+    chips.find((c) => c.classList.contains("on"))?.focus();
+  });
+}
+
+/// Says `text` in the system's voice chosen in Settings, at `speed` (else the chosen speed) and the chosen pitch. (Named apart from
 /// the voice panel's say() in app.js: two top-level functions with one name are one, the later.)
-function systemSay(text, lang) {
+function systemSay(text, lang, speed) {
   const tag = lang ? languageTag(lang) : "";
-  if (platform === "android" || !window.speechSynthesis) return invoke("speak_text", { text, language: tag || null });
+  if (platform === "android" || !window.speechSynthesis) return invoke("speak_text", { text, language: tag || null, speed: speed ?? null });
   return new Promise((resolve) => {
     const u = new SpeechSynthesisUtterance(text.replace(/[“”]/g, ""));
-    u.rate = prefs.read_speed ?? 1;
+    u.rate = speed ?? prefs.read_speed ?? 1;
     u.pitch = prefs.read_pitch ?? 1;
     // The voice chosen in Settings, unless the text is in a language it doesn't speak: then one that does.
     const all = speechSynthesis.getVoices();
@@ -1135,7 +1310,13 @@ function systemVoices() {
   });
 }
 
-const speedText = (s) => (Math.abs(s - 1) < 0.01 ? "Normal" : `${s.toFixed(2).replace(/0$/, "")}×`);
+const speedText = (s) => (Math.abs(s - 1) < 0.01 ? "Normal" : `${Number(s.toFixed(2))}×`);
+
+/// The slowest and fastest anything is read aloud.
+const READ_SPEED = { min: 0.5, max: 3 };
+
+/// How fast books are read aloud: their own speed, kept apart from everything else's, normal until changed.
+const bookSpeed = () => prefs.book_read_speed ?? 1;
 
 /// One line for the Settings row: which voice, at what speed.
 async function readingAloudSummary() {
@@ -1151,6 +1332,7 @@ async function saveReading(change) {
     ...(change.natural != null && { natural_voice: change.natural }),
     ...(change.voice != null && { tts_voice: change.voice }),
     ...(change.speed != null && { read_speed: change.speed }),
+    ...(change.bookSpeed != null && { book_read_speed: change.bookSpeed }),
     ...(change.pitch != null && { read_pitch: change.pitch }),
     ...(change.systemVoice != null && { system_voice: change.systemVoice }),
     ...(change.readSpeakers != null && { read_speakers: change.readSpeakers }),
@@ -1158,9 +1340,9 @@ async function saveReading(change) {
 }
 
 /// A slider from 0.5 to 2 with its value beside it, saved when let go.
-function rateSlider(label, hint, value, save) {
+function rateSlider(label, hint, value, save, max = 2) {
   const shown = el("span", { class: "value" }, speedText(value));
-  const input = el("input", { type: "range", min: "0.5", max: "2", step: "0.05", value: String(value), "aria-label": label });
+  const input = el("input", { type: "range", min: "0.5", max: String(max), step: "0.05", value: String(value), "aria-label": label });
   input.addEventListener("input", () => { shown.textContent = speedText(Number(input.value)); });
   input.addEventListener("change", () => save(Number(input.value)));
   const reset = el("button", { class: "link", type: "button", onclick: () => { input.value = "1"; shown.textContent = speedText(1); save(1); } }, "Reset");
@@ -1187,7 +1369,8 @@ async function showReadingSettings(message) {
 
   // How it reads.
   const how = el("div", { class: "group" },
-    rateSlider("Speed", "How fast it reads", prefs.read_speed ?? 1, (s) => saveReading({ speed: s })));
+    rateSlider("Speed", "How fast it reads", prefs.read_speed ?? 1, (s) => saveReading({ speed: s })),
+    rateSlider("Books", "How fast books are read, on their own", bookSpeed(), (s) => saveReading({ bookSpeed: s }), READ_SPEED.max));
   const systemNames = voices.filter((v) => /^en/i.test(v.lang)).map((v) => v.name);
   if (!natural) {
     how.append(rateSlider("Pitch", "The system's voice only", prefs.read_pitch ?? 1, (s) => saveReading({ pitch: s })));

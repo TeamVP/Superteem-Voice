@@ -803,7 +803,7 @@ mod imp {
         if speakers > 0 && v.speaker >= speakers {
             return Err(format!("This model has speakers 0 to {}; {} isn't one.", speakers - 1, v.speaker));
         }
-        let generation = GenerationConfig { speed: speed.clamp(0.5, 2.0), sid: v.speaker, ..Default::default() };
+        let generation = GenerationConfig { speed: speed.clamp(0.5, 3.0), sid: v.speaker, ..Default::default() };
         let audio = tts.generate_with_config(text, &generation, None::<fn(&[f32], f32) -> bool>).ok_or("The voice couldn't say that.")?;
         Ok((audio.samples().to_vec(), audio.sample_rate().max(1) as u32))
     }

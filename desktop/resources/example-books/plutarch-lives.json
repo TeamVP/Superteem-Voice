@@ -7,7 +7,7 @@
   "language": "en",
   "source": "https://www.gutenberg.org/ebooks/674",
   "licence": "public-domain",
-  "version": 7,
+  "version": 8,
   "changes": [
     {
       "version": 1,
@@ -43,6 +43,11 @@
       "version": 7,
       "date": "2026-11-14",
       "summary": "Links to its source at Project Gutenberg, which opens in your browser after saying it leaves the app."
+    },
+    {
+      "version": 8,
+      "date": "2026-11-14",
+      "summary": "Themistocles and Caesar gain commentary, with when each lived in our own calendar and what else was happening in the world, and their own pronunciations of the names in them. Where a chapter says a name its own way, that's used in place of the book's."
     }
   ],
   "links": [

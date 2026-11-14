@@ -89,6 +89,8 @@ pub struct Prefs {
     pub tts_voice: String,
     /// How fast to read aloud: 1 is normal. Unset: 1.
     pub read_speed: Option<f32>,
+    /// How fast books are read aloud, apart from everything else: 1 is normal. Unset: 1.
+    pub book_read_speed: Option<f32>,
     /// The system voice's pitch: 1 is normal. Unset: 1.
     pub read_pitch: Option<f32>,
     /// The system voice chosen, by name; empty for the device's default.

@@ -1633,6 +1633,26 @@ dialog.sheet.extras-dialog { max-width: 560px; }
 .pron-arrow { color: var(--muted); }
 .pron-empty[hidden] { display: none; }
 .pron-add { margin: 2px 0 14px; }
+.pron-row .pron-replaces { grid-column: 1 / -1; margin: -2px 0 2px; }
+.pron-replaces { color: var(--muted); font-size: 12px; }
+.pron-replaces[hidden] { display: none; }
+
+/* Reading a book aloud: its speed, voice and pronunciation, from Read aloud's menu. */
+.book-reading-dialog .book-setting { margin: 0 0 16px; }
+.book-reading-dialog h3 { margin: 0 0 4px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.book-reading-dialog .hint { margin: 0 0 8px; }
+.book-reading-dialog select { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
+.speed-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.speed-chip { font-variant-numeric: tabular-nums; }
+.speed-chip.on { background: var(--key); color: #fff; }
+.book-reading-dialog .slider input[type="range"] { flex: 1; width: auto; min-width: 0; }
+.pron-details summary { cursor: pointer; color: var(--key); font-size: 14px; }
+.pron-list { display: flex; flex-direction: column; gap: 4px; max-height: 34vh; overflow-y: auto; margin: 8px 0 0; font-size: 14px; }
+.pron-item { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.4fr) auto; align-items: center; gap: 8px; }
+.pron-word { font-weight: 600; overflow-wrap: anywhere; }
+.pron-said { display: flex; flex-direction: column; overflow-wrap: anywhere; }
+.pron-item .icon-only.on { color: var(--key); }
+.book-reading-dialog .actions { flex-wrap: wrap; }
 
 /* A book's cover beside its title, who wrote it, and its About panel. */
 .book-cover { width: 44px; height: 62px; object-fit: cover; border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 0.25); flex: none; }
