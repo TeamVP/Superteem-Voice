@@ -121,6 +121,12 @@ pub struct BookFile {
     pub credit: String,
     /// As a book's `licence`.
     pub licence: String,
+    /// Where it came from: the edition or scan it was taken from, as an address or a description.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub source: String,
+    /// The chapters (note ids) that show it, so the book's gallery can go to where each is in the text.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub used_in: Vec<String>,
 }
 
 /// A web page outside the library that a book links to.
@@ -719,13 +725,15 @@ fn files_dir(id: &str) -> Result<PathBuf, String> {
     Ok(path(id)?.with_extension("files"))
 }
 
-/// A file of the book's own, by its name: only a plain name, so nothing outside the book's folder.
+/// A file of the book's own, by its name: a plain name, or plain names in folders ("media/maps/salamis.jpg"),
+/// so nothing outside the book's folder.
 pub fn file_path(id: &str, file: &str) -> Result<PathBuf, String> {
-    let plain = !file.is_empty() && !file.starts_with('.') && !file.contains(['/', '\\', ':']) && file != "..";
-    if !plain {
+    let plain = |part: &str| !part.is_empty() && !part.starts_with('.') && !part.contains(['\\', ':']);
+    let parts: Vec<&str> = file.split('/').collect();
+    if parts.len() > 4 || !parts.iter().all(|p| plain(p)) {
         return Err("That file isn't the book's.".into());
     }
-    Ok(files_dir(id)?.join(file))
+    Ok(parts.iter().fold(files_dir(id)?, |dir, part| dir.join(part)))
 }
 
 fn place_path(id: &str) -> Result<PathBuf, String> {
@@ -812,13 +820,33 @@ fn install_bundled(now: u64) -> Result<(), String> {
         }
         library::write_json(&dest, &note)?;
     }
+    // The book's own files (its cover and pictures), in their folders, in place of any before.
+    if let Some(files) = EXAMPLE.get_dir("files") {
+        let dest = files_dir(EXAMPLE_ID)?;
+        let _ = std::fs::remove_dir_all(&dest);
+        copy_bundled(files, files.path(), &dest)?;
+    }
     let book_file = library::data_dir().join("books").join(format!("{EXAMPLE_ID}.json"));
     std::fs::create_dir_all(book_file.parent().unwrap()).map_err(|e| e.to_string())?;
     library::write_json(&book_file, &book)
 }
 
+/// Writes a compiled-in folder's files under `dest`, by where they are below `root`.
+fn copy_bundled(dir: &Dir<'_>, root: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+    for file in dir.files() {
+        let rel = file.path().strip_prefix(root).map_err(|e| e.to_string())?;
+        let to = dest.join(rel);
+        std::fs::create_dir_all(to.parent().unwrap_or(dest)).map_err(|e| e.to_string())?;
+        std::fs::write(&to, file.contents()).map_err(|e| e.to_string())?;
+    }
+    for sub in dir.dirs() {
+        copy_bundled(sub, root, dest)?;
+    }
+    Ok(())
+}
+
 /// The example book's version, which is its `version`: what changed in each is in its `changes`.
-const EXAMPLE_BOOK: u32 = 9;
+const EXAMPLE_BOOK: u32 = 10;
 const EXAMPLE_ID: &str = "plutarch-lives";
 
 fn example_dir(resource_dir: Option<&std::path::Path>) -> Option<PathBuf> {
@@ -899,9 +927,29 @@ mod tests {
     }
 
     #[test]
+    fn the_example_books_pictures_are_there_as_listed() {
+        use sha2::Digest;
+        let dir = example_dir(None).expect("the example book is beside the crate");
+        let book: Book = library::read_json(&dir.join(format!("{EXAMPLE_ID}.json"))).unwrap();
+        assert!(book.files.iter().any(|f| f.name == book.cover), "the cover is one of its files");
+        for f in &book.files {
+            assert!(file_path("x", &f.name).is_ok(), "{}", f.name);
+            let bytes = std::fs::read(dir.join("files").join(&f.name)).unwrap_or_else(|_| panic!("{} is there", f.name));
+            let hash: String = sha2::Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+            assert_eq!((bytes.len() as u64, hash.as_str()), (f.size, f.sha256.as_str()), "{} is as listed", f.name);
+            assert!(!f.alt.is_empty() && !f.credit.is_empty() && !f.licence.is_empty(), "{} says what it is", f.name);
+            for chapter in &f.used_in {
+                let note: notes::Note = library::read_json(&dir.join("notes").join(format!("{chapter}.json"))).unwrap();
+                assert!(format!("{}{}", note.body, note.commentary).contains(&format!("attachment:book/{}", f.name)), "{chapter} shows {}", f.name);
+            }
+        }
+    }
+
+    #[test]
     fn a_books_files_stay_in_its_folder() {
         assert!(file_path("b1", "cover.jpg").is_ok());
-        for bad in ["", "../b2.json", "a/b.jpg", "..", ".hidden", "c:x"] {
+        assert!(file_path("b1", "media/maps/salamis.jpg").is_ok());
+        for bad in ["", "../b2.json", "a/../b.jpg", "..", ".hidden", "c:x", "a\\b.jpg", "media//x.jpg", "/x.jpg", "a/b/c/d/e.jpg"] {
             assert!(file_path("b1", bad).is_err(), "{bad}");
         }
     }

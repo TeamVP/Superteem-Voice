@@ -759,7 +759,7 @@ function noteScrollButtons(topEl, { floor = null, cover = null } = {}) {
 
 /// Where a note's files, and a book's (under _book/), are served to the page.
 const noteFileBase = () => (platform === "windows" || platform === "android" ? "http://stvnote.localhost/" : "stvnote://localhost/");
-const bookCover = (book) => (book.cover ? `${noteFileBase()}_book/${encodeURIComponent(book.id)}/${encodeURIComponent(book.cover)}` : null);
+const bookCover = (book) => (book.cover ? bookFileUrl(book, book.cover) : null);
 
 /// A link that shows and hides a panel, for a book's or a note's commentary and About. Gives { link, panel }.
 function toggledPanel({ label, hide, about, head, content }) {
@@ -792,8 +792,145 @@ function markdownInto(node, markdown, fileUrl = () => "") {
 /// boundary of `book`, the book it's in (see guardLinks). Gives { link, panel }, both null when there is none.
 function commentary(markdown, about, book = null) {
   if (!markdown?.trim()) return { link: null, panel: null };
-  return toggledPanel({ label: "Commentary", hide: "Hide commentary", about: `Commentary on ${about}`, head: "Commentary",
-    content: guardLinks(markdownInto(el("div", { class: "commentary-body" }), markdown), { book }) });
+  // Its pictures are the book's own files (attachment:book/<name>).
+  const fileUrl = (file) => (book && file.startsWith("book/") ? bookFileUrl(book, file.slice(5)) : "");
+  const content = guardLinks(markdownInto(el("div", { class: "commentary-body" }), markdown, fileUrl), { book });
+  if (book) bookPicturesIn(content, book);
+  return toggledPanel({ label: "Commentary", hide: "Hide commentary", about: `Commentary on ${about}`, head: "Commentary", content });
+}
+
+// ---------- A book's pictures: the gallery, and each one full screen
+
+icon.image = '<rect x="3" y="4" width="18" height="16" rx="2"></rect><circle cx="9" cy="10" r="2"></circle><path d="M21 17l-5-5-9 8"></path>';
+icon.left = '<path d="M15 18l-6-6 6-6"></path>';
+icon.right = '<path d="M9 18l6-6-6-6"></path>';
+
+/// Where one of a book's own files is served to the page, by its name in the book ("media/cover.jpg").
+const bookFileUrl = (book, name) => `${noteFileBase()}_book/${encodeURIComponent(book.id)}/${encodeURIComponent(name)}`;
+
+/// A book's pictures, in the order they come in it: the cover first, then by the first chapter that shows each.
+function bookPictures(book) {
+  const order = (f) => {
+    if (f.name === book.cover) return -1;
+    const at = (f.used_in ?? []).map((id) => (book.notes ?? []).indexOf(id)).filter((i) => i >= 0);
+    return at.length ? Math.min(...at) : (book.notes ?? []).length;
+  };
+  return (book.files ?? []).filter((f) => f.kind?.startsWith("image/")).map((f, i) => ({ f, i }))
+    .sort((a, b) => order(a.f) - order(b.f) || a.i - b.i).map(({ f }) => f);
+}
+
+/// A picture's credit line: who made it, its licence, and where it came from.
+const pictureCredit = (f) => [f.credit, f.licence ? licenceName(f.licence) : "", f.source && !/^https?:/.test(f.source) ? f.source : ""].filter(Boolean).join(" · ");
+
+/// Makes the book's pictures in `root` (a chapter's text or a commentary) show their captions, and open full
+/// screen when pressed. Captions aren't read aloud with the text.
+function bookPicturesIn(root, book, { titles = null, goTo = null } = {}) {
+  const pictures = bookPictures(book);
+  if (!pictures.length) return root;
+  const byUrl = new Map(pictures.map((f) => [bookFileUrl(book, f.name), f]));
+  for (const img of root.querySelectorAll("img")) {
+    const f = byUrl.get(img.getAttribute("src"));
+    if (!f) continue;
+    img.alt = img.alt || f.alt;
+    img.tabIndex = 0;
+    img.setAttribute("role", "button");
+    img.title = "See it full screen";
+    const open = () => pictureViewer(book, pictures, pictures.indexOf(f), { titles, goTo });
+    img.addEventListener("click", open);
+    img.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+    const holder = img.closest("p") && img.closest("p").textContent.trim() === "" ? img.closest("p") : img;
+    const figure = el("figure", { class: "book-figure" });
+    holder.replaceWith(figure);
+    figure.append(img);
+    if (f.caption) figure.append(el("figcaption", { "data-noread": "" }, f.caption));
+  }
+  return root;
+}
+
+/// The Media button on a book's contents: shown only when the book has pictures. `titles` names each chapter
+/// by its id, and `goTo(id)` opens one, for "In Themistocles" under a picture.
+function mediaLink(book, { titles = null, goTo = null } = {}) {
+  const n = bookPictures(book).length;
+  if (!n) return null;
+  return el("button", { class: "link commentary-link", type: "button", title: "See all the book's pictures",
+    onclick: () => mediaGallery(book, { titles, goTo }) }, svg("image", 13), `Media (${n})`);
+}
+
+/// All a book's pictures as a grid; pressing one shows it full screen, to go through them one after another.
+function mediaGallery(book, { titles = null, goTo = null } = {}) {
+  const pictures = bookPictures(book);
+  const grid = el("div", { class: "gallery-grid" }, pictures.map((f, i) => el("button", { class: "gallery-tile", type: "button",
+    title: f.caption || f.alt, onclick: () => pictureViewer(book, pictures, i, { titles, goTo, onGo: () => dialog.close() }) },
+    el("img", { src: bookFileUrl(book, f.name), alt: f.alt, loading: "lazy" }),
+    el("span", { class: "gallery-caption" }, f.caption || (f.name === book.cover ? "The cover" : f.alt)))));
+  const dialog = el("dialog", { class: "sheet gallery-dialog", "aria-label": `Pictures in ${book.title || "this book"}` },
+    el("div", { class: "gallery-head" },
+      el("h2", {}, "Media", el("small", {}, ` ${pictures.length} in ${book.title || "this book"}`)),
+      el("button", { class: "icon-only", type: "button", title: "Close", "aria-label": "Close", onclick: () => dialog.close() }, svg("close", 18))),
+    grid);
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  grid.querySelector("button")?.focus();
+}
+
+/// One picture filling the window, with its caption and credit, and the ones before and after it a click,
+/// an arrow key or a swipe away. Escape closes it. `onGo`, when given, is done before going to a chapter.
+function pictureViewer(book, pictures, start = 0, { titles = null, goTo = null, onGo = null } = {}) {
+  let at = Math.max(0, Math.min(pictures.length - 1, start));
+  const img = el("img", { class: "viewer-img", alt: "" });
+  const caption = el("p", { class: "viewer-caption" });
+  const credit = el("p", { class: "viewer-credit" });
+  const count = el("span", { class: "viewer-count", "aria-live": "polite" });
+  const where = el("span", { class: "viewer-where" });
+  const prev = el("button", { class: "viewer-nav prev", type: "button", title: "Previous (←)", "aria-label": "Previous picture" }, svg("left", 30));
+  const next = el("button", { class: "viewer-nav next", type: "button", title: "Next (→)", "aria-label": "Next picture" }, svg("right", 30));
+  const stage = el("div", { class: "viewer-stage", tabindex: "-1" }, img, prev, next);
+  const dialog = el("dialog", { class: "picture-viewer", "aria-label": "Picture" },
+    el("div", { class: "viewer-top" }, count, el("span", { class: "grow" }),
+      el("button", { class: "viewer-close", type: "button", title: "Close (Esc)", "aria-label": "Close", onclick: () => dialog.close() }, svg("close", 22))),
+    stage,
+    el("div", { class: "viewer-foot" }, caption, credit, where));
+  const show = (i) => {
+    at = Math.max(0, Math.min(pictures.length - 1, i));
+    const f = pictures[at];
+    img.src = bookFileUrl(book, f.name);
+    img.alt = f.alt;
+    caption.textContent = f.caption || (f.name === book.cover ? "The cover" : f.alt);
+    credit.textContent = pictureCredit(f);
+    count.textContent = `${at + 1} of ${pictures.length}`;
+    prev.disabled = at === 0;
+    next.disabled = at === pictures.length - 1;
+    // The chapters it's in, to go to.
+    where.replaceChildren(...(goTo && titles ? (f.used_in ?? []).filter((id) => titles[id]).map((id) => el("button", { class: "link", type: "button",
+      onclick: () => { dialog.close(); onGo?.(); goTo(id); } }, `In ${titles[id]} →`)) : []));
+    // The ones either side, ready.
+    for (const j of [at - 1, at + 1]) if (pictures[j]) new Image().src = bookFileUrl(book, pictures[j].name);
+  };
+  prev.addEventListener("click", () => show(at - 1));
+  next.addEventListener("click", () => show(at + 1));
+  dialog.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft") { e.preventDefault(); show(at - 1); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); show(at + 1); }
+    else if (e.key === "Home") { e.preventDefault(); show(0); }
+    else if (e.key === "End") { e.preventDefault(); show(pictures.length - 1); }
+  });
+  // A swipe left or right, by finger or with the mouse held down.
+  let down = null;
+  stage.addEventListener("pointerdown", (e) => { if (!e.target.closest("button")) down = { x: e.clientX, y: e.clientY }; });
+  stage.addEventListener("pointerup", (e) => {
+    if (!down) return;
+    const dx = e.clientX - down.x, dy = e.clientY - down.y;
+    down = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) show(at + (dx < 0 ? 1 : -1));
+  });
+  stage.addEventListener("pointercancel", () => { down = null; });
+  img.addEventListener("dragstart", (e) => e.preventDefault());
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog);
+  show(at);
+  dialog.showModal();
+  stage.focus();
 }
 
 /// Licences a book can say it has, as people know them.
@@ -1281,7 +1418,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     if (view !== mine) return;
     const chapter = contents[index];
     const kicker = [chapter.part, chapter.label].filter(Boolean).join(" · ");
-    const body = guardLinks(chapterInto(el("div", { class: "book-chapter-body" }), note.body, note.format, note.id, book.id), { book, noteId: note.id });
+    const body = bookPicturesIn(guardLinks(chapterInto(el("div", { class: "book-chapter-body" }), note.body, note.format, note.id, book.id), { book, noteId: note.id }), book);
     const turn = () => el("div", { class: "book-turn" },
       el("button", { class: "pill", disabled: index === 0, onclick: () => openBook(book.id, { chapter: contents[index - 1].id }) }, "Previous"),
       el("span", { class: "book-kicker" }, `${index + 1} of ${contents.length}`),
@@ -1413,7 +1550,9 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
         el("span", { class: "reader-pill", title: "For reading: the chapters stay as they are" }, "Reader"))),
     el("div", { class: "book-meta" },
       book.author ? el("p", { class: "book-byline" }, `by ${book.author}`) : "",
-      el("div", { class: "book-links" }, about.link, notes.link, pronounceLink(book))),
+      el("div", { class: "book-links" }, about.link, notes.link,
+        mediaLink(book, { titles: Object.fromEntries(contents.map((c) => [c.id, c.title])), goTo: (id) => openBook(book.id, { chapter: id }) }),
+        pronounceLink(book))),
     about.panel ?? "", notes.panel ?? "",
     listenResume(book.id, contents, (c, how) => openBook(book.id, { chapter: c.id, listen: how })),
     search.bar, search.results, list);
@@ -1592,7 +1731,9 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
   const cover = bookCover(book);
   const page = el("div", { class: "page book" },
     el("div", { class: "book-head" }, cover ? el("img", { class: "book-cover", src: cover, alt: "" }) : el("span", { class: "book-icon" }, svg("book", 22)), title, remove),
-    el("div", { class: "book-links" }, aboutPanel.link, bookNotes.link, editDetails, editCommentary, editPronounce), aboutPanel.panel ?? "", bookNotes.panel ?? "", modes);
+    el("div", { class: "book-links" }, aboutPanel.link, bookNotes.link,
+      mediaLink(book, { titles: Object.fromEntries(chapters.map((c) => [c.id, c.title])), goTo: (noteId) => openNote(noteId) }),
+      editDetails, editCommentary, editPronounce), aboutPanel.panel ?? "", bookNotes.panel ?? "", modes);
 
   if (reading) {
     // All the notes one after another, each under its title, which opens it.
@@ -1679,7 +1820,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
         part = c.part;
         page.append(el("h2", { class: "book-part" }, c.part));
       }
-      const body = guardLinks(chapterInto(el("div", { class: "book-chapter-body" }), c.body, c.format, c.id, id), { book, noteId: c.id });
+      const body = bookPicturesIn(guardLinks(chapterInto(el("div", { class: "book-chapter-body" }), c.body, c.format, c.id, id), { book, noteId: c.id }), book);
       const heading = c.label ? `${c.label}. ${c.title}` : c.title;
       const holder = el("div", { class: "book-chapter-holder" }, body);
       const notes = commentary(c.commentary, c.title, book);

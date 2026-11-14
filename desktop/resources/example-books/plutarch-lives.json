@@ -7,7 +7,7 @@
   "language": "en",
   "source": "https://www.gutenberg.org/ebooks/674",
   "licence": "public-domain",
-  "version": 9,
+  "version": 10,
   "changes": [
     {
       "version": 1,
@@ -53,6 +53,11 @@
       "version": 9,
       "date": "2026-11-14",
       "summary": "Easier, more natural ways of saying the names in Themistocles and Caesar, and Themistocles said as Thur-mistic-klees."
+    },
+    {
+      "version": 10,
+      "date": "2026-11-15",
+      "summary": "A cover, and pictures: timelines in the commentaries on Themistocles and Caesar, all in the book's gallery."
     }
   ],
   "links": [
@@ -718,5 +723,58 @@
       ]
     }
   ],
-  "editable": false
+  "editable": false,
+  "cover": "media/cover.jpg",
+  "files": [
+    {
+      "name": "media/cover.jpg",
+      "kind": "image/jpeg",
+      "size": 86285,
+      "sha256": "3ea848615d48dbf82a5649f85237d8c677e32b090d0e686dc76372f87006de6c",
+      "alt": "The cover: Plutarch's Lives, translated by John Dryden, revised by Arthur Hugh Clough",
+      "caption": "",
+      "credit": "Made for this edition by Superteem",
+      "licence": "cc0-1.0"
+    },
+    {
+      "name": "media/timelines/plutarchs-world.png",
+      "kind": "image/png",
+      "size": 58961,
+      "sha256": "a110c5dff0957023de149a49462e02a0e9465f3bebe10264fc27dd3fb3e793ca",
+      "alt": "Timeline from 540 BC to AD 140: Themistocles born about 524 BC, Salamis 480 BC, Caesar born 100 BC, Augustus 27 BC, Plutarch born about AD 46 and writing about AD 100",
+      "caption": "Themistocles, Caesar and Plutarch on one line: Plutarch is as far from Themistocles as we are from the first printed books",
+      "credit": "Made for this edition by Superteem",
+      "licence": "cc0-1.0",
+      "used_in": [
+        "plutarch-04-01-themistocles",
+        "plutarch-17-02-caesar"
+      ]
+    },
+    {
+      "name": "media/timelines/themistocles.png",
+      "kind": "image/png",
+      "size": 83931,
+      "sha256": "330457a64bd74192cf193e035778d20b324ee1ebc604089a20ef248b903f05ad",
+      "alt": "Timeline of Themistocles: born about 524 BC, archon 493, Marathon 490, the fleet built 483, Salamis 480, Plataea 479, ostracised about 471, died about 459 BC",
+      "caption": "The life of Themistocles",
+      "credit": "Made for this edition by Superteem",
+      "licence": "cc0-1.0",
+      "used_in": [
+        "plutarch-04-01-themistocles"
+      ]
+    },
+    {
+      "name": "media/timelines/caesar.png",
+      "kind": "image/png",
+      "size": 86156,
+      "sha256": "1717d1a358b96a0b2e301137c870e85a6ff69721ed52738c71b1a8fe94440c55",
+      "alt": "Timeline of Julius Caesar: born 100 BC, taken by pirates about 75, chief priest 63, consul 59, Gaul from 58, the Rubicon 49, Pharsalus 48, the calendar reformed 46, killed 44 BC",
+      "caption": "The life of Julius Caesar",
+      "credit": "Made for this edition by Superteem",
+      "licence": "cc0-1.0",
+      "used_in": [
+        "plutarch-17-02-caesar"
+      ]
+    }
+  ]
 }
