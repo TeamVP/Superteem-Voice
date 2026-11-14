@@ -5215,6 +5215,7 @@ async function showSettings() {
   refreshItems();
   const [fresh, ready, prints, terms] = await Promise.all([invoke("get_prefs"), invoke("model_ready"), invoke("list_voiceprints").catch(() => []),
     invoke("list_vocabulary").catch(() => [])]);
+  const archivedCount = (await invoke("list_notes", { query: "" }).catch(() => [])).filter((n) => n.archived).length;
   prefs = fresh;
   const page = el("div", { class: "page" }, el("h1", {}, "Settings"));
   // Each section is made here, then added in the order the page shows them.
@@ -5302,6 +5303,10 @@ async function showSettings() {
       await invoke("save_prefs", { dictateManually: !on });
     }))];
 
+  // Archived: how many notes are archived, and the way to them.
+  const archivedSection = [el("h2", {}, "Archived"), el("div", { class: "group" },
+    linkRow("Archive", archivedCount ? `${archivedCount} archived note${archivedCount === 1 ? "" : "s"}` : "Nothing archived", () => showArchive(), { drop: true }))];
+
   const meetings = [el("h2", {}, "Meetings"), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, "Consent question",
       el("small", {}, "Voice always confirms everyone agreed before a meeting is recorded.")), el("span", { class: "value" }, "Always asked")),
@@ -5336,7 +5341,7 @@ async function showSettings() {
     el("div", { class: "row" }, el("span", { class: "label" }, "Recordings and notes", el("small", {}, "Kept on this device only.")),
       isDesktop() ? el("button", { class: "pill", onclick: () => invoke("open_folder", { id: null }) }, "Open folder") : null))];
 
-  for (const section of [about, phone, optimise, languages, listening, notesSection, meetings, transcription, analysis, voices, appearance, storage]) {
+  for (const section of [about, phone, optimise, languages, listening, notesSection, archivedSection, meetings, transcription, analysis, voices, appearance, storage]) {
     page.append(...section.filter(Boolean));
   }
   main.replaceChildren(page);
