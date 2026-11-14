@@ -1459,8 +1459,11 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 .book-mode { display: flex; gap: 6px; margin: 12px 0 16px; }
 .book-mode .pill.on { background: var(--key); color: #fff; }
 .book-notes .row { gap: 8px; }
-.book-num { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.5em; text-align: right; }
-.book-num.chapter { min-width: 7.2em; text-align: left; }
+/* Every number in a list is the same width, fitting 1 to 99 (or "Chapter 1" to "Chapter 99"), so the titles line up. */
+.book-num { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; width: 1.6em; text-align: right; white-space: nowrap; }
+.book-num.chapter { text-align: left; }
+.book-notes.labelled .book-num { width: 5.8em; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.book-hit-head .book-num.chapter { width: auto; }
 .book-part { margin: 28px 0 4px; font-size: 26px; }
 .book-notes .group-label { background: var(--bg, transparent); }
 .book-notes .icon-only:disabled { opacity: 0.3; cursor: default; }
@@ -1475,6 +1478,17 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 .book-chapter-body img { max-width: 100%; }
 .book-chapter-body p { margin: 0 0 0.9em; }
 .book-locked-title { margin: 0; font-size: 28px; flex: 0 1 auto; min-width: 0; }
+/* A reading book's icon or cover, title and Reader pill all rest on the title's baseline. */
+.book-read .book-head { align-items: baseline; }
+.book-read .book-head .book-icon svg { display: block; }
+/* Who wrote it, with About and Commentary at the right on a wide screen; stacked on a phone. */
+.book-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 18px; flex-wrap: wrap; margin: 4px 0 0; }
+.book-meta .book-byline, .book-meta .book-links { margin: 0; }
+.book-meta .book-links { margin-left: auto; }
+@media (max-width: 720px) {
+  .book-meta { flex-direction: column; align-items: flex-start; }
+  .book-meta .book-links { margin-left: 0; }
+}
 /* A reading book's chapter: Contents, Commentary, Bookmark and Read aloud stay at the top, over a thin line, while
    the chapter scrolls under them. The bar reaches the page's edges, through its padding. */
 .book-contents-bar {
@@ -1557,7 +1571,9 @@ body.note-chat-float .chat-head { padding-left: 8px; }
 
 /* A book kept for reading says so beside its title. */
 .reader-pill {
-  flex: none; margin-left: 10px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  /* Inline-block with hidden overflow puts its baseline at its bottom edge, on the title's baseline. */
+  display: inline-block; overflow: hidden; vertical-align: baseline; line-height: 1.5;
+  flex: none; margin-left: 14px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--accent-text); background: var(--highlight); border: 1px solid color-mix(in srgb, var(--key) 35%, transparent);
 }
 /* Searching every note in a book, under its title; what it finds takes the contents list's place. */
@@ -1647,22 +1663,48 @@ dialog.sheet.leave-dialog { max-width: 480px; }
 dialog.sheet.bm-book-dialog { max-width: 560px; }
 .bm-book-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .bm-book-head h2 { margin: 0; }
-.bm-book-section { padding: 12px 0; border-top: 1px solid var(--line); }
-.bm-book-section:first-child { border-top: none; }
-.bm-book-section h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-.bm-book-section .hint { margin: 0 0 10px; }
-.bm-book-section .field input { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
-.bm-chip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
-.bm-chip-label { width: 100%; font-size: 13px; color: var(--soft); }
-.bm-chip-pair { display: inline-flex; align-items: center; }
-.bm-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 0; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; text-decoration: line-through; }
-.bm-chip.on { background: var(--raised); color: var(--text); border-color: color-mix(in srgb, var(--key) 45%, var(--line)); text-decoration: none; }
-.bm-chip small { color: var(--muted); font-size: 11px; }
+/* The list: this chapter's or the whole book's, each bookmark's colour and maker pressable to narrow it. */
+.bm-book-body { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; max-height: 60vh; overflow-y: auto; }
+.bm-scope { display: inline-flex; align-self: flex-start; padding: 3px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); }
+.bm-scope-tab { display: inline-flex; align-items: center; gap: 6px; min-height: 0; padding: 5px 14px; border: none; border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; }
+.bm-scope-tab small { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bm-scope-tab.on { background: var(--raised); color: var(--text); box-shadow: 0 0 0 1px color-mix(in srgb, var(--key) 45%, var(--line)); }
+.bm-narrowed { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bm-narrowed .hint { font-size: 13px; }
+.bm-narrowed .grow { flex: 1; }
+.bm-remove-theirs { font-size: 13px; }
+.bm-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 0; padding: 4px 8px 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; }
+.bm-chip.on { background: var(--raised); color: var(--text); border-color: color-mix(in srgb, var(--key) 45%, var(--line)); }
+.bm-chip svg { color: var(--muted); }
+.bm-chip:hover svg { color: var(--text); }
 .bm-chip-swatch { width: 12px; height: 12px; border-radius: 50%; background: var(--bm); flex: none; }
-.bm-chip-swatch.none { background: transparent; border: 1.5px solid var(--muted); }
-.bm-chip:not(.on) .bm-chip-swatch { opacity: 0.4; }
-.bm-chip-remove { margin-left: 2px; color: var(--muted); }
-.bm-chip-remove.armed { color: var(--danger, #b85c5c); }
+.bm-chip-swatch.none { background: transparent; border: 1.5px solid var(--muted); box-sizing: border-box; }
+.bm-items { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.bm-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px; padding: 2px 8px 2px 4px; border-top: 1px solid var(--line); }
+.bm-item:first-child { border-top: none; }
+.bm-item-colour { display: grid; place-items: center; width: 30px; height: 30px; min-height: 0; padding: 0; border: none; border-radius: 50%; background: transparent; cursor: pointer; }
+.bm-item-colour .bm-chip-swatch { width: 14px; height: 14px; }
+.bm-item-colour:hover:not(:disabled) { background: var(--hover); }
+.bm-item-colour:disabled { cursor: default; }
+.bm-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; min-height: 0; padding: 8px 6px; border: none; border-radius: 8px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.bm-item-main:hover, .bm-item-main:focus-visible { background: var(--hover); }
+.bm-item-label { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.bm-item-quote { font-size: 13px; color: var(--muted); line-height: 1.45; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bm-item-quote.alone { color: var(--soft); font-size: 14px; }
+.bm-item-author { font-size: 13px; white-space: nowrap; max-width: 9em; overflow: hidden; text-overflow: ellipsis; padding: 4px 6px; }
+.bm-item button.bm-item-author { color: var(--accent-text); }
+.bm-item-author:hover:not(:disabled) { text-decoration: underline; }
+.bm-item-author:disabled, .bm-item-colour:disabled { opacity: 1; }
+.bm-item button.bm-item-author:disabled { color: var(--muted); cursor: default; text-decoration: none; }
+button.bm-remove-theirs, button.bm-remove-theirs:hover { color: var(--danger, #b85c5c); }
+.bm-chapters { display: flex; flex-direction: column; gap: 14px; }
+.bm-chapter h3 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 6px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.bm-chapter h3 small { text-transform: none; letter-spacing: 0; color: var(--key); font-weight: 500; }
+.bm-empty { margin: 4px 0; }
+.bm-book-foot { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.bm-book-foot .grow { flex: 1; }
+.bm-import-points { margin: 0 0 14px; padding-left: 18px; }
+.bm-import-points li { margin: 3px 0; }
 .bm-import-preview { margin-top: 10px; }
 .bm-import-preview p { margin: 0 0 6px; }
 .bm-book-status { margin: 8px 0 0; overflow-wrap: anywhere; }

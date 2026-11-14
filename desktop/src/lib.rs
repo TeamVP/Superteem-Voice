@@ -1471,9 +1471,10 @@ fn book_bookmarks(id: String) -> Result<std::collections::BTreeMap<String, Vec<n
 }
 
 /// Writes a book's bookmarks to a file in the exports folder, the person's own under `author`; gives its path.
+/// `only` names the bookmarks to include; without it, all of them.
 #[tauri::command]
-async fn export_book_bookmarks(id: String, author: String) -> Result<String, String> {
-    blocking(move || exports::export_book_bookmarks(&id, &author).map(|p| p.to_string_lossy().into_owned())).await?
+async fn export_book_bookmarks(id: String, author: String, only: Option<Vec<String>>) -> Result<String, String> {
+    blocking(move || exports::export_book_bookmarks(&id, &author, only.as_deref()).map(|p| p.to_string_lossy().into_owned())).await?
 }
 
 /// Takes in someone's bookmarks for a book; `author` names any that don't say who made them.

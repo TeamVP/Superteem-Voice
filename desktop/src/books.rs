@@ -393,11 +393,21 @@ pub fn bookmarks(id: &str) -> Result<std::collections::BTreeMap<String, Vec<note
     Ok(book.notes.iter().filter_map(|n| notes::bookmarks(n).ok().filter(|m| !m.is_empty()).map(|m| (n.clone(), m))).collect())
 }
 
-/// The book's bookmarks as a file to give someone; the person's own carry `author`.
-pub fn bookmark_file(id: &str, author: &str) -> Result<BookmarkFile, String> {
+/// The book's bookmarks as a file to give someone; the person's own carry `author`. With `only`, just the
+/// bookmarks of those ids (the list the person narrowed to), leaving out chapters with none of them.
+pub fn bookmark_file(id: &str, author: &str, only: Option<&[String]>) -> Result<BookmarkFile, String> {
     let book = load(id)?;
     let author = notes::clean_line(author, 80);
     let mut all = bookmarks(id)?;
+    if let Some(only) = only {
+        for marks in all.values_mut() {
+            marks.retain(|m| only.contains(&m.id));
+        }
+        all.retain(|_, marks| !marks.is_empty());
+        if all.is_empty() {
+            return Err("None of those bookmarks are in the book any more.".into());
+        }
+    }
     for marks in all.values_mut() {
         for m in marks.iter_mut().filter(|m| m.author.is_empty()) {
             m.author = author.clone();

@@ -1287,7 +1287,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     mark.addEventListener("click", () => marks?.create());
     // Which bookmarks show, by colour and maker; held, the button opens all the book's bookmarks.
     const filter = bookmarkFilter(book.id);
-    onHold(mark, () => bookBookmarksDialog(book, filter, (what) => (what === "marks" ? marks?.reload() : marks?.redraw())));
+    onHold(mark, () => bookBookmarksDialog(book, filter, (what) => (what === "marks" ? marks?.reload() : marks?.redraw()), { chapter: note.id }));
     const notes = commentary(note.commentary, note.title || chapter.title, book);
     const bar = el("div", { class: "book-contents-bar" },
       el("span", { class: "book-bar-links" }, el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"), notes.link),
@@ -1328,7 +1328,8 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
       el("button", { class: "label link-label", onclick: () => openBook(book.id, { chapter: c.id }) }, c.title,
         el("small", {}, [wordsText(c.words), c.author && c.author !== book.author ? `by ${c.author}` : ""].filter(Boolean).join(" · ")))));
   });
-  const list = el("div", { class: "group book-notes" }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "This book has no chapters.")));
+  // One width for every number, so each title and its details line up under the others'.
+  const list = el("div", { class: "group book-notes" + (contents.some((c) => c.label) ? " labelled" : "") }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "This book has no chapters.")));
   const search = bookSearch(book.id, list, (hit, snippet) => openBook(book.id, { chapter: hit.id, find: snippet }));
   const notes = commentary(book.commentary, book.title || "this book", book);
   const about = aboutBook(book);
@@ -1336,10 +1337,12 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
   const page = el("div", { class: "page book book-read" },
     el("div", { class: "book-head" },
       cover ? el("img", { class: "book-cover", src: cover, alt: "" }) : el("span", { class: "book-icon" }, svg("book", 22)),
-      el("h1", { class: "book-locked-title" }, book.title || "Untitled book"),
-      el("span", { class: "reader-pill", title: "For reading: the chapters stay as they are" }, "Reader")),
-    book.author ? el("p", { class: "book-byline" }, `by ${book.author}`) : "",
-    notes.link || about.link ? el("div", { class: "book-links" }, about.link, notes.link) : "",
+      // The pill sits in the heading's line, so its bottom rests on the title's baseline.
+      el("h1", { class: "book-locked-title" }, book.title || "Untitled book",
+        el("span", { class: "reader-pill", title: "For reading: the chapters stay as they are" }, "Reader"))),
+    book.author || notes.link || about.link ? el("div", { class: "book-meta" },
+      book.author ? el("p", { class: "book-byline" }, `by ${book.author}`) : "",
+      notes.link || about.link ? el("div", { class: "book-links" }, about.link, notes.link) : "") : "",
     about.panel ?? "", notes.panel ?? "",
     listenResume(book.id, contents, (c, how) => openBook(book.id, { chapter: c.id, listen: how })),
     search.bar, search.results, list);
@@ -1648,7 +1651,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
       el("button", { class: "icon-only", title: "Move down", "aria-label": `Move ${c.title} down`, disabled: i === chapters.length - 1 || otherPart(i + 1), onclick: () => move(i, 1) }, svg("down", 16)),
       el("button", { class: "pill", onclick: async () => { await invoke("remove_note_from_book", { id, note: c.id }).catch(() => {}); reopen(); } }, "Take out")));
   });
-  const list = el("div", { class: "group book-notes" }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "No notes yet. Write a new one, or add notes you have.")));
+  const list = el("div", { class: "group book-notes" + (chapters.some((c) => c.label) ? " labelled" : "") }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "No notes yet. Write a new one, or add notes you have.")));
 
   const newNote = el("button", { class: "pill", onclick: async () => {
     try {
@@ -2054,7 +2057,7 @@ function renderNote(data, dictate) {
     const book = await noteBook();
     if (!book) return micToast("Holding Bookmark opens all of a book's bookmarks, for a note that's in a book.");
     noteFilter ??= bookmarkFilter(book.id);
-    bookBookmarksDialog(book, noteFilter, (what) => (what === "marks" ? marks?.reload() : marks?.redraw()));
+    bookBookmarksDialog(book, noteFilter, (what) => (what === "marks" ? marks?.reload() : marks?.redraw()), { chapter: note.id });
   });
   // On a phone, Export, Archive and Delete sit behind one "more" button, so the top bar keeps to one line.
   const more = moreMenu([extras, exporter, archive, remove]);
