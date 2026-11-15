@@ -352,7 +352,7 @@ mod sandbox {
         let made = unsafe {
             CreateAppContainerProfile(
                 name.as_ptr(),
-                wide("Voice by Superteem analysis").as_ptr(),
+                wide("Voice-OS analysis").as_ptr(),
                 wide("Runs the language model for analyses, without network access.").as_ptr(),
                 null(),
                 0,

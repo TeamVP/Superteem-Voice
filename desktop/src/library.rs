@@ -37,20 +37,20 @@ fn env_dir(var: &str) -> PathBuf {
 }
 
 /// Defaults to the computer's own locations when `init` was not called, as on Windows and the Mac and in
-/// tests and the self-test: Documents\Superteem Voice on Windows, ~/Documents/Superteem Voice on the Mac.
+/// tests and the self-test: Documents\Voice-OS on Windows, ~/Documents/Voice-OS on the Mac.
 pub fn root() -> PathBuf {
     match PATHS.get() {
         Some(p) => p.sessions.clone(),
-        None if cfg!(windows) => env_dir("USERPROFILE").join("Documents").join("Superteem Voice"),
-        None => env_dir("HOME").join("Documents").join("Superteem Voice"),
+        None if cfg!(windows) => env_dir("USERPROFILE").join("Documents").join("Voice-OS"),
+        None => env_dir("HOME").join("Documents").join("Voice-OS"),
     }
 }
 
 pub fn data_dir() -> PathBuf {
     match PATHS.get() {
         Some(p) => p.data.clone(),
-        None if cfg!(windows) => env_dir("LOCALAPPDATA").join("Superteem Voice"),
-        None => env_dir("HOME").join("Library").join("Application Support").join("Superteem Voice"),
+        None if cfg!(windows) => env_dir("LOCALAPPDATA").join("Voice-OS"),
+        None => env_dir("HOME").join("Library").join("Application Support").join("Voice-OS"),
     }
 }
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Voice by Superteem",
-  "version": "0.10.2",
-  "identifier": "io.superteem.voice",
+  "productName": "Voice-OS",
+  "version": "0.11.0",
+  "identifier": "io.github.teamvp.voiceos",
   "build": {
     "frontendDist": "ui"
   },
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Voice by Superteem",
+        "title": "Voice-OS",
         "width": 1180,
         "height": 780,
         "minWidth": 720,

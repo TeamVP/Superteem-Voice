@@ -1,4 +1,4 @@
-# Prepares a Mac to build Voice by Superteem for the Mac and the iPhone. Source it: source desktop/build-env.sh
+# Prepares a Mac to build Voice-OS for the Mac and the iPhone. Source it: source desktop/build-env.sh
 # The Mac's own tools do most of it: Xcode's clang and libclang, and CMake from Homebrew or GitHub's runners.
 # This makes the local copy of whisper-rs-sys that Cargo.toml's [patch] points at, as build-env.ps1 does on
 # Windows, and sets how whisper.cpp is compiled.

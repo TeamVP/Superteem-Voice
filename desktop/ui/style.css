@@ -642,7 +642,7 @@ body:is([data-platform="android"], [data-platform="ios"]) .windows-only { displa
 .brand:hover img { opacity: 0.85; }
 .help-toggle { width: 26px; height: 26px; font-weight: 700; font-size: 13px; border: 1px solid var(--line); }
 /* The wordmark has a version for each theme, following the same choice as the colours. */
-/* "Voice by [Superteem]", as on the download page. */
+/* The wordmark: the app's name. */
 /* All three sit on one baseline. The wordmark image's own baseline is its bottom edge, but the lettering's
    baseline is 19.8% of the image height above that (the "p" descends below it), so it drops by that much. */
 .brand img { display: block; height: 16.5px; width: auto; transform: translateY(19.8%); }

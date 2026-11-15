@@ -1,4 +1,4 @@
-# Prepares the build environment for Superteem Voice. Dot-source it: . .\build-env.ps1 [-Android]
+# Prepares the build environment for Voice-OS. Dot-source it: . .\build-env.ps1 [-Android]
 # whisper.cpp needs CMake and libclang, and its build script needs one fix to cross-compile from Windows.
 param([switch]$Android)
 $ErrorActionPreference = 'Stop'
@@ -140,7 +140,7 @@ if ($Android) {
     if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
         # The newest Visual Studio's CMake, so it knows the generator for the newest compiler.
         $found = & $vswhere -sort -products * -find 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe' | Select-Object -First 1
-        if (-not $found) { throw 'CMake is required to build Superteem Voice' }
+        if (-not $found) { throw 'CMake is required to build Voice-OS' }
         $env:CMAKE = $found
     }
     # The libclang wheel has no compiler headers, so bindgen uses the ones from Visual Studio and the Windows SDK.
@@ -153,7 +153,7 @@ if ($Android) {
     if (-not $env:VULKAN_SDK) {
         $vulkan = [Environment]::GetEnvironmentVariable('VULKAN_SDK', 'Machine')
         if (-not $vulkan) { $vulkan = (Get-ChildItem 'C:\VulkanSDK' -Directory -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1).FullName }
-        if (-not $vulkan) { throw 'The Vulkan SDK is required to build Superteem Voice: winget install KhronosGroup.VulkanSDK' }
+        if (-not $vulkan) { throw 'The Vulkan SDK is required to build Voice-OS: winget install KhronosGroup.VulkanSDK' }
         $env:VULKAN_SDK = $vulkan
     }
     # ggml's Vulkan build turns on parallel custom build steps (CMP0147), and MSBuild then runs the shader

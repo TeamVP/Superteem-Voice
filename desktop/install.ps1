@@ -1,15 +1,15 @@
-# Builds Superteem Voice and installs it for the current user, with a Start Menu shortcut.
-# Run with -Uninstall to remove the app. Recordings in Documents\Superteem Voice are always kept.
+# Builds Voice-OS and installs it for the current user, with a Start Menu shortcut.
+# Run with -Uninstall to remove the app. Recordings in Documents\Voice-OS are always kept.
 param([switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
 
-$installDir = Join-Path $env:LOCALAPPDATA 'Programs\Superteem Voice'
-$shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Superteem Voice.lnk'
+$installDir = Join-Path $env:LOCALAPPDATA 'Programs\Voice-OS'
+$shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Voice-OS.lnk'
 
 if ($Uninstall) {
     Remove-Item $shortcut -Force -ErrorAction SilentlyContinue
     Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Output 'Superteem Voice removed. Recordings were kept.'
+    Write-Output 'Voice-OS removed. Recordings were kept.'
     return
 }
 
@@ -31,4 +31,4 @@ $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
 $link.TargetPath = $exe
 $link.WorkingDirectory = $installDir
 $link.Save()
-Write-Output "Installed to $exe. Open it from the Start Menu: Superteem Voice."
+Write-Output "Installed to $exe. Open it from the Start Menu: Voice-OS."

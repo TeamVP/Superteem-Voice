@@ -466,7 +466,7 @@ fn session_start(root: &Path, fallback_name: &str) -> Option<u64> {
         .or_else(|| from_name(fallback_name))
 }
 
-/// Adds another person's recording of this meeting: their whole Superteem Voice session, as its folder, a
+/// Adds another person's recording of this meeting: their whole Voice-OS session, as its folder, a
 /// folder holding it, or a zip of either. Each of their tracks that heard something becomes a track here,
 /// named after who or what it recorded, with `owner` ("Lin") in front when it only names a device. They go
 /// where their recording started by the clock, which is the same instant wherever they were, and are then

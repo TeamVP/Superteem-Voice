@@ -590,7 +590,7 @@ impl Vault {
         Ok(Snapshot { file: name, at, bytes: std::fs::metadata(&file).map_or(0, |m| m.len()) })
     }
 
-    /// Once a day a sealed copy also goes to the backup folder (Documents › Superteem Voice › Vault backups
+    /// Once a day a sealed copy also goes to the backup folder (Documents › Voice-OS › Vault backups
     /// unless the person chose another), which is the folder people back up and sync: a copy that outlives
     /// this computer. Only when sealed, as it leaves the app's folder. Each copy is named with the vault's ID,
     /// and only this vault's own are thinned out, so copies of a vault set aside are never deleted by its
@@ -630,7 +630,7 @@ impl Vault {
     }
 }
 
-const ABOUT_BACKUPS: &str = "These are sealed copies of your vault from Voice by Superteem: your notes, books, bookmarks,\r\n\
+const ABOUT_BACKUPS: &str = "These are sealed copies of your vault from Voice-OS: your notes, books, bookmarks,\r\n\
 chats, analyses and translations. The newest seven of each vault are kept.\r\n\r\n\
 vault-7F3A90C2-1763200000.db is a copy of the vault whose ID is 7F3A-90C2, made at that time.\r\n\
 keys-7F3A90C2.json goes with it: it isn't secret, and lets a vault password open the copy.\r\n\r\n\
@@ -672,7 +672,7 @@ fn default_dir() -> PathBuf {
     crate::library::data_dir().join("vault")
 }
 
-/// Where the daily sealed copy goes: the folder the person chose, or Documents › Superteem Voice › Vault
+/// Where the daily sealed copy goes: the folder the person chose, or Documents › Voice-OS › Vault
 /// backups, beside the meetings.
 pub fn backup_dir() -> PathBuf {
     let chosen = crate::prefs::load().vault_backup_dir;
@@ -1220,7 +1220,7 @@ pub fn kit() -> Result<String, String> {
         let y = yoe + era * 400 + i64::from(m <= 2);
         format!("{y}-{m:02}-{d:02}")
     };
-    let mut out = String::from("Voice by Superteem: recovery kit\r\n");
+    let mut out = String::from("Voice-OS: recovery kit\r\n");
     out += &format!("Vault ID {}, made {}\r\n\r\n", status.id, date(now()));
     out += "These 24 words open your vault: your notes, books, bookmarks and meetings. Anyone who has them, and a\r\n";
     out += "copy of the vault, can read everything in it, so keep this somewhere private: printed and filed, or in a\r\n";
@@ -1234,7 +1234,7 @@ pub fn kit() -> Result<String, String> {
     out += "Voice opens the vault by itself day to day. After Windows is reinstalled, or your Windows password is\r\n";
     out += "reset by someone else, it can't, and asks for these words (or your vault password, if you set one).\r\n\r\n";
     out += "ON A NEW COMPUTER\r\n";
-    out += "1. Copy the Superteem Voice folder from Documents (or wherever your backups are) to the new computer, or\r\n";
+    out += "1. Copy the Voice-OS folder from Documents (or wherever your backups are) to the new computer, or\r\n";
     out += "   let OneDrive or your backup bring it back.\r\n";
     out += "2. Install Voice, open Settings > Vault, and choose Bring in from a backup.\r\n";
     out += "3. Choose that folder, type these words, and choose Use it on this computer. Your notes, books and\r\n";
@@ -1566,7 +1566,7 @@ pub fn bring_in_folder(folder: &Path, words: &str, password: &str) -> Result<Bro
     }
     bring_in_extras(folder, &mut out)?;
     if out.notes + out.books + out.meetings + out.had == 0 && out.failed.is_empty() && out.other_vault.is_empty() {
-        return Err("Nothing from Voice was found in that folder. Choose the Superteem Voice folder from Documents, a Vault backups folder, or Voice's own data folder.".into());
+        return Err("Nothing from Voice was found in that folder. Choose the Voice-OS (or earlier Superteem Voice) folder from Documents, a Vault backups folder, or Voice's own data folder.".into());
     }
     std::thread::spawn(crate::sealed::seal_existing);
     Ok(out)
@@ -1589,6 +1589,8 @@ fn bring_in_extras(folder: &Path, out: &mut BroughtIn) -> Result<(), String> {
         Ok(())
     })?;
     copy_meetings(folder, out);
+    copy_meetings(&folder.join("Voice-OS"), out);
+    // Versions up to 0.10 were Voice by Superteem, whose folder this was.
     copy_meetings(&folder.join("Superteem Voice"), out);
     // A backup folder sits inside the meetings' folder: they're beside it.
     if folder.file_name().is_some_and(|n| n.eq_ignore_ascii_case("Vault backups")) {

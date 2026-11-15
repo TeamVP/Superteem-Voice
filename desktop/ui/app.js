@@ -671,10 +671,8 @@ function showNewHome() {
     el("span", { class: "tile-sub" }, k.sub)));
   main.replaceChildren(el("div", { class: "home phone-home" },
     // The wordmark, as in the sidebar.
-    el("div", { class: "brand home-brand", role: "img", "aria-label": "Voice by Superteem" },
-      el("span", { class: "product" }, "Voice"), el("span", { class: "by" }, "by"),
-      el("img", { class: "logo-light-mode", src: "logo-light-mode.png", alt: "" }),
-      el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" })),
+    el("div", { class: "brand home-brand", role: "img", "aria-label": "Voice-OS" },
+      el("span", { class: "product" }, "Voice-OS")),
     el("h1", {}, tr("Start new")),
     el("div", { class: "new-grid" }, tiles),
     el("div", { class: "hint" }, tr("Pick one to start"))));
@@ -1316,8 +1314,8 @@ function leaveDialog(href, link = null) {
     const finish = (value) => { result = value; dialog.close(); };
     const stay = el("button", { class: "primary pill", type: "button", onclick: () => dialog.close() }, tr("Stay here"));
     const copied = el("span", { class: "hint", "aria-live": "polite" });
-    const dialog = el("dialog", { class: "sheet leave-dialog", "aria-label": tr("This link leaves Superteem") },
-      el("h2", {}, mail ? tr("This writes an email outside Superteem") : tr("This link leaves Superteem")),
+    const dialog = el("dialog", { class: "sheet leave-dialog", "aria-label": tr("This link leaves Voice-OS") },
+      el("h2", {}, mail ? tr("This writes an email outside Voice-OS") : tr("This link leaves Voice-OS")),
       el("p", { class: "leave-site" }, svg("up", 16), site),
       link?.title ? el("p", { class: "leave-title" }, link.title) : null,
       el("p", { class: "leave-url" }, href),
@@ -1392,7 +1390,7 @@ function guardLinks(root, { book = null, noteId = "" } = {}) {
     a.classList.add("out-link");
     let site = href;
     try { site = new URL(href).hostname.replace(/^www\./, "") || href; } catch {}
-    a.title = tr("Leaves Superteem: {site}", { site: site });
+    a.title = tr("Leaves Voice-OS: {site}", { site: site });
     a.append(el("span", { class: "out-mark", "aria-hidden": "true", "data-noread": "" }, "↗"));
   }
   const press = (e) => {
@@ -5087,7 +5085,7 @@ function showImport(tracks, id, meetingStart, zone) {
       status.replaceChildren(el("span", { class: "danger" }, tr("Couldn't import: {0}", { "0": e?.message ?? e })));
     }
   });
-  // Someone else's Superteem Voice session of the same meeting: every track of theirs that heard something,
+  // Someone else's Voice-OS session of the same meeting: every track of theirs that heard something,
   // placed by when their recording started (the same instant wherever they were), then by its sound.
   const owner = el("input", { type: "text", placeholder: tr("Whose, like Lin"), maxlength: "40", "aria-label": tr("Whose recording") });
   const sessionStatus = el("div", { class: "hint", role: "status" });
@@ -5115,7 +5113,7 @@ function showImport(tracks, id, meetingStart, zone) {
     el("button", { class: "pill", type: "button", onclick: pickSession(true) }, tr("Choose a .zip…")),
   ];
   const fromSession = isDesktop() ? [
-    el("div", { class: "menu-label" }, tr("Another Superteem Voice recording")),
+    el("div", { class: "menu-label" }, tr("Another Voice-OS recording")),
     el("label", { class: "import-row" }, el("span", {}, tr("Whose")), owner, el("small", { class: "hint" }, tr("Prefix for their track names"))),
     el("div", { class: "import-row" }, ...sessionButtons),
     sessionStatus,
@@ -6201,7 +6199,7 @@ async function showSettings() {
     installUpdate().finally(() => { getButton.disabled = false; });
   });
   const about = [el("h2", {}, tr("About")), el("div", { class: "group" },
-    el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult),
+    el("div", { class: "row" }, el("span", { class: "label" }, "Voice-OS", version, checkResult),
       checkStack, updateStack))];
 
   // Optimise: offered with a callout while it would change something; the pages it leads to always.
@@ -6358,9 +6356,9 @@ const SETUP = { welcome: 0, voice: 1, model: 2, hello: 3, done: 4, permissions: 
 /// What the person agrees to by pressing "Agree and get started". Kept short on purpose.
 const TERMS = [
   [tr("Your voice stays on this device"),
-    tr("Voice by Superteem turns speech into text on this device. Your recordings, transcripts, notes and voice print (a numeric description of how your voice sounds, not a recording of it) are stored only here and are never sent to us or anyone else. Checking for an update sends Superteem the app version, the operating system and its version, the models in use, the configured languages, and whether the check was automatic, requested, or the start of an install. That check does not include recordings, transcripts, notes or the voice print.")],
+    tr("Voice-OS turns speech into text on this device. Your recordings, transcripts, notes and voice print (a numeric description of how your voice sounds, not a recording of it) are stored only here and are never sent to us or anyone else. Checking for an update sends Superteem the app version, the operating system and its version, the models in use, the configured languages, and whether the check was automatic, requested, or the start of an install. That check does not include recordings, transcripts, notes or the voice print.")],
   [tr("You're in control"),
-    tr("Delete voice prints, notes and recordings in the app at any time. Uninstalling removes the app; your files stay in the Superteem Voice folder until you delete it.")],
+    tr("Delete voice prints, notes and recordings in the app at any time. Uninstalling removes the app; your files stay in the Voice-OS folder until you delete it.")],
   [tr("Open source, no warranty"),
     tr("Voice is free software under the GNU General Public License v3. You may use, study, change and share it under that licence. It is provided as is, without warranty of any kind.")],
   [tr("Use it lawfully"),
@@ -6377,7 +6375,7 @@ function showCheckDetails(opener) {
   const dialog = el("dialog", { class: "check-details", "aria-label": tr("Telemetry") },
     el("div", { class: "body" },
       el("h2", {}, tr("Telemetry")),
-      el("p", {}, tr("Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted. Voice by Superteem is built to help you secure your data on your devices and give you a better alternative to AI cloud providers that store everything about you for their own benefit. "),
+      el("p", {}, tr("Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted. Voice-OS is built to help you secure your data on your devices and give you a better alternative to AI cloud providers that store everything about you for their own benefit. "),
         el("button", { class: "link inline", onclick: () => { dialog.close(); showTerms(); } }, tr("Privacy policy")), "."),
       el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => dialog.close() }, tr("Close")))));
   dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
@@ -6621,10 +6619,7 @@ async function showOnboarding(step = SETUP.welcome) {
     });
     page.classList.add("welcome");
     page.append(
-      el("h1", { class: "welcome-title" }, el("span", { class: "product" }, "Voice"), " ", el("span", { class: "by" }, "by"), " ",
-        el("span", { class: "welcome-logo", role: "img", "aria-label": "Superteem" },
-          el("img", { class: "logo-light-mode", src: "logo-light-mode.png", alt: "" }),
-          el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" }))),
+      el("h1", { class: "welcome-title" }, el("span", { class: "product" }, "Voice-OS")),
       el("p", { class: "lead" }, tr("Voice notes, meetings and commands, transcribed on your device. No cloud.")),
       rerun ? el("p", {}, tr("There are new terms of use. Agree to carry on.")) : "",
       el("p", { class: "legend" }, tr("By continuing you agree to the "),
@@ -7628,7 +7623,7 @@ async function doCommand(id) {
     await say(platform === "android"
       ? `I'm opening the download in your browser. When it has downloaded, open it to install.`
       : platform === "macos"
-      ? `Downloading version ${update.latest}. When its window opens, drag Voice by Superteem into Applications.`
+      ? `Downloading version ${update.latest}. When its window opens, drag Voice-OS into Applications.`
       : `Updating to version ${update.latest}. The app will close, install the update, and open again in about a minute.`);
     closeAgent();
     installUpdate();
@@ -7722,7 +7717,7 @@ async function installUpdate() {
   try {
     await invoke("install_update");
     showUpdateBar(platform === "android" ? tr("When it's downloaded, open it to install.")
-      : platform === "macos" ? tr("Drag Voice by Superteem into Applications in the window that opened, then reopen it.")
+      : platform === "macos" ? tr("Drag Voice-OS into Applications in the window that opened, then reopen it.")
       : tr("Installing. The app reopens when done."));
   } catch (e) {
     showUpdateBar(String(e));

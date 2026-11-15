@@ -140,7 +140,7 @@ pub struct Prefs {
     /// When this device last moved to a new version (Unix seconds); 0 when it hasn't.
     pub updated_at: u64,
     /// Where a sealed copy of the vault goes each day, beside the key file that names it: a synced folder, a
-    /// USB drive or a network share. Empty for Documents › Superteem Voice › Vault backups.
+    /// USB drive or a network share. Empty for Documents › Voice-OS › Vault backups.
     pub vault_backup_dir: String,
 }
 

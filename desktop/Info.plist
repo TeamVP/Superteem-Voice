@@ -4,8 +4,8 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Voice by Superteem records your notes and meetings and transcribes them on this Mac. Nothing is uploaded.</string>
+  <string>Voice-OS records your notes and meetings and transcribes them on this Mac. Nothing is uploaded.</string>
   <key>NSBluetoothAlwaysUsageDescription</key>
-  <string>Voice by Superteem records from Voice Pins over Bluetooth.</string>
+  <string>Voice-OS records from Voice Pins over Bluetooth.</string>
 </dict>
 </plist>

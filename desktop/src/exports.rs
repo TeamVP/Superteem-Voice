@@ -457,7 +457,7 @@ pub fn export_meeting(m: &MeetingExport, format: &str) -> Result<PathBuf, String
 fn package_readme(title: &str, name: &str, tracks: &[PackageTrack], mix_file: &str) -> String {
     let list: String = tracks.iter().map(|t| format!("  audio/{}  ({})\n", t.file, t.name)).collect();
     format!(
-        "{title}\nExported from Voice by Superteem.\n\n\
+        "{title}\nExported from Voice-OS.\n\n\
          Audio, 16 kHz mono WAV, all starting at the same moment:\n{list}  audio/{mix_file}  (the transcript mix: every microphone, each muted where the transcript takes its words from another one)\n\n\
          Edit decisions for the transcript mix:\n\
          \x20 {name}.xml  Premiere Pro and DaVinci Resolve (File > Import). A track per microphone, cut to the transcript mix; every line of the transcript and every bookmark is a marker with its text.\n\

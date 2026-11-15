@@ -125,7 +125,7 @@ function showVaultWelcome() {
       el("ul", { class: "vault-list" },
         el("li", {}, el("strong", {}, tr("Nothing changes day to day. ")), tr("Voice opens the vault itself for your Windows account; no password to type.")),
         el("li", {}, el("strong", {}, tr("Copies can't be read. ")), tr("Backups, synced folders and copied disks hold only sealed files.")),
-        el("li", {}, el("strong", {}, tr("A sealed copy is kept every day ")), `in ${vault?.backup_dir ?? tr("Documents › Superteem Voice › Vault backups")}.`),
+        el("li", {}, el("strong", {}, tr("A sealed copy is kept every day ")), `in ${vault?.backup_dir ?? tr("Documents › Voice-OS › Vault backups")}.`),
         el("li", {}, el("strong", {}, tr("Meetings open only in Voice. ")), tr("Export makes readable copies when you need them elsewhere."))),
       moved.failed?.length ? el("div", { class: "notice" }, tr("Not moved, left in place: {0}.", { "0": moved.failed.join(", ") })) : null,
       el("div", { class: "notice" }, el("strong", {}, tr("One thing to do now: save your recovery words. ")),
@@ -233,7 +233,7 @@ function showVaultCopies() {
       : tr("Voice keeps sealed copies of the vault as it changes. Restoring one puts every note and book back as it was. The vault as it is now is copied first, so this can be undone.")));
     if (!vault?.snapshots.length) {
       vaultAdd(body, el("p", { class: "notice" }, tr("No copies on this computer yet.")),
-        damaged ? el("p", { class: "hint" }, tr("If Documents is backed up or synced, a daily copy is in Documents › Superteem Voice › Vault backups. Open the vault, or start an empty one, then use Settings › Vault › Bring in from a backup.")) : null);
+        damaged ? el("p", { class: "hint" }, tr("If Documents is backed up or synced, a daily copy is in Documents › Voice-OS › Vault backups. Open the vault, or start an empty one, then use Settings › Vault › Bring in from a backup.")) : null);
     }
     const list = el("div", { class: "group vault-copies" });
     for (const copy of vault?.snapshots ?? []) {
@@ -394,12 +394,12 @@ function broughtText(r) {
   return text;
 }
 
-/// Chooses where to bring things in from: a folder (a backup, a copy of Documents › Superteem Voice, or
+/// Chooses where to bring things in from: a folder (a backup, a copy of Documents › Voice-OS, or
 /// Voice's data folder) or a vault file.
 async function chooseBringIn(folder) {
   try {
     const path = await window.__TAURI__.dialog.open(folder
-      ? { directory: true, title: tr("Choose a backup or Superteem Voice folder"), defaultPath: vault?.backup_dir }
+      ? { directory: true, title: tr("Choose a backup or Voice-OS folder"), defaultPath: vault?.backup_dir }
       : { title: tr("Choose a vault file"), filters: [{ name: tr("Vault"), extensions: ["db"] }] });
     if (path) showVaultBringIn({ path, folder });
   } catch (e) {
@@ -563,12 +563,12 @@ async function showVaultSettings() {
       copyNow, vault.snapshots.length ? button(tr("Restore a copy…"), () => showVaultCopies()) : null)));
   if (isDesktop()) {
     vaultAdd(page, el("h2", {}, tr("Bring in")), el("div", { class: "group" },
-      row(tr("From a backup or another computer"), tr("A Vault backups folder, a copy of Documents › Superteem Voice, or Voice's data folder from before the vault. Brings notes, books and meetings."),
+      row(tr("From a backup or another computer"), tr("A Vault backups folder, a copy of Documents › Voice-OS, or Voice's data folder from before the vault. Brings notes, books and meetings."),
         button(tr("Choose a folder…"), () => chooseBringIn(true))),
       row(tr("From a vault file"), tr("A single daily copy, or a vault set aside."), button(tr("Choose a file…"), () => chooseBringIn(false))),
       vault.sealed ? row(tr("Meetings from another vault"), vault.keyring ? tr("This vault also opens what {0} sealed.", { "0": vaultPlural(vault.keyring, "other vault") }) : tr("Open meetings sealed on another computer, with that vault's words."),
         button(tr("Add its words…"), () => showVaultAddWords())) : null));
   }
-  vaultAdd(page, el("h2", {}, tr("Where it is")), el("div", { class: "group" }, row(tr("The vault"), vault.folder), row(tr("Meetings"), tr("Documents › Superteem Voice, sealed beside the vault's daily copies"))));
+  vaultAdd(page, el("h2", {}, tr("Where it is")), el("div", { class: "group" }, row(tr("The vault"), vault.folder), row(tr("Meetings"), tr("Documents › Voice-OS, sealed beside the vault's daily copies"))));
   main.replaceChildren(page);
 }

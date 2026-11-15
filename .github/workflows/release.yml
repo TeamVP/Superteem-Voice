@@ -12,9 +12,9 @@ permissions:
   contents: read
 
 env:
-  WINDOWS_FILE: Voice-by-Superteem-Setup-x64.exe
-  ANDROID_FILE: Voice-by-Superteem-Android.apk
-  MAC_FILE: Voice-by-Superteem-macOS.dmg
+  WINDOWS_FILE: Voice-OS-Setup-x64.exe
+  ANDROID_FILE: Voice-OS-Android.apk
+  MAC_FILE: Voice-OS-macOS.dmg
 
 jobs:
   version:
@@ -350,7 +350,7 @@ jobs:
           cd desktop
           npm run tauri -- ios build --export-method app-store-connect
           mkdir -p ../dist
-          cp gen/apple/build/arm64/*.ipa ../dist/Voice-by-Superteem-iOS.ipa
+          cp gen/apple/build/arm64/*.ipa ../dist/Voice-OS-iOS.ipa
           ls -l ../dist
       - name: Upload to TestFlight
         if: env.IOS_SIGNED == 'true' && env.TESTFLIGHT == 'true' && startsWith(github.ref, 'refs/tags/v')
@@ -361,7 +361,7 @@ jobs:
         run: |
           mkdir -p ~/.appstoreconnect/private_keys
           printf '%s\n' "$APPLE_API_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_$APPLE_API_KEY.p8
-          xcrun altool --upload-app --type ios --file dist/Voice-by-Superteem-iOS.ipa \
+          xcrun altool --upload-app --type ios --file dist/Voice-OS-iOS.ipa \
             --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
       - uses: actions/upload-artifact@v7
         with:
@@ -390,7 +390,7 @@ jobs:
         run: |
           ls -l dist
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
-            --title "Voice by Superteem ${GITHUB_REF_NAME#v}" --generate-notes
+            --title "Voice-OS ${GITHUB_REF_NAME#v}" --generate-notes
       # The download page at voice.superteem.com (TeamVP/voice-superteem-site, on Vercel) serves its own copy of
       # the release's files, and installed apps check its release.json for updates. Its deploy hook rebuilds it.
       - name: Republish the download page

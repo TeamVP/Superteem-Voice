@@ -665,7 +665,7 @@ async function showTemplates(message) {
     el("div", { class: "row" }, el("span", { class: "grow" }), create));
   page.append(el("h2", {}, tr("New template")), form);
   if (isDesktop()) {
-    page.append(el("p", { class: "hint" }, tr("Templates are TOML files in your Superteem Voice folder, editable in any text editor. "),
+    page.append(el("p", { class: "hint" }, tr("Templates are TOML files in your Voice-OS folder, editable in any text editor. "),
       el("button", { class: "link inline", onclick: () => invoke("open_templates_folder") }, tr("Open folder"))));
   }
   main.replaceChildren(page);

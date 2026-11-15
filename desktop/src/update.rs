@@ -11,19 +11,19 @@ use serde::Serialize;
 pub const SITE: &str = "https://voice.superteem.com";
 /// Static `release.json` on GitHub Pages. The query below is not stored: Pages does not keep it, and this
 /// repository has no access log for voice.superteem.com, so aggregate reporting needs a change on the host.
-const RELEASE: &str = "https://voice.superteem.com/download/release.json";
-const GITHUB: &str = "https://api.github.com/repos/TeamVP/Superteem-Voice-OS/releases/latest";
-const USER_AGENT: &str = concat!("voice-by-superteem/", env!("CARGO_PKG_VERSION"));
+const RELEASE: &str = "https://voice.superteem.com/os/release.json";
+const GITHUB: &str = "https://api.github.com/repos/TeamVP/Voice-OS/releases/latest";
+const USER_AGENT: &str = concat!("voice-os/", env!("CARGO_PKG_VERSION"));
 
 /// This device's file in each release.
 #[cfg(target_os = "android")]
-const FILE: &str = "Voice-by-Superteem-Android.apk";
+const FILE: &str = "Voice-OS-Android.apk";
 #[cfg(target_os = "macos")]
-const FILE: &str = "Voice-by-Superteem-macOS.dmg";
+const FILE: &str = "Voice-OS-macOS.dmg";
 #[cfg(target_os = "ios")]
-const FILE: &str = "Voice-by-Superteem-iOS.ipa";
+const FILE: &str = "Voice-OS-iOS.ipa";
 #[cfg(not(any(target_os = "android", target_os = "macos", target_os = "ios")))]
-const FILE: &str = "Voice-by-Superteem-Setup-x64.exe";
+const FILE: &str = "Voice-OS-Setup-x64.exe";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Update {
@@ -74,7 +74,7 @@ fn launched(last: &str, onboarded: bool, current: &str, now: u64) -> Option<u64>
 pub fn just_updated() -> Option<JustUpdated> {
     let p = crate::prefs::load();
     showing(p.updated_at, &p.last_version, current(), crate::library::now())
-        .then(|| JustUpdated { version: current().to_string(), notes: format!("https://github.com/TeamVP/Superteem-Voice-OS/releases/tag/v{}", current()) })
+        .then(|| JustUpdated { version: current().to_string(), notes: format!("https://github.com/TeamVP/Voice-OS/releases/tag/v{}", current()) })
 }
 
 fn showing(updated_at: u64, last: &str, current: &str, now: u64) -> bool {
@@ -282,7 +282,7 @@ fn known(value: String) -> String {
 /// the fallback, unchanged. Neither gets the configuration query.
 fn installer_url(from_site: bool, asset_present: bool, browser_download_url: Option<&str>) -> String {
     if from_site && asset_present {
-        format!("{SITE}/download/{FILE}")
+        format!("{SITE}/os/{FILE}")
     } else {
         browser_download_url.unwrap_or(SITE).to_string()
     }
@@ -325,7 +325,7 @@ pub fn check(reason: &str) -> Result<Update, String> {
 /// it.
 pub fn install(update: &Update, progress: impl Fn(f32)) -> Result<(), String> {
     if !update.download.starts_with(SITE) && !update.download.starts_with("https://github.com/TeamVP/") {
-        return Err("That download isn't from the Voice by Superteem site.".into());
+        return Err("That download isn't from the Voice-OS download page or GitHub.".into());
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -342,7 +342,7 @@ pub fn install(update: &Update, progress: impl Fn(f32)) -> Result<(), String> {
             .map_err(|e| format!("The download failed: {e}"))?;
         let total: Option<u64> = response.header("Content-Length").and_then(|v| v.parse().ok());
         let name = if cfg!(target_os = "macos") { "macOS.dmg" } else { "Setup-x64.exe" };
-        let path = std::env::temp_dir().join(format!("Voice-by-Superteem-{}-{name}", update.latest));
+        let path = std::env::temp_dir().join(format!("Voice-OS-{}-{name}", update.latest));
         let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
         let mut reader = response.into_reader();
         let mut buf = vec![0u8; 64 * 1024];
@@ -435,7 +435,7 @@ mod tests {
         let url = superteem_release_url(&sample("org/Qwen 3:1.7b", "server", vec![("transcription_model", "base.en".into())], "en", "en"));
         assert_eq!(
             url,
-            "https://voice.superteem.com/download/release.json?app_version=0.8.7&os=Windows&os_version=10.0.26200&analysis_model=org%2FQwen%203%3A1.7b&analysis_mode=server&transcription_model=base.en&languages=en&primary_language=en&reason=auto"
+            "https://voice.superteem.com/os/release.json?app_version=0.8.7&os=Windows&os_version=10.0.26200&analysis_model=org%2FQwen%203%3A1.7b&analysis_mode=server&transcription_model=base.en&languages=en&primary_language=en&reason=auto"
         );
         let awkward = superteem_release_url(&sample("a b/c:d?e&f#g%h", "local", vec![("transcription_model", "none".into())], "en", "en"));
         assert!(awkward.contains("analysis_model=a%20b%2Fc%3Ad%3Fe%26f%23g%25h"));
@@ -521,13 +521,13 @@ mod tests {
         assert!(url.starts_with(&format!("{RELEASE}?")));
         assert!(url.contains("analysis_model=qwen3-1.7b"));
         assert!(!GITHUB.contains('?') && !GITHUB.contains("analysis_model") && !GITHUB.contains("languages"));
-        let site_installer = installer_url(true, true, Some("https://github.com/TeamVP/Superteem-Voice-OS/releases/download/v0.8.7/ignored.exe"));
-        let github_installer = installer_url(false, true, Some("https://github.com/TeamVP/Superteem-Voice-OS/releases/download/v0.8.7/Voice-by-Superteem-Setup-x64.exe"));
+        let site_installer = installer_url(true, true, Some("https://github.com/TeamVP/Voice-OS/releases/download/v0.8.7/ignored.exe"));
+        let github_installer = installer_url(false, true, Some("https://github.com/TeamVP/Voice-OS/releases/download/v0.8.7/Voice-OS-Setup-x64.exe"));
         let plain_site = installer_url(false, false, None);
         for download in [site_installer.as_str(), github_installer.as_str(), plain_site.as_str(), GITHUB] {
             assert!(!download.contains("analysis_model") && !download.contains("os_version") && !download.contains("languages=") && !download.contains("reason="), "{download}");
         }
-        assert_eq!(site_installer, format!("{SITE}/download/{FILE}"));
+        assert_eq!(site_installer, format!("{SITE}/os/{FILE}"));
         assert!(github_installer.starts_with("https://github.com/TeamVP/"));
     }
 

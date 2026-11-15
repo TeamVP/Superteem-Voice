@@ -35,8 +35,8 @@ struct Sandbox {
 
 fn sandbox(root: &Path, now: u64) -> Sandbox {
     let _ = std::fs::remove_dir_all(root);
-    let data = root.join("local").join("Superteem Voice");
-    let docs = root.join("home").join("Documents").join("Superteem Voice");
+    let data = root.join("local").join("Voice-OS");
+    let docs = root.join("home").join("Documents").join("Voice-OS");
     let notes = data.join("notes");
     let books = data.join("books");
     write(&data.join("preferences.json"), json!({ "onboarded": true, "terms_accepted": now - 86400 }));

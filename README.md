@@ -1,20 +1,13 @@
-<p align="center">
-  <picture>
-    <source srcset="public/Superteem-only-light.png" media="(prefers-color-scheme: dark)">
-    <img src="public/Superteem-only-dark.png" alt="Superteem" width="320">
-  </picture>
-</p>
-
-<h1 align="center">Voice by Superteem</h1>
+<h1 align="center">Voice-OS</h1>
 
 <p align="center">
   <b>Voice notes transcribed on your own device. No cloud.</b><br>
-  <a href="https://voice.superteem.com">Download</a> ·
-  <a href="https://github.com/TeamVP/Superteem-Voice-OS/releases">Releases</a> ·
+  <a href="https://voice.superteem.com/#open-source">Download</a> ·
+  <a href="https://github.com/TeamVP/Voice-OS/releases">Releases</a> ·
   <a href="#license">Open source</a>
 </p>
 
-Voice by Superteem turns speech into text on your PC, Mac or phone. You can dictate notes, record meetings and give voice commands. Recordings, transcripts and notes stay on the device, and there's no account. Checking for an update sends Superteem the app version, the operating system and its version, the models in use, the configured languages, and whether the check was automatic, requested, or the start of an install.
+Voice-OS turns speech into text on your PC, Mac or phone. It is free software under the GNU GPL v3. You can dictate notes, record meetings and give voice commands. Recordings, transcripts and notes stay on the device, and there's no account. Checking for an update sends Superteem the app version, the operating system and its version, the models in use, the configured languages, and whether the check was automatic, requested, or the start of an install.
 
 ## Features
 
@@ -26,7 +19,7 @@ Voice by Superteem turns speech into text on your PC, Mac or phone. You can dict
 - **Listen to translations:** read a translation aloud line by line, following along, or start from any line. Natural voices for about 40 languages download in one click (Windows).
 - **Optimise for this device:** one button picks the speech model, analysis model, graphics processor and a reading voice for each of your languages, for what your device runs well and the room it has, then tries each one. Settings › AI on this computer shows what runs and how fast.
 - **Voice commands (Windows and Mac):** say "Hey Superteem, start meeting", "take a note" or "bookmark that".
-- **Plain files:** each meeting is a folder of WAV audio and `transcript.json`. Text, Markdown and SRT copies are written next to them and regenerated on every edit. On Windows and the Mac the folders live in `Documents/Superteem Voice`; on iPhone, in the Files app under On My iPhone.
+- **Plain files:** each meeting is a folder of WAV audio and `transcript.json`. Text, Markdown and SRT copies are written next to them and regenerated on every edit. On Windows and the Mac the folders live in `Documents/Voice-OS`; on iPhone, in the Files app under On My iPhone.
 - **Voice Pin (in development):** support for Seeed's wearable [reSpeaker Clip](https://github.com/Seeed-Studio/reSpeaker_Clip), which runs Seeed's own open-source firmware.
 
 Summaries and translations use [llama.cpp](https://github.com/ggml-org/llama.cpp) with a small model you choose in Settings, downloaded once: Qwen3 1.7B (about 1.1 GB) is quick, and Qwen3.5 4B (about 2.7 GB) is much better for translation and for languages such as Welsh. You can also point it at a local server such as Ollama. On Windows, models run on the graphics processor through Vulkan when there's one that can (NVIDIA, AMD or Intel), and on the processor otherwise; the Mac uses Metal.
@@ -35,13 +28,15 @@ Transcription uses [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Engl
 
 ## Download
 
-Get the latest Windows installer, Mac disk image and Android APK from **[voice.superteem.com](https://voice.superteem.com)**.
+Get the latest Windows installer, Mac disk image and Android APK from **[voice.superteem.com](https://voice.superteem.com/#open-source)**, or from [Releases](https://github.com/TeamVP/Voice-OS/releases). The site copies each release into `/os/`, which the app checks for updates.
+
+Versions up to 0.10.2 were published as "Voice by Superteem". From 0.11 this edition is Voice-OS: a separate app with its own name, identifier and folder (`Documents/Voice-OS`), so it installs beside any earlier copy. To bring in notes and meetings from an earlier copy, use Settings › Vault › From a backup or another computer, and choose `Documents/Superteem Voice`.
 
 | Device | Requires | File |
 | --- | --- | --- |
-| Windows | Windows 10 or 11, 64-bit | `Voice-by-Superteem-Setup-x64.exe` |
-| Mac | macOS 13.3 or later, Apple silicon | `Voice-by-Superteem-macOS.dmg` |
-| Android | Android 10 or later | `Voice-by-Superteem-Android.apk` |
+| Windows | Windows 10 or 11, 64-bit | `Voice-OS-Setup-x64.exe` |
+| Mac | macOS 13.3 or later, Apple silicon | `Voice-OS-macOS.dmg` |
+| Android | Android 10 or later | `Voice-OS-Android.apk` |
 | iPhone | iOS 16.4 or later | Through TestFlight and the App Store, once signing is set up |
 
 ## Repository layout

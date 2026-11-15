@@ -1,4 +1,4 @@
-//! Voice by Superteem, shared by Windows, the Mac, Android and the iPhone.
+//! Voice-OS, shared by Windows, the Mac, Android and the iPhone.
 
 pub mod analysis;
 #[cfg(not(target_os = "android"))]
@@ -1499,7 +1499,7 @@ fn open_note_link(id: String, href: String) -> Result<(), String> {
 
 /// Where files kept in notes are copied in the clear for another app to open.
 fn opened_files_dir() -> std::path::PathBuf {
-    std::env::temp_dir().join("Superteem Voice opened files")
+    std::env::temp_dir().join("Voice-OS opened files")
 }
 
 /// Serves a meeting's audio to the page, at stvaudio://localhost/<meeting>/<track>.wav (http://stvaudio.localhost/
@@ -1991,7 +1991,7 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
 /// voices to add.
 #[tauri::command]
 async fn open_link(url: String) -> Result<(), String> {
-    let allowed = [update::SITE, "https://github.com/TeamVP/Superteem-Voice-OS", "https://k2-fsa.github.io/sherpa/onnx/tts/"];
+    let allowed = [update::SITE, "https://github.com/TeamVP/Voice-OS", "https://k2-fsa.github.io/sherpa/onnx/tts/"];
     if !allowed.iter().any(|a| url.starts_with(a)) {
         return Err("Only the app's own pages can be opened.".into());
     }
