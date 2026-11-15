@@ -98,10 +98,13 @@ jobs:
           New-Item -ItemType Junction -Path C:\t -Target (Resolve-Path desktop/target).Path | Out-Null
           $env:CARGO_TARGET_DIR = 'C:\t'
           # sherpa-onnx's build script downloads its libraries into sherpa-onnx-prebuilt at the top of the target
-          # folder, which the Rust cache doesn't keep, though it keeps the script's result. Without the libraries
-          # the script runs again so it fetches them; otherwise linking fails on sherpa-onnx-c-api.lib.
-          if (-not (Test-Path C:\t\sherpa-onnx-prebuilt)) {
+          # folder. The Rust cache keeps the script's result and that folder, but not the .lib files in it, and the
+          # script doesn't download again while the folder is there. Without the library, the folder and the
+          # script's result go, so it runs again and fetches them; otherwise linking fails on sherpa-onnx-c-api.lib.
+          if (-not (Get-ChildItem C:\t\sherpa-onnx-prebuilt -Recurse -Filter sherpa-onnx-c-api.lib -ErrorAction SilentlyContinue)) {
+            Remove-Item C:\t\sherpa-onnx-prebuilt -Recurse -Force -ErrorAction SilentlyContinue
             Get-ChildItem C:\t\release\build, C:\t\release\.fingerprint -Directory -Filter 'sherpa-onnx-sys-*' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+            Write-Output 'sherpa-onnx libraries missing from the cache; fetching them again.'
           }
           Push-Location desktop
           npm ci --no-audit --no-fund
