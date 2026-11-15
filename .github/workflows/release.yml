@@ -391,9 +391,11 @@ jobs:
           ls -l dist
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
             --title "Voice by Superteem ${GITHUB_REF_NAME#v}" --generate-notes
-      # The download page serves its own copy of the release's files. A release made with this workflow's
-      # token doesn't start other workflows, so the page is republished here.
+      # The download page at voice.superteem.com (TeamVP/voice-superteem-site, on Vercel) serves its own copy of
+      # the release's files, and installed apps check its release.json for updates. Its deploy hook rebuilds it.
       - name: Republish the download page
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
+          DEPLOY_HOOK: ${{ secrets.VOICE_SITE_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then echo "::warning::VOICE_SITE_DEPLOY_HOOK isn't set, so the download page wasn't rebuilt."; exit 0; fi
+          curl -sSf --retry 5 --retry-all-errors -X POST "$DEPLOY_HOOK" > /dev/null

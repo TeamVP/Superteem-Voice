@@ -52,7 +52,6 @@ Get the latest Windows installer, Mac disk image and Android APK from **[voice.s
 | `desktop/` | The Tauri app for Windows, Mac, Android and iPhone: Rust in `src/`, the interface in `ui/`, the Android project in `gen/android/`. The iPhone's Xcode project is generated in `gen/apple/` |
 | `firmware/` | Step 0 radio test firmware for a Seeed XIAO nRF52840 Sense. A development tool for testing Bluetooth audio, not shipped |
 | `protocol/` | The Bluetooth protocol the test firmware speaks, and its test vectors |
-| `site/` | The download page at voice.superteem.com |
 | `public/` | Logos and icons |
 
 ## Building from source
