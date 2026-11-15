@@ -10,7 +10,7 @@
 <p align="center">
   <b>Voice notes transcribed on your own device. No cloud.</b><br>
   <a href="https://voice.superteem.com">Download</a> ·
-  <a href="https://github.com/TeamVP/Superteem-Voice/releases">Releases</a> ·
+  <a href="https://github.com/TeamVP/Superteem-Voice-OS/releases">Releases</a> ·
   <a href="#license">Open source</a>
 </p>
 

@@ -12,7 +12,7 @@ pub const SITE: &str = "https://voice.superteem.com";
 /// Static `release.json` on GitHub Pages. The query below is not stored: Pages does not keep it, and this
 /// repository has no access log for voice.superteem.com, so aggregate reporting needs a change on the host.
 const RELEASE: &str = "https://voice.superteem.com/download/release.json";
-const GITHUB: &str = "https://api.github.com/repos/TeamVP/Superteem-Voice/releases/latest";
+const GITHUB: &str = "https://api.github.com/repos/TeamVP/Superteem-Voice-OS/releases/latest";
 const USER_AGENT: &str = concat!("voice-by-superteem/", env!("CARGO_PKG_VERSION"));
 
 /// This device's file in each release.
@@ -74,7 +74,7 @@ fn launched(last: &str, onboarded: bool, current: &str, now: u64) -> Option<u64>
 pub fn just_updated() -> Option<JustUpdated> {
     let p = crate::prefs::load();
     showing(p.updated_at, &p.last_version, current(), crate::library::now())
-        .then(|| JustUpdated { version: current().to_string(), notes: format!("https://github.com/TeamVP/Superteem-Voice/releases/tag/v{}", current()) })
+        .then(|| JustUpdated { version: current().to_string(), notes: format!("https://github.com/TeamVP/Superteem-Voice-OS/releases/tag/v{}", current()) })
 }
 
 fn showing(updated_at: u64, last: &str, current: &str, now: u64) -> bool {
@@ -521,8 +521,8 @@ mod tests {
         assert!(url.starts_with(&format!("{RELEASE}?")));
         assert!(url.contains("analysis_model=qwen3-1.7b"));
         assert!(!GITHUB.contains('?') && !GITHUB.contains("analysis_model") && !GITHUB.contains("languages"));
-        let site_installer = installer_url(true, true, Some("https://github.com/TeamVP/Superteem-Voice/releases/download/v0.8.7/ignored.exe"));
-        let github_installer = installer_url(false, true, Some("https://github.com/TeamVP/Superteem-Voice/releases/download/v0.8.7/Voice-by-Superteem-Setup-x64.exe"));
+        let site_installer = installer_url(true, true, Some("https://github.com/TeamVP/Superteem-Voice-OS/releases/download/v0.8.7/ignored.exe"));
+        let github_installer = installer_url(false, true, Some("https://github.com/TeamVP/Superteem-Voice-OS/releases/download/v0.8.7/Voice-by-Superteem-Setup-x64.exe"));
         let plain_site = installer_url(false, false, None);
         for download in [site_installer.as_str(), github_installer.as_str(), plain_site.as_str(), GITHUB] {
             assert!(!download.contains("analysis_model") && !download.contains("os_version") && !download.contains("languages=") && !download.contains("reason="), "{download}");

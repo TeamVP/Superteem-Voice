@@ -1991,7 +1991,7 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
 /// voices to add.
 #[tauri::command]
 async fn open_link(url: String) -> Result<(), String> {
-    let allowed = [update::SITE, "https://github.com/TeamVP/Superteem-Voice", "https://k2-fsa.github.io/sherpa/onnx/tts/"];
+    let allowed = [update::SITE, "https://github.com/TeamVP/Superteem-Voice-OS", "https://k2-fsa.github.io/sherpa/onnx/tts/"];
     if !allowed.iter().any(|a| url.starts_with(a)) {
         return Err("Only the app's own pages can be opened.".into());
     }
