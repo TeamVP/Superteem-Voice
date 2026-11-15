@@ -63,11 +63,41 @@ function trLanguageName(tag) {
   }
 }
 
-/// Saves the language on this device and in its preferences, then draws everything again in it.
-function pickUiLang(code) {
+/// `text` in one of the app's languages other than the chosen one: a question asked in the language
+/// just picked, before the page is drawn again in it.
+function trIn(code, text, vars) {
+  const column = UI_LANGS.findIndex(([c]) => c === code) - 1;
+  const cell = column >= 0 ? I18N_STRINGS[text]?.[column] : null;
+  return trFill(typeof cell === "string" && cell ? cell : text, vars);
+}
+
+/// The spoken language that matches each of the app's: 简体中文 is Mandarin in simplified characters.
+const UI_SPOKEN = { en: "en", uk: "uk", es: "es", "zh-CN": "zh" };
+const uiLangFor = (spoken) => Object.keys(UI_SPOKEN).find((code) => UI_SPOKEN[code] === spoken) ?? null;
+
+/// Offers to match the app's language and the spoken one that the person turned down, such as
+/// "ui:uk:en" (show the app in Ukrainian instead of English), so the same one isn't offered again.
+function langOfferDeclined(pair) {
+  try {
+    return JSON.parse(localStorage.getItem("langOffersDeclined") ?? "[]").includes(pair);
+  } catch {
+    return false;
+  }
+}
+
+function declineLangOffer(pair) {
+  try {
+    const all = JSON.parse(localStorage.getItem("langOffersDeclined") ?? "[]");
+    if (!all.includes(pair)) localStorage.setItem("langOffersDeclined", JSON.stringify([...all, pair]));
+  } catch {}
+}
+
+/// Saves the language on this device and in its preferences, then draws everything again in it,
+/// coming back to `reopen` ("settings" or "languages").
+function pickUiLang(code, reopen = "settings") {
   try {
     localStorage.setItem("uiLang", code);
-    sessionStorage.setItem("reopen", "settings");
+    sessionStorage.setItem("reopen", reopen);
   } catch {}
   window.__TAURI__.core.invoke("save_prefs", { uiLang: code }).catch(() => {}).finally(() => location.reload());
 }

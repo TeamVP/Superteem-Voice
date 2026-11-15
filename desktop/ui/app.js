@@ -6290,11 +6290,8 @@ async function showSettings() {
     theme.append(el("button", { class: current === value ? "on" : "", "aria-pressed": String(current === value),
       onclick: () => { pickTheme(value); showSettings(); } }, label));
   }
-  // The app's own words; each language is named in itself, so it can be found from any of them.
-  const uiLang = el("select", { "aria-label": tr("App language"), onchange: () => pickUiLang(uiLang.value) },
-    UI_LANGS.map(([code, name]) => el("option", { value: code, selected: code === UI_LANG }, name)));
   const appearance = [el("h2", {}, tr("Appearance")), el("div", { class: "group" },
-    el("div", { class: "row" }, el("span", { class: "label" }, tr("App language")), uiLang),
+    el("div", { class: "row" }, el("span", { class: "label" }, tr("App language")), uiLangPicker("settings")),
     el("div", { class: "row" }, el("span", { class: "label" }, tr("Theme")), theme))];
 
   const storage = [el("h2", {}, tr("Storage")), el("div", { class: "group" },
@@ -7795,9 +7792,11 @@ async function installUpdate() {
     showOnboarding(SETUP.welcome);
   } else {
     showHome();
-    // Back to Settings after its language was changed.
+    // Back to the page the app's language was changed on.
     try {
-      if (sessionStorage.getItem("reopen") === "settings") showSettings();
+      const reopen = sessionStorage.getItem("reopen");
+      if (reopen === "settings") showSettings();
+      else if (reopen === "languages") showLanguages();
       sessionStorage.removeItem("reopen");
     } catch {}
     // On a phone the list is home.

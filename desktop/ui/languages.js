@@ -153,6 +153,68 @@ async function changeItemLanguages(kind, id, list, notice) {
 
 // ---------- Settings › Languages
 
+/// The app's language, each named in itself so it can be found from any of them. `reopen` is the page
+/// to come back to once it's drawn again in the new one.
+function uiLangPicker(reopen) {
+  const select = el("select", { "aria-label": tr("App language"), onchange: () => changeUiLang(select.value, reopen) },
+    UI_LANGS.map(([code, name]) => el("option", { value: code, selected: code === UI_LANG }, name)));
+  return select;
+}
+
+/// Asks, in `lang`, whether to change the other language too. Gives true for Switch, false for Not now,
+/// and null when it's closed without an answer.
+function langOffer(lang, heading, lines) {
+  return new Promise((done) => {
+    let answer = null;
+    const finish = (yes) => { answer = yes; dialog.close(); };
+    const dialog = el("dialog", { class: "sheet", lang, "aria-label": heading },
+      el("h2", {}, heading), ...lines.map((line) => el("p", {}, line)),
+      el("div", { class: "actions" }, el("span", { class: "grow" }),
+        el("button", { class: "pill", type: "button", onclick: () => finish(false) }, trIn(lang, "Not now")),
+        el("button", { class: "primary pill", type: "button", onclick: () => finish(true) }, trIn(lang, "Switch"))));
+    dialog.addEventListener("close", () => { dialog.remove(); done(answer); });
+    document.body.append(dialog);
+    dialog.showModal();
+  });
+}
+
+/// After the primary language changes to one the app comes in, offers to show the app in it, asking in
+/// that language. Gives true when the app is being drawn again in it.
+async function offerUiLangFor(primary) {
+  const code = uiLangFor(primary);
+  const pair = `ui:${code}:${UI_LANG}`;
+  if (!code || code === UI_LANG || langOfferDeclined(pair)) return false;
+  const yes = await langOffer(code, trIn(code, "Show the app in English?"),
+    [trIn(code, "Menus, buttons and messages. You can change it any time in Settings › Languages.")]);
+  if (yes === false) declineLangOffer(pair);
+  if (!yes) return false;
+  pickUiLang(code, "languages");
+  return true;
+}
+
+/// Changes the app's language, first offering, in the new one, to make the spoken language that matches it
+/// primary: new notes and meetings start in it, and a speech model it needs is named with its size.
+async function changeUiLang(code, reopen) {
+  const spoken = UI_SPOKEN[code];
+  const data = await languageData(true).catch(() => null);
+  const pair = `primary:${spoken}:${data?.primary}`;
+  if (spoken && data && data.primary !== spoken && !langOfferDeclined(pair)) {
+    const model = await invoke("speech_model_for", { languages: [spoken] }).catch(() => null);
+    const lines = [trIn(code, "New notes and meetings will start in English and be transcribed in it. Ones you have keep their languages.")];
+    if (model && !model.ready) lines.push(trIn(code, "Transcribing it needs the {name} speech model ({size}), downloaded once.", { name: model.name, size: sizeText(model.size) }));
+    const yes = await langOffer(code, trIn(code, "Make English your primary language?"), lines);
+    if (yes === false) declineLangOffer(pair);
+    if (yes) {
+      try {
+        await invoke("save_languages", { languages: [...data.chosen, spoken], primary: spoken });
+      } catch (e) {
+        micToast(String(e));
+      }
+    }
+  }
+  pickUiLang(code, reopen);
+}
+
 /// Settings › Languages: the ones the person uses and the primary one, what new items start in, what to
 /// translate into, and the speech models.
 async function showLanguages(message) {
@@ -162,10 +224,22 @@ async function showLanguages(message) {
   refreshItems();
   const [data, models] = await Promise.all([languageData(true), invoke("speech_models").catch(() => [])]);
   const page = el("div", { class: "page" }, el("button", { class: "link back-link", onclick: () => showSettings() }, tr("‹ Settings")), el("h1", {}, tr("Languages")));
-  page.append(el("p", { class: "hint" }, tr("The languages you use. Notes and meetings use your primary one unless you pick others beside their status: one, or two for people who switch.")));
+  // The app's own words first, beside the spoken languages they're offered to match.
+  page.append(el("div", { class: "group" }, el("div", { class: "row" },
+    el("span", { class: "label" }, tr("App language"), el("small", {}, tr("Menus, buttons and messages"))), uiLangPicker("languages"))));
+  page.append(el("h2", {}, tr("Your languages")),
+    el("p", { class: "hint" }, tr("The languages you use. Notes and meetings use your primary one unless you pick others beside their status: one, or two for people who switch.")));
   if (message) page.append(el("div", { class: "notice" }, message));
   const save = async (chosen, primary) => {
-    try { await invoke("save_languages", { languages: chosen, primary }); await languageData(true); showLanguages(); } catch (e) { showError(page, e); }
+    try {
+      await invoke("save_languages", { languages: chosen, primary });
+      await languageData(true);
+      // A new primary language the app also comes in: offered for the app's words too.
+      if (primary !== data.primary && await offerUiLangFor(primary)) return;
+      showLanguages();
+    } catch (e) {
+      showError(page, e);
+    }
   };
   const settings = async (change) => {
     try { languageInfo = await invoke("save_language_settings", change); showLanguages(); } catch (e) { showError(page, e); }

@@ -2786,6 +2786,12 @@ fn speech_model_view(m: &'static transcribe::SpeechModel) -> SpeechModelView {
     SpeechModelView { model: m, ready: transcribe::is_ready(m), suggested: m.multilingual && m.id == transcribe::suggested_multilingual().id, used_for }
 }
 
+/// The speech model that would transcribe these languages, and whether it is downloaded.
+#[tauri::command]
+fn speech_model_for(languages: Vec<String>) -> SpeechModelView {
+    speech_model_view(transcribe::model_for(&languages).0)
+}
+
 #[tauri::command]
 fn speech_models() -> Vec<SpeechModelView> {
     transcribe::MODELS.iter().map(speech_model_view).collect()
@@ -3728,6 +3734,7 @@ pub fn run() {
             set_my_pronounce,
             get_languages,
             save_languages,
+            speech_model_for,
             set_line_language,
             save_language_settings,
             set_item_languages,
