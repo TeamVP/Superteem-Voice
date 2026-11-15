@@ -97,6 +97,12 @@ jobs:
           New-Item -ItemType Directory -Force desktop/target | Out-Null
           New-Item -ItemType Junction -Path C:\t -Target (Resolve-Path desktop/target).Path | Out-Null
           $env:CARGO_TARGET_DIR = 'C:\t'
+          # sherpa-onnx's build script downloads its libraries into sherpa-onnx-prebuilt at the top of the target
+          # folder, which the Rust cache doesn't keep, though it keeps the script's result. Without the libraries
+          # the script runs again so it fetches them; otherwise linking fails on sherpa-onnx-c-api.lib.
+          if (-not (Test-Path C:\t\sherpa-onnx-prebuilt)) {
+            Get-ChildItem C:\t\release\build, C:\t\release\.fingerprint -Directory -Filter 'sherpa-onnx-sys-*' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+          }
           Push-Location desktop
           npm ci --no-audit --no-fund
           # The natural voice's DLLs, which the installer packs from here (installer-hooks.nsh).
