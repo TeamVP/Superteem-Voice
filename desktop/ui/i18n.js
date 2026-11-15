@@ -6,7 +6,10 @@
 // whose rows hold one column per language in UI_LANGS order after English. A word with no translation
 // shows in English. Placeholders are {name}: tr("Updated to {version}", { version }).
 
-const UI_LANGS = [["en", "English"], ["uk", "Українська"], ["es", "Español"], ["zh-CN", "简体中文"]];
+const UI_LANGS = [
+  ["en", "English"], ["uk", "Українська"], ["es", "Español"], ["zh-CN", "简体中文"], ["hi", "हिन्दी"], ["ar", "العربية"],
+  ["bn", "বাংলা"], ["fr", "Français"], ["id", "Bahasa Indonesia"], ["pt-BR", "Português (Brasil)"], ["ja", "日本語"],
+];
 
 /// The language chosen on this device. It's read before anything draws, so words made once, as the
 /// scripts load, are already in it; changing it reloads the page.
@@ -19,8 +22,12 @@ const UI_LANG = (() => {
 })();
 const UI_COLUMN = UI_LANGS.findIndex(([code]) => code === UI_LANG) - 1;
 document.documentElement.lang = UI_LANG;
-/// Dates and times follow the chosen language; in English, the device's own way.
-const UI_LOCALE = UI_LANG === "en" ? undefined : UI_LANG;
+// Arabic reads right to left: the layout mirrors, while timelines and recordings keep running left to right.
+const UI_RTL = UI_LANG === "ar";
+document.documentElement.dir = UI_RTL ? "rtl" : "ltr";
+/// Dates and times follow the chosen language; in English, the device's own way. Numbers stay in the
+/// digits 0–9 everywhere, so a date and a count beside it read alike.
+const UI_LOCALE = UI_LANG === "en" ? undefined : ["ar", "bn"].includes(UI_LANG) ? UI_LANG + "-u-nu-latn" : UI_LANG;
 
 const trFill = (text, vars) => vars ? text.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k] ?? "") : m)) : text;
 
@@ -71,8 +78,9 @@ function trIn(code, text, vars) {
   return trFill(typeof cell === "string" && cell ? cell : text, vars);
 }
 
-/// The spoken language that matches each of the app's: 简体中文 is Mandarin in simplified characters.
-const UI_SPOKEN = { en: "en", uk: "uk", es: "es", "zh-CN": "zh" };
+/// The spoken language that matches each of the app's: 简体中文 is Mandarin in simplified characters, and
+/// Português (Brasil) is Portuguese.
+const UI_SPOKEN = { en: "en", uk: "uk", es: "es", "zh-CN": "zh", hi: "hi", ar: "ar", bn: "bn", fr: "fr", id: "id", "pt-BR": "pt", ja: "ja" };
 const uiLangFor = (spoken) => Object.keys(UI_SPOKEN).find((code) => UI_SPOKEN[code] === spoken) ?? null;
 
 /// Offers to match the app's language and the spoken one that the person turned down, such as

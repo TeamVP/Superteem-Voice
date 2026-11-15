@@ -602,15 +602,17 @@ try {
   splitter.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     splitter.setPointerCapture(e.pointerId);
-    const left = sidebar.getBoundingClientRect().left;
+    // The sidebar sits on the right when the layout reads right to left.
+    const box = sidebar.getBoundingClientRect();
+    const width = (x) => (UI_RTL ? box.right - x : x - box.left);
     splitter.classList.add("dragging");
     document.body.classList.add("resizing");
-    const move = (m) => setSidebarWidth(m.clientX - left, false);
+    const move = (m) => setSidebarWidth(width(m.clientX), false);
     const up = (u) => {
       splitter.removeEventListener("pointermove", move);
       splitter.classList.remove("dragging");
       document.body.classList.remove("resizing");
-      setSidebarWidth(u.clientX - left);
+      setSidebarWidth(width(u.clientX));
     };
     splitter.addEventListener("pointermove", move);
     splitter.addEventListener("pointerup", up, { once: true });
@@ -618,7 +620,7 @@ try {
   });
   splitter.addEventListener("dblclick", () => setSidebarWidth(SIDEBAR_WIDTH.default));
   splitter.addEventListener("keydown", (e) => {
-    const step = e.key === "ArrowLeft" ? -16 : e.key === "ArrowRight" ? 16 : 0;
+    const step = (e.key === "ArrowLeft" ? -16 : e.key === "ArrowRight" ? 16 : 0) * (UI_RTL ? -1 : 1);
     if (!step) return;
     e.preventDefault();
     setSidebarWidth(sidebar.getBoundingClientRect().width + step);
@@ -1153,8 +1155,7 @@ function commentaryDialog(about, text) {
     const finish = (value) => { result = value; dialog.close(); };
     const dialog = el("dialog", { class: "sheet extras-dialog", "aria-label": tr("Commentary") },
       el("h2", {}, tr("Commentary on {about}", { about: about })),
-      el("p", { class: "hint" }, tr("Hidden until a reader presses Commentary, then shown at the top. Never read aloud. ")
-        + tr("Markdown works: *italic*, **bold**, - lists, blank line between paragraphs.")),
+      el("p", { class: "hint" }, tr("Hidden until a reader presses Commentary, then shown at the top. Never read aloud. Markdown works: *italic*, **bold**, - lists, blank line between paragraphs.")),
       area,
       el("div", { class: "actions" },
         text?.trim() ? el("button", { class: "link danger", type: "button", onclick: () => finish("") }, tr("Remove")) : null,
@@ -1255,11 +1256,9 @@ function pronounceDialog(about, words, { fresh = "", inherited = null, voice = n
     const theirs = Object.keys(inherited ?? {}).length;
     const dialog = el("dialog", { class: "sheet extras-dialog pron-dialog", "aria-label": tr("Pronunciation") },
       el("h2", {}, tr("Pronunciation in {about}", { about: about })),
-      el("p", { class: "hint" }, tr("Fix words the voice says wrong: type the word, then spell it as it sounds. ")
-        + tr("Hyphenated chunks work best, like Themistocles → Thur-mistic-klees.")),
-      defaults ? el("p", { class: "hint" }, tr("Your changes stay on this device and replace the book's. ")
-        + tr("Remove a word to read it as written.")) : null,
-      theirs ? el("p", { class: "hint" }, tr("The book's {theirs} word{1} used too. Words here apply to this note only.", { theirs: theirs, "1": theirs === 1 ? " is" : "s are" })) : null,
+      el("p", { class: "hint" }, tr("Fix words the voice says wrong: type the word, then spell it as it sounds. Hyphenated chunks work best, like Themistocles → Thur-mistic-klees.")),
+      defaults ? el("p", { class: "hint" }, tr("Your changes stay on this device and replace the book's. Remove a word to read it as written.")) : null,
+      theirs ? el("p", { class: "hint" }, trn(theirs, "The book's {n} word is used too. Words here apply to this note only.", "The book's {n} words are used too. Words here apply to this note only.")) : null,
       search, rows, empty,
       el("div", { class: "actions" },
         el("button", { class: "pill with-icon pron-add", type: "button", onclick: () => addRow().querySelector("input").focus() }, svg("plus", 14), tr("Add a word")),
@@ -4066,8 +4065,7 @@ function renderSession(session, processingError, suggestion) {
   }
   if (used.size) {
     // How to read and fix the transcript, behind a "?" so it isn't in the way once known.
-    const help = el("div", { class: "legend", hidden: !helpOpen, id: "transcript-help" }, el("p", {}, tr("Rename a voice to update every line, or use ⋯ to merge voices or link a voice print. ")
-      + tr("Dotted lines are less certain; a side bar means two people spoke at once.")), extraHelp);
+    const help = el("div", { class: "legend", hidden: !helpOpen, id: "transcript-help" }, el("p", {}, tr("Rename a voice to update every line, or use ⋯ to merge voices or link a voice print. Dotted lines are less certain; a side bar means two people spoke at once.")), extraHelp);
     const helpButton = el("button", { class: `icon-only help-toggle${helpOpen ? " on" : ""}`, type: "button", title: tr("Reading and fixing the transcript"),
       "aria-label": tr("Reading and fixing the transcript"), "aria-expanded": String(helpOpen), "aria-controls": "transcript-help" }, "?");
     helpButton.addEventListener("click", () => {
@@ -5508,9 +5506,7 @@ async function showVoicePrints(error) {
   const page = el("div", { class: "page" },
     el("button", { class: "link", onclick: () => showVoices() }, tr("‹ Voices")),
     el("h1", {}, tr("Voice prints")),
-    el("p", { class: "legend" }, tr("A voice print lets Voice recognise and name someone in new meetings. ")
-      + tr("It's kept only on this device, as a description of the voice; its recording is deleted. ")
-      + tr("Only make one with the person's consent.")));
+    el("p", { class: "legend" }, tr("A voice print lets Voice recognise and name someone in new meetings. It's kept only on this device, as a description of the voice; its recording is deleted. Only make one with the person's consent.")));
   if (error) page.append(el("div", { class: "error" }, String(error)));
   if (!prints.length) page.append(el("div", { class: "empty" }, tr("No voice prints yet.")));
   // One person can have several prints, as they sound different on each microphone and through call apps.
@@ -5540,8 +5536,7 @@ async function showVoicePrints(error) {
     for (const p of person.prints) page.append(printRow(p, person.prints.length > 1));
   }
   page.append(el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showEnrol(null) }, tr("New voice print"))),
-    el("p", { class: "legend" }, tr("You can also make one from a speaker in any meeting, via ⋯ beside their name. ")
-      + tr("Someone can have several, as they sound different on each mic and call app; each is matched separately.")));
+    el("p", { class: "legend" }, tr("You can also make one from a speaker in any meeting, via ⋯ beside their name. Someone can have several, as they sound different on each mic and call app; each is matched separately.")));
   main.replaceChildren(page);
 
   /// One voice print of a person: what it was recorded on and from what, with its own buttons.
@@ -5718,10 +5713,7 @@ async function showKeyphrases(printId, message) {
   const page = el("div", { class: "page" },
     el("button", { class: "link", onclick: () => showVoices() }, tr("‹ Voices")),
     el("h1", {}, tr("Wake word & commands")),
-    el("p", { class: "legend" }, tr("Say each phrase a few times so Voice hears it instantly, without waiting ")
-      + tr("for speech to text. It learns your voice, so it answers you, not others in the room. Only a ")
-      + tr("description of the sound is kept with your voice print; recordings are deleted. Record again discards ")
-      + tr("every take for that phrase and starts fresh.")));
+    el("p", { class: "legend" }, tr("Say each phrase a few times so Voice hears it instantly, without waiting for speech to text. It learns your voice, so it answers you, not others in the room. Only a description of the sound is kept with your voice print; recordings are deleted. Record again discards every take for that phrase and starts fresh.")));
   if (!print) {
     page.append(el("div", { class: "notice" }, tr("Make your voice print first: phrases are kept with it.")),
       el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showOnboarding(SETUP.voice) }, tr("Make my voice print"))));
@@ -5870,8 +5862,7 @@ function showPhraseTakes() {
   const stop = el("button", { class: "primary pill" }, tr("Done"));
   const cancel = el("button", { class: "pill" }, tr("Cancel"));
   const page = el("div", { class: "page" }, el("h1", {}, tr("Say “{text}”", { text: phrase.text })),
-    el("p", { class: "legend" }, tr("Say it once per line, with a pause of about a second between. Say it a little ")
-      + tr("differently each time, to teach Voice how you really say it.")
+    el("p", { class: "legend" }, tr("Say it once per line, with a pause of about a second between. Say it a little differently each time, to teach Voice how you really say it.")
       + (phrase.after ? tr(" Say just “{text}”; it counts only after “{after}”.", { text: phrase.text, after: phrase.after }) : "")),
     banner, el("div", { class: "meter wide-meter" }, meter),
     el("ol", { class: "takes" }, phrase.how.map((h) => el("li", {}, h))),
@@ -5925,9 +5916,7 @@ async function showVocabulary(message) {
   const page = el("div", { class: "page" },
     el("button", { class: "link", onclick: () => showTranscription() }, tr("‹ Transcription")),
     el("h1", {}, tr("Vocabulary")),
-    el("p", { class: "legend" }, tr("Names, products and acronyms that speech to text writes as everyday words, like “SIBR” ")
-      + tr("as “cyber”. Voice tells the speech model about them before it listens, and fixes what it ")
-      + tr("still gets wrong. In meetings, corrected words are underlined: click one to undo.")));
+    el("p", { class: "legend" }, tr("Names, products and acronyms that speech to text writes as everyday words, like “SIBR” as “cyber”. Voice tells the speech model about them before it listens, and fixes what it still gets wrong. In meetings, corrected words are underlined: click one to undo.")));
   if (message) page.append(el("p", { class: "vocab-notice", role: "status" }, message));
   if (!terms.length) page.append(el("div", { class: "empty" }, tr("No words yet.")));
   for (const t of terms) {
@@ -6369,25 +6358,15 @@ const SETUP = { welcome: 0, voice: 1, model: 2, hello: 3, done: 4, permissions: 
 /// What the person agrees to by pressing "Agree and get started". Kept short on purpose.
 const TERMS = [
   [tr("Your voice stays on this device"),
-    tr("Voice by Superteem turns speech into text on this device. Your recordings, transcripts, notes and voice print (a ")
-    + tr("numeric description of how your voice sounds, not a recording of it) are stored only here and are never sent ")
-    + tr("to us or anyone else. Checking for an update sends Superteem the app version, the operating system and its ")
-    + tr("version, the models in use, the configured languages, and whether the check was automatic, requested, or the ")
-    + tr("start of an install. That check does not include recordings, transcripts, notes or the voice print.")],
+    tr("Voice by Superteem turns speech into text on this device. Your recordings, transcripts, notes and voice print (a numeric description of how your voice sounds, not a recording of it) are stored only here and are never sent to us or anyone else. Checking for an update sends Superteem the app version, the operating system and its version, the models in use, the configured languages, and whether the check was automatic, requested, or the start of an install. That check does not include recordings, transcripts, notes or the voice print.")],
   [tr("You're in control"),
-    tr("Delete voice prints, notes and recordings in the app at any time. Uninstalling removes the app; your files stay ")
-    + tr("in the Superteem Voice folder until you delete it.")],
+    tr("Delete voice prints, notes and recordings in the app at any time. Uninstalling removes the app; your files stay in the Superteem Voice folder until you delete it.")],
   [tr("Open source, no warranty"),
-    tr("Voice is free software under the GNU General Public License v3. You may use, study, change and share it ")
-    + tr("under that licence. It is provided as is, without warranty of any kind.")],
+    tr("Voice is free software under the GNU General Public License v3. You may use, study, change and share it under that licence. It is provided as is, without warranty of any kind.")],
   [tr("Use it lawfully"),
-    tr("You are responsible for how you use Voice. Get consent before recording anyone, follow the recording, ")
-    + tr("privacy and surveillance laws where you are, and don't use it for anything illegal. We can't prevent misuse ")
-    + tr("and aren't responsible for it.")],
+    tr("You are responsible for how you use Voice. Get consent before recording anyone, follow the recording, privacy and surveillance laws where you are, and don't use it for anything illegal. We can't prevent misuse and aren't responsible for it.")],
   [tr("Our liability"),
-    tr("To the extent the law allows, Superteem and its authors aren't liable for any loss or damage from using it, ")
-    + tr("including missing or wrong transcripts. Nothing here limits rights you have under the Australian Consumer Law ")
-    + tr("or other laws that can't be excluded.")],
+    tr("To the extent the law allows, Superteem and its authors aren't liable for any loss or damage from using it, including missing or wrong transcripts. Nothing here limits rights you have under the Australian Consumer Law or other laws that can't be excluded.")],
   [tr("Governing law"),
     tr("These terms are governed by the laws of Victoria, Australia. If they change, Voice will ask you again.")],
 ];
@@ -6398,8 +6377,7 @@ function showCheckDetails(opener) {
   const dialog = el("dialog", { class: "check-details", "aria-label": tr("Telemetry") },
     el("div", { class: "body" },
       el("h2", {}, tr("Telemetry")),
-      el("p", {}, tr("Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted. ")
-        + tr("Voice by Superteem is built to help you secure your data on your devices and give you a better alternative to AI cloud providers that store everything about you for their own benefit. "),
+      el("p", {}, tr("Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted. Voice by Superteem is built to help you secure your data on your devices and give you a better alternative to AI cloud providers that store everything about you for their own benefit. "),
         el("button", { class: "link inline", onclick: () => { dialog.close(); showTerms(); } }, tr("Privacy policy")), "."),
       el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => dialog.close() }, tr("Close")))));
   dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
@@ -6559,8 +6537,7 @@ async function showTranscription(message) {
     list.append(el("div", { class: "row" }, el("span", { class: "label" }, tr("Other languages"), el("small", {}, tr("Which multilingual model transcribes them"))), pick));
   }
   page.append(el("h2", {}, tr("Speech models")), list,
-    el("p", { class: "hint" }, tr("English uses the English model, unless the large one runs on a GPU. Other languages need a multilingual model, offered when you choose one. ")
-      + tr("Spoken commands like “Hey Superteem” and “bookmark that” are English for now.")));
+    el("p", { class: "hint" }, tr("English uses the English model, unless the large one runs on a GPU. Other languages need a multilingual model, offered when you choose one. Spoken commands like “Hey Superteem” and “bookmark that” are English for now.")));
 
   page.append(el("h2", {}, tr("Vocabulary")), el("div", { class: "group" },
     linkRow(tr("Vocabulary"), terms.length ? trn(terms.length, "{n} word", "{n} words") : tr("Spell names and acronyms your way"), () => showVocabulary(), { drop: true })));
@@ -6799,8 +6776,7 @@ async function sayHello(page, next, skip, rerun) {
   const finished = (message) => {
     stop();
     fill(PRACTICE_GOAL);
-    lead.textContent = tr("Superteem knows how you say “Hey Superteem”. Turn listening on now, or later in Settings. ")
-      + tr("Nothing is recorded until you ask.");
+    lead.textContent = tr("Superteem knows how you say “Hey Superteem”. Turn listening on now, or later in Settings. Nothing is recorded until you ask.");
     state.textContent = message ?? "";
     const listening = toggleRow(tr("Listen for “Hey Superteem”"), tr("While the app is open."), prefs.wake, async (on, box) => {
       try {
@@ -6866,8 +6842,7 @@ async function sayHello(page, next, skip, rerun) {
       state.textContent = p.reason || tr("That didn't count. Say “Hey Superteem”, then pause.");
       if (misses >= PRACTICE_STRUGGLE && !help.firstChild) {
         help.replaceChildren(el("div", { class: "notice hello-struggle" },
-          el("p", {}, tr("Having trouble? Get close to the mic in a quiet room. Or skip for now: ")
-            + tr("you can practise later in Settings › Wake word & commands.")),
+          el("p", {}, tr("Having trouble? Get close to the mic in a quiet room. Or skip for now: you can practise later in Settings › Wake word & commands.")),
           el("button", { class: "primary pill", onclick: () => { stop(); next(); } }, tr("Skip for now"))));
       }
     };

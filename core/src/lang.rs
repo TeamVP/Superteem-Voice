@@ -133,7 +133,6 @@ pub const LANGUAGES: &[Language] = &[
     lang("pt", "Portuguese", "Português", "pt", Latin, Good, Direct),
     lang("pa", "Punjabi", "ਪੰਜਾਬੀ", "pa", Other, Weak, ViaEnglish),
     lang("ro", "Romanian", "Română", "ro", Latin, Fair, ViaEnglish),
-    lang("ru", "Russian", "Русский", "ru", Cyrillic, Good, Direct),
     lang("sr", "Serbian", "Српски", "sr", Cyrillic, Fair, ViaEnglish),
     lang("sk", "Slovak", "Slovenčina", "sk", Latin, Fair, ViaEnglish),
     lang("sl", "Slovenian", "Slovenščina", "sl", Latin, Fair, ViaEnglish),
@@ -415,7 +414,6 @@ pub fn fillers(code: &str) -> &'static [&'static str] {
         "ar" => &["نعم", "أيوه", "اه", "طيب", "تمام", "ok", "يعني", "شكرا", "ممم"],
         "hi" => &["हाँ", "हां", "जी", "ठीक", "ठीक है", "अच्छा", "हम्म", "ok", "धन्यवाद"],
         "tr" => &["evet", "tamam", "hı hı", "ok", "peki", "şey", "yani", "teşekkürler"],
-        "ru" => &["да", "ага", "угу", "ок", "ладно", "хорошо", "ну", "спасибо", "так"],
         _ => &["ok", "okay", "mm", "mhm", "hmm"],
     }
 }

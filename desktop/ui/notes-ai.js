@@ -93,15 +93,17 @@ function noteChat(status) {
   edge.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     edge.setPointerCapture(e.pointerId);
-    const right = panel.getBoundingClientRect().right;
+    // The chat sits on the left when the layout reads right to left.
+    const box = panel.getBoundingClientRect();
+    const width = (x) => (UI_RTL ? x - box.left : box.right - x);
     edge.classList.add("dragging");
     document.body.classList.add("resizing");
-    const move = (m) => setChatWidth(right - m.clientX, false);
+    const move = (m) => setChatWidth(width(m.clientX), false);
     const up = (u) => {
       edge.removeEventListener("pointermove", move);
       edge.classList.remove("dragging");
       document.body.classList.remove("resizing");
-      setChatWidth(right - u.clientX);
+      setChatWidth(width(u.clientX));
     };
     edge.addEventListener("pointermove", move);
     edge.addEventListener("pointerup", up, { once: true });
@@ -109,7 +111,7 @@ function noteChat(status) {
   });
   edge.addEventListener("dblclick", () => setChatWidth(CHAT_WIDTH.default));
   edge.addEventListener("keydown", (e) => {
-    const step = e.key === "ArrowLeft" ? 16 : e.key === "ArrowRight" ? -16 : 0;
+    const step = (e.key === "ArrowLeft" ? 16 : e.key === "ArrowRight" ? -16 : 0) * (UI_RTL ? -1 : 1);
     if (!step) return;
     e.preventDefault();
     setChatWidth(panel.getBoundingClientRect().width + step);
