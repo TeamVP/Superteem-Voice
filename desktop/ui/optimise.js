@@ -26,22 +26,22 @@ async function optimiseCallout() {
   const todo = data.plan.steps.filter((s) => !s.done && !s.kind.startsWith("remove"));
   if (!data.progress.running && (!todo.length || !data.stale)) return null;
   return el("div", { class: "optimise-callout" }, svg("spark", 22),
-    el("div", { class: "grow" }, el("strong", {}, data.progress.running ? "Optimising Voice for this device…" : `Make Voice faster and smarter on this ${isPhone() ? "phone" : "computer"}`),
+    el("div", { class: "grow" }, el("strong", {}, data.progress.running ? tr("Optimising Voice…") : tr("Make Voice faster and smarter on this {0}", { "0": deviceWord() })),
       el("small", {}, data.progress.running ? data.progress.step : optimiseSummary(todo))),
-    el("button", { class: "primary pill", onclick: () => (data.progress.running ? showAiSettings() : showOptimise(OPTIMISE_FROM.settings)) }, data.progress.running ? "See progress" : "Optimise"));
+    el("button", { class: "primary pill", onclick: () => (data.progress.running ? showAiSettings() : showOptimise(OPTIMISE_FROM.settings)) }, data.progress.running ? tr("See progress") : tr("Optimise")));
 }
 
 /// "A better speech model, the graphics processor and a Spanish voice."
 function optimiseSummary(todo) {
   const parts = [];
-  if (todo.some((s) => s.kind === "gpu")) parts.push("the graphics processor");
-  if (todo.some((s) => s.kind === "speech")) parts.push("a better speech model");
-  if (todo.some((s) => s.kind === "analysis")) parts.push("a better analysis model");
+  if (todo.some((s) => s.kind === "gpu")) parts.push(tr("the GPU"));
+  if (todo.some((s) => s.kind === "speech")) parts.push(tr("a better speech model"));
+  if (todo.some((s) => s.kind === "analysis")) parts.push(tr("a better analysis model"));
   const voices = todo.filter((s) => s.kind === "voice").map((s) => s.title.replace(/^Reading (.+?):.*/, "$1"));
   if (voices.length) parts.push(`${voices.length === 1 ? "a" : ""} natural ${voices.join(" and ")} voice${voices.length > 1 ? "s" : ""}`);
-  if (!parts.length) return "Check what runs here and how fast.";
+  if (!parts.length) return tr("Check what runs here and how fast.");
   const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
-  return `One click sets up ${list}, chosen for what this device runs well.`;
+  return tr("One click sets up {list}, chosen for this device.", { list: list });
 }
 
 // ---------- The home page suggestion
@@ -52,12 +52,12 @@ async function optimiseNudge() {
   const data = await optimiseData().catch(() => null);
   if (!data?.suggest || data.progress.running) return null;
   const todo = data.plan.steps.filter((s) => !s.done && !s.kind.startsWith("remove"));
-  const card = el("div", { class: "optimise-nudge", role: "region", "aria-label": "Optimise for this device" },
+  const card = el("div", { class: "optimise-nudge", role: "region", "aria-label": tr("Optimise for this device") },
     svg("spark", 22),
-    el("div", { class: "grow" }, el("strong", {}, `Voice can run better on this ${isPhone() ? "phone" : "computer"}`), el("small", {}, optimiseSummary(todo))),
+    el("div", { class: "grow" }, el("strong", {}, tr("Voice can run better on this {0}", { "0": deviceWord() })), el("small", {}, optimiseSummary(todo))),
     el("div", { class: "optimise-nudge-actions" },
-      el("button", { class: "primary pill", onclick: () => showOptimise(OPTIMISE_FROM.home) }, "Optimise"),
-      el("button", { class: "link", onclick: async () => { await invoke("optimise_dismiss").catch(() => {}); card.remove(); } }, "Not now")));
+      el("button", { class: "primary pill", onclick: () => showOptimise(OPTIMISE_FROM.home) }, tr("Optimise")),
+      el("button", { class: "link", onclick: async () => { await invoke("optimise_dismiss").catch(() => {}); card.remove(); } }, tr("Not now"))));
   return card;
 }
 
@@ -68,13 +68,13 @@ async function showAiSettings(message) {
   showPage();
   view = { kind: "ai-settings" };
   refreshItems();
-  const page = el("div", { class: "page ai-page" }, backLinks("‹ Settings", () => showSettings()), el("h1", {}, "Local AI"));
+  const page = el("div", { class: "page ai-page" }, backLinks(tr("‹ Settings"), () => showSettings()), el("h1", {}, tr("Local AI")));
   main.replaceChildren(page);
   const data = await optimiseData().catch((e) => { showError(page, e); return null; });
   if (!data) return;
   const { plan, current, last, progress } = data;
   const d = plan.profile;
-  page.append(el("p", { class: "hint" }, "Everything Voice does with AI runs here, offline: turning speech into text, analyses and translations, and reading aloud. This is what each runs with, and how fast."));
+  page.append(el("p", { class: "hint" }, tr("All of Voice's AI runs here, offline: speech to text, analyses, translations and reading aloud. This is what each uses, and how fast.")));
   if (message) page.append(el("div", { class: "notice" }, message));
 
   if (progress.running) {
@@ -84,52 +84,52 @@ async function showAiSettings(message) {
   } else {
     const todo = plan.steps.filter((s) => !s.done && !s.kind.startsWith("remove"));
     // Never done; something new to recommend; set up as the person chose; or fully optimised.
-    const [title, detail] = !last ? ["Not optimised yet", optimiseSummary(todo)]
-      : data.stale ? ["Something here can be better", optimiseSummary(todo)]
-      : todo.length ? ["Set up the way you chose", `You kept your own choices. The recommendations are still here if you change your mind. Last checked ${timeText(last.at)}.`]
-      : ["Optimised for this device", `Nothing to change. Last done ${timeText(last.at)}.`];
-    const label = !last || data.stale ? "Optimise" : todo.length ? "See recommendations" : "Optimise again";
+    const [title, detail] = !last ? [tr("Not optimised yet"), optimiseSummary(todo)]
+      : data.stale ? [tr("Something can be better"), optimiseSummary(todo)]
+      : todo.length ? [tr("Set up your way"), tr("You kept your own choices. Recommendations are still here. Last checked {0}.", { "0": timeText(last.at) })]
+      : [tr("Optimised for this device"), tr("Nothing to change. Last done {0}.", { "0": timeText(last.at) })];
+    const label = !last || data.stale ? tr("Optimise") : todo.length ? tr("See recommendations") : tr("Optimise again");
     page.append(el("div", { class: "optimise-callout" }, svg("spark", 22),
       el("div", { class: "grow" }, el("strong", {}, title), el("small", {}, detail)),
       el("button", { class: !last || data.stale ? "primary pill" : "pill", onclick: () => showOptimise(OPTIMISE_FROM.ai) }, label)));
   }
 
   // The device.
-  const gpuText = d.gpu ? `${d.gpu}${d.gpu_memory_gb ? `, ${d.gpu_memory_gb.toFixed(0)} GB` : d.integrated ? ", shares the computer's memory" : ""}` : "None usable";
-  page.append(el("h2", {}, "This device"), el("div", { class: "group" },
-    infoRow("Graphics processor", d.gpu ? (current.gpu_on ? "Models run on it." : "Turned off: models run on the processor.") : plan.notes.find((n) => n.includes("graphics")) ?? "", gpuText),
-    infoRow("Memory", "Decides how large a model runs well.", `${d.ram_gb.toFixed(0)} GB`),
-    infoRow("Free space", "Where models are kept.", d.free < 1e15 ? bytes(d.free) : "—"),
-    infoRow("Space models take", "Speech, analysis and voice models together.", bytes(current.storage))));
+  const gpuText = d.gpu ? `${d.gpu}${d.gpu_memory_gb ? `, ${d.gpu_memory_gb.toFixed(0)} GB` : d.integrated ? tr(", shares the computer's memory") : ""}` : tr("None usable");
+  page.append(el("h2", {}, tr("This device")), el("div", { class: "group" },
+    infoRow(tr("GPU"), d.gpu ? (current.gpu_on ? tr("Models run on it.") : tr("Off: models run on the CPU.")) : plan.notes.find((n) => n.includes("graphics")) ?? "", gpuText),
+    infoRow(tr("Memory"), tr("Decides how large a model runs well."), `${d.ram_gb.toFixed(0)} GB`),
+    infoRow(tr("Free space"), tr("Where models are kept."), d.free < 1e15 ? bytes(d.free) : "—"),
+    infoRow(tr("Model storage"), tr("Speech, analysis and voice models."), bytes(current.storage))));
 
   // Each job.
-  const where = (gpu) => (gpu ? "on the graphics processor" : "on the processor");
-  const speechSpeed = last?.speech_s != null ? `10 s of speech in ${last.speech_s.toFixed(1)} s, ${where(last.speech_on_gpu)}` : "Speed is measured when you optimise.";
-  const words = last?.words_per_s != null ? `About ${Math.round(last.words_per_s)} words a second, ${where(last.analysis_on_gpu)}` : "Speed is measured when you optimise.";
-  page.append(el("h2", {}, "What runs here"), el("div", { class: "group" },
-    infoRow("Speech to text", `${speechSpeed}. Dictation, commands and transcripts.`, current.speech_ready ? current.speech : `${current.speech} (not downloaded)`),
-    infoRow("Analysis", current.server ? `On your server, ${current.server}.` : `${words}. Summaries, action items and templates.`, current.server ? "Server" : current.analysis ?? "None yet"),
-    infoRow("Translation", "Made by the analysis model, line by line.", current.server ? "Server" : current.analysis ?? "None yet"),
-    infoRow("Reading aloud", "Notes, transcripts, analyses and translations.", current.languages.map(([, v]) => v).filter(Boolean)[0] ?? "The system's voice")));
+  const where = (gpu) => (gpu ? tr("on the GPU") : tr("on the CPU"));
+  const speechSpeed = last?.speech_s != null ? tr("10 s of speech in {0} s, {1}", { "0": last.speech_s.toFixed(1), "1": where(last.speech_on_gpu) }) : tr("Speed is measured when you optimise.");
+  const words = last?.words_per_s != null ? tr("About {0} words a second, {1}", { "0": Math.round(last.words_per_s), "1": where(last.analysis_on_gpu) }) : tr("Speed is measured when you optimise.");
+  page.append(el("h2", {}, tr("What runs here")), el("div", { class: "group" },
+    infoRow(tr("Speech to text"), tr("{speechSpeed}. Dictation, commands and transcripts.", { speechSpeed: speechSpeed }), current.speech_ready ? current.speech : tr("{speech} (not downloaded)", { speech: current.speech })),
+    infoRow(tr("Analysis"), current.server ? tr("On your server, {server}.", { server: current.server }) : tr("{words}. Summaries, action items and templates.", { words: words }), current.server ? tr("Server") : current.analysis ?? tr("None yet")),
+    infoRow(tr("Translation"), tr("Made by the analysis model, line by line."), current.server ? tr("Server") : current.analysis ?? tr("None yet")),
+    infoRow(tr("Reading aloud"), tr("Notes, transcripts, analyses and translations."), current.languages.map(([, v]) => v).filter(Boolean)[0] ?? tr("System voice"))));
 
   // Each language.
-  const quality = { good: "Transcribed well", fair: "Transcribed fairly well", weak: "Transcription is rough", none: "Can't be transcribed yet" };
-  page.append(el("h2", {}, "Your languages"), el("div", { class: "group" }, current.languages.map(([code, voice, q, direct]) =>
-    infoRow(languageName(code), `${quality[q] ?? ""} · ${direct ? "Analyses written in it" : "Analysed through English"}`, voice ?? "System voice"))));
+  const quality = { good: tr("Transcribed well"), fair: tr("Transcribes fairly well"), weak: tr("Rough transcription"), none: tr("Can't transcribe yet") };
+  page.append(el("h2", {}, tr("Your languages")), el("div", { class: "group" }, current.languages.map(([code, voice, q, direct]) =>
+    infoRow(languageName(code), `${quality[q] ?? ""} · ${direct ? tr("Analyses in it") : tr("Analysed via English")}`, voice ?? tr("System voice")))));
 
   // Things to tidy.
   const removable = plan.steps.filter((s) => s.kind.startsWith("remove"));
   if (removable.length) {
-    page.append(el("h2", {}, "Not needed any more"), el("div", { class: "group" }, removable.map((s) =>
+    page.append(el("h2", {}, tr("No longer needed")), el("div", { class: "group" }, removable.map((s) =>
       infoRow(s.title.replace(/^Remove /, ""), s.reason, bytes(s.frees)))),
-    el("p", { class: "hint" }, "Optimising removes these, or remove them yourself on the pages below."));
+    el("p", { class: "hint" }, tr("Optimising removes these, or remove them on the pages below.")));
   }
   if (plan.notes.length) page.append(el("ul", { class: "optimise-notes" }, plan.notes.map((n) => el("li", {}, n))));
 
-  page.append(el("h2", {}, "Choose for yourself"), el("div", { class: "group" },
-    linkRow("Analysis", "The model, the graphics processor and a local server", () => { analysisOrigin = null; showAnalysisSettings(); }),
-    linkRow("Languages", "Your languages and the speech models", () => showLanguages()),
-    linkRow("Reading aloud", "Voices for each language, speed", () => showReadingSettings())));
+  page.append(el("h2", {}, tr("Choose for yourself")), el("div", { class: "group" },
+    linkRow(tr("Analysis"), tr("Model, GPU and local server"), () => { analysisOrigin = null; showAnalysisSettings(); }),
+    linkRow(tr("Languages"), tr("Your languages and speech models"), () => showLanguages()),
+    linkRow(tr("Reading aloud"), tr("Voices per language, speed"), () => showReadingSettings())));
 }
 
 function infoRow(label, detail, value) {
@@ -140,8 +140,8 @@ function infoRow(label, detail, value) {
 
 /// Where optimising was started from, to go back to: [label, show].
 const OPTIMISE_FROM = {
-  settings: ["Settings", () => showSettings()],
-  ai: ["Local AI", () => showAiSettings()],
+  settings: [tr("Settings"), () => showSettings()],
+  ai: [tr("Local AI"), () => showAiSettings()],
   home: ["Home", () => showHome()],
 };
 let optimiseFrom = OPTIMISE_FROM.settings;
@@ -157,27 +157,27 @@ async function showOptimise(from) {
   // Straight from the app, not the stand-in used when it can't be read, so saving can't drop a language.
   let info;
   try { info = await invoke("get_languages"); languageInfo = info; } catch (e) {
-    main.replaceChildren(el("div", { class: "page" }, backLinks(`‹ ${optimiseFrom[0]}`, optimiseFrom[1]), el("div", { class: "error" }, `Your languages couldn't be read: ${e}`)));
+    main.replaceChildren(el("div", { class: "page" }, backLinks(`‹ ${optimiseFrom[0]}`, optimiseFrom[1]), el("div", { class: "error" }, tr("Your languages couldn't be read: {e}", { e: e }))));
     return;
   }
   const page = el("div", { class: "page optimise-page" }, backLinks(`‹ ${optimiseFrom[0]}`, optimiseFrom[1]),
-    el("div", { class: "optimise-step" }, "Step 1 of 2 · Your languages"), el("h1", {}, `Optimise for this ${isPhone() ? "phone" : "computer"}`),
-    el("p", { class: "hint" }, "First, the languages you speak and read in. Voice then picks the speech model, analysis model and voices that work best for them here."));
+    el("div", { class: "optimise-step" }, tr("Step 1 of 2 · Your languages")), el("h1", {}, tr("Optimise for this {0}", { "0": deviceWord() })),
+    el("p", { class: "hint" }, tr("First, the languages you speak and read. Voice then picks the best speech model, analysis model and voices for them.")));
   const chosen = new Set(info.chosen);
   const list = el("div", { class: "group" });
   const draw = () => {
     list.replaceChildren(...[...chosen].map((code) => {
       const box = el("input", { type: "checkbox", checked: true, disabled: code === info.primary, "aria-label": languageName(code) });
       box.addEventListener("change", () => { chosen.delete(code); draw(); });
-      return el("label", { class: "row" }, box, el("span", { class: "label" }, languageName(code), code === info.primary ? el("small", {}, "Your main language") : null));
+      return el("label", { class: "row" }, box, el("span", { class: "label" }, languageName(code), code === info.primary ? el("small", {}, tr("Your main language")) : null));
     }));
-    const add = el("select", { "aria-label": "Add a language" }, el("option", { value: "" }, "Add a language…"),
+    const add = el("select", { "aria-label": tr("Add a language") }, el("option", { value: "" }, tr("Add a language…")),
       (info.catalogue ?? []).filter((l) => !chosen.has(l.code)).map((l) => el("option", { value: l.code }, l.native && l.native !== l.name ? `${l.name} · ${l.native}` : l.name)));
     add.addEventListener("change", () => { if (add.value) { chosen.add(add.value); draw(); } });
     list.append(el("div", { class: "row add-language" }, add));
   };
   draw();
-  const next = el("button", { class: "primary pill" }, "Next: see the plan");
+  const next = el("button", { class: "primary pill" }, tr("Next: the plan"));
   next.addEventListener("click", async () => {
     next.disabled = true;
     try {
@@ -191,7 +191,7 @@ async function showOptimise(from) {
       showError(page, e);
     }
   });
-  page.append(el("h2", {}, "Your languages"), list, el("div", { class: "toolbar" }, el("span", { class: "grow" }), next));
+  page.append(el("h2", {}, tr("Your languages")), list, el("div", { class: "toolbar" }, el("span", { class: "grow" }), next));
   main.replaceChildren(page);
 }
 
@@ -200,16 +200,16 @@ async function showOptimisePlan() {
   showPage();
   view = { kind: "optimise" };
   const page = el("div", { class: "page optimise-page" }, backLinks(`‹ ${optimiseFrom[0]}`, optimiseFrom[1]),
-    el("div", { class: "optimise-step" }, "Step 2 of 2 · The plan · ", el("button", { class: "link inline", onclick: () => showOptimise() }, "Change languages")),
-    el("h1", {}, `The plan for this ${isPhone() ? "phone" : "computer"}`));
-  page.append(el("p", { class: "hint" }, el("span", { class: "spinner" }), " Looking at this device…"));
+    el("div", { class: "optimise-step" }, tr("Step 2 of 2 · The plan · "), el("button", { class: "link inline", onclick: () => showOptimise() }, tr("Change languages"))),
+    el("h1", {}, tr("The plan for this {0}", { "0": deviceWord() })));
+  page.append(el("p", { class: "hint" }, el("span", { class: "spinner" }), tr(" Looking at this device…")));
   main.replaceChildren(page);
   const data = await optimiseData().catch((e) => { showError(page, e); return null; });
   if (!data) return;
   page.querySelector(".hint").remove();
   const { plan } = data;
   const d = plan.profile;
-  page.append(el("p", { class: "hint" }, `${d.gpu ?? "No graphics processor models can use"} · ${d.ram_gb.toFixed(0)} GB of memory · ${d.free < 1e15 ? bytes(d.free) : "plenty of"} free. Untick anything you'd rather not have.`));
+  page.append(el("p", { class: "hint" }, tr("{0} · {1} GB memory · {2} free. Untick anything you don't want.", { "0": d.gpu ?? tr("No usable GPU"), "1": d.ram_gb.toFixed(0), "2": d.free < 1e15 ? bytes(d.free) : "plenty of" })));
   const picked = new Map();
   const total = el("strong", {});
   const go = el("button", { class: "primary pill" });
@@ -217,8 +217,8 @@ async function showOptimisePlan() {
     const steps = plan.steps.filter((s) => picked.get(`${s.kind}:${s.id}`));
     const download = steps.reduce((n, s) => n + s.download, 0);
     const frees = steps.reduce((n, s) => n + s.frees, 0);
-    total.textContent = download ? `Downloads ${bytes(download)}${frees ? `, frees ${bytes(frees)}` : ""}` : frees ? `Frees ${bytes(frees)}` : steps.length ? "Nothing to download" : "Nothing to change";
-    go.textContent = download ? `Download and set up (${bytes(download)})` : "Set up";
+    total.textContent = download ? tr("Downloads {download}{1}", { download: bytes(download), "1": frees ? `, frees ${bytes(frees)}` : "" }) : frees ? tr("Frees {frees}", { frees: bytes(frees) }) : steps.length ? tr("Nothing to download") : tr("Nothing to change");
+    go.textContent = download ? tr("Download and set up ({download})", { download: bytes(download) }) : tr("Set up");
     go.disabled = !steps.length;
   };
   const group = el("div", { class: "group optimise-plan" });
@@ -228,8 +228,8 @@ async function showOptimisePlan() {
     const text = el("span", { class: "label" }, s.title, el("small", {}, s.reason));
     // Done: nothing to choose; a green tick and "Done".
     if (s.done) {
-      group.append(el("div", { class: "row done" }, el("span", { class: "plan-tick", role: "img", "aria-label": "Done" }, svg("check", 18)), text,
-        el("span", { class: "plan-done" }, "Done")));
+      group.append(el("div", { class: "row done" }, el("span", { class: "plan-tick", role: "img", "aria-label": tr("Done") }, svg("check", 18)), text,
+        el("span", { class: "plan-done" }, tr("Done"))));
       continue;
     }
     // Ticked, unless the person chose to go without it before.
@@ -237,11 +237,11 @@ async function showOptimisePlan() {
     const box = el("input", { type: "checkbox", checked: !kept.has(key), "aria-label": s.title });
     box.addEventListener("change", () => { picked.set(key, box.checked); sum(); });
     group.append(el("label", { class: "row" }, box, text,
-      el("span", { class: "value" }, s.download ? bytes(s.download) : s.frees ? `Frees ${bytes(s.frees)}` : "")));
+      el("span", { class: "value" }, s.download ? bytes(s.download) : s.frees ? tr("Frees {0}", { "0": bytes(s.frees) }) : "")));
   }
   page.append(group);
   if (plan.notes.length) page.append(el("ul", { class: "optimise-notes" }, plan.notes.map((n) => el("li", {}, n))));
-  page.append(el("p", { class: "hint" }, "Each model is tried once when it's in place, so you see how fast it runs here. Downloads carry on if you leave this page."));
+  page.append(el("p", { class: "hint" }, tr("Each model is tried once in place, so you see how fast it runs. Downloads continue if you leave.")));
   go.addEventListener("click", async () => {
     const steps = plan.steps.filter((s) => picked.get(`${s.kind}:${s.id}`)).map((s) => [s.kind, s.id]);
     go.disabled = true;
@@ -256,14 +256,14 @@ async function showOptimisePlan() {
   // Happy as things are: what's left becomes the person's choice, and isn't suggested again until
   // something changes. They can come back and follow the recommendations whenever they like.
   const keep = plan.steps.some((s) => !s.done)
-    ? el("button", { class: "pill", title: "Keep things as they are. Voice stops suggesting these until something changes.", onclick: async () => {
+    ? el("button", { class: "pill", title: tr("Keep things as they are. Voice stops suggesting these until something changes."), onclick: async () => {
       try {
         await invoke("optimise_keep");
-        showAiSettings("Kept as you have it. Voice won't suggest these again unless something changes. Come back any time to follow the recommendations.");
+        showAiSettings(tr("Kept as is. Voice won't suggest these unless something changes. Come back any time."));
       } catch (e) { showError(page, e); }
-    } }, "Keep my current setup")
+    } }, tr("Keep my setup"))
     : null;
-  page.append(el("div", { class: "toolbar optimise-go" }, total, el("span", { class: "grow" }), el("button", { class: "pill", onclick: optimiseFrom[1] }, "Cancel"), keep, go));
+  page.append(el("div", { class: "toolbar optimise-go" }, total, el("span", { class: "grow" }), el("button", { class: "pill", onclick: optimiseFrom[1] }, tr("Cancel")), keep, go));
   sum();
   main.replaceChildren(page);
 }
@@ -272,7 +272,7 @@ function drawOptimiseProgress(holder, p) {
   if (!p.running) {
     if (p.finished) {
       const problems = p.problems ?? [];
-      const message = p.error ?? (problems.length ? `Optimised, except: ${problems.join(" · ")}` : "Optimised. Everything below is set up and was tried on this device.");
+      const message = p.error ?? (problems.length ? tr("Optimised, except: {0}", { "0": problems.join(" · ") }) : tr("Optimised. Everything below is set up and tested here."));
       optimisePage = null;
       if (view.kind === "ai-settings") showAiSettings(message);
     }
@@ -280,6 +280,6 @@ function drawOptimiseProgress(holder, p) {
   }
   const bar = el("div", { class: "optimise-bar" }, el("span", { style: `width:${Math.round((p.fraction ?? 0) * 100)}%` }));
   holder.replaceChildren(el("div", { class: "row" }, el("span", { class: "spinner" }),
-    el("span", { class: "label" }, p.step || "Starting…", el("small", {}, `Step ${p.index} of ${p.count}${p.fraction > 0 && p.fraction < 1 ? ` · ${Math.round(p.fraction * 100)}%` : ""}`), bar),
-    el("button", { class: "pill", onclick: () => invoke("optimise_cancel") }, "Stop")));
+    el("span", { class: "label" }, p.step || tr("Starting…"), el("small", {}, tr("Step {index} of {count}{2}", { index: p.index, count: p.count, "2": p.fraction > 0 && p.fraction < 1 ? ` · ${Math.round(p.fraction * 100)}%` : "" })), bar),
+    el("button", { class: "pill", onclick: () => invoke("optimise_cancel") }, tr("Stop"))));
 }

@@ -26,10 +26,10 @@ icon.paste = '<path d="M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1
 
 /// The 15 bookmark colours, as Superteem's colour tags.
 const BOOKMARK_COLOURS = [
-  ["c01", "#B85C5C", "Red"], ["c02", "#C47A3A", "Orange"], ["c03", "#B8963A", "Gold"], ["c04", "#7A9A3E", "Olive"],
-  ["c05", "#3D9468", "Green"], ["c06", "#2E8F86", "Teal"], ["c07", "#3A86B0", "Sky"], ["c08", "#4A6FBE", "Blue"],
-  ["c09", "#7460B8", "Violet"], ["c10", "#A45BA0", "Plum"], ["c11", "#B85C80", "Rose"], ["c12", "#8A7364", "Taupe"],
-  ["c13", "#6A8494", "Slate"], ["c14", "#5C8A72", "Sage"], ["c15", "#A86B4A", "Copper"],
+  ["c01", "#B85C5C", tr("Red")], ["c02", "#C47A3A", tr("Orange")], ["c03", "#B8963A", tr("Gold")], ["c04", "#7A9A3E", tr("Olive")],
+  ["c05", "#3D9468", tr("Green")], ["c06", "#2E8F86", tr("Teal")], ["c07", "#3A86B0", tr("Sky")], ["c08", "#4A6FBE", tr("Blue")],
+  ["c09", "#7460B8", tr("Violet")], ["c10", "#A45BA0", tr("Plum")], ["c11", "#B85C80", tr("Rose")], ["c12", "#8A7364", tr("Taupe")],
+  ["c13", "#6A8494", tr("Slate")], ["c14", "#5C8A72", tr("Sage")], ["c15", "#A86B4A", tr("Copper")],
 ];
 const bookmarkColour = (key) => BOOKMARK_COLOURS.find(([k]) => k === key)?.[1] ?? null;
 
@@ -226,7 +226,7 @@ function showContextMenu(x, y, items) {
   document.addEventListener("scroll", close, true);
 }
 
-const modKey = () => (platform === "macos" ? "⌘" : "Ctrl+");
+const modKey = () => (platform === "macos" ? "⌘" : tr("Ctrl+"));
 
 /// Bookmarks on one surface. `holder` is an element around the surface's root, which the markers are drawn
 /// over. `noteId()` is the note's id, or null before it is saved; `ensureNote()` saves it and gives its id.
@@ -266,7 +266,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
       if (!id) return;
       const text = surface.text();
       kept = marks.map((m) => anchorOf(m, text));
-      await invoke("save_note_bookmarks", { id, bookmarks: kept }).catch((e) => micToast(`Bookmarks not saved: ${e}`));
+      await invoke("save_note_bookmarks", { id, bookmarks: kept }).catch((e) => micToast(tr("Bookmarks not saved: {e}", { e: e })));
     }, 500);
   };
   const place = () => {
@@ -336,7 +336,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
       below = top + size;
       const open = shown === m.id;
       if (m.listen) {
-        const what = m.live ? "Reading aloud here" : "Where you stopped listening";
+        const what = m.live ? tr("Reading here") : tr("Where you stopped");
         const flag = el("button", {
           class: "bm-flag listen" + (open ? " on" : ""), type: "button", style: `left:${x}px;top:${top}px`,
           title: what, "aria-label": what, "aria-expanded": String(open),
@@ -346,11 +346,11 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
         layer.append(flag);
         if (!open || m.live) continue;
         layer.append(el("div", { class: "bm-point listen", style: `left:${first.left - base.left - 1}px;top:${first.top - base.top}px;height:${first.height}px` }));
-        const pop = el("div", { class: "bm-pop", role: "dialog", "aria-label": "Where you stopped listening" },
-          el("div", { class: "bm-pop-label" }, "You stopped listening here", el("small", {}, agoText(listened.place.created))),
+        const pop = el("div", { class: "bm-pop", role: "dialog", "aria-label": tr("Where you stopped") },
+          el("div", { class: "bm-pop-label" }, tr("You stopped here"), el("small", {}, agoText(listened.place.created))),
           el("div", { class: "bm-pop-actions" },
-            el("button", { class: "icon-only", type: "button", title: "Read on from here", "aria-label": "Read on from here", onclick: () => { show(null); listen?.read(listened.from); } }, svg("play", 14)),
-            el("button", { class: "icon-only", type: "button", title: "Forget this place", "aria-label": "Forget where you stopped listening", onclick: () => { show(null); listen?.forget(); } }, svg("trash", 16))));
+            el("button", { class: "icon-only", type: "button", title: tr("Read on from here"), "aria-label": tr("Read on from here"), onclick: () => { show(null); listen?.read(listened.from); } }, svg("play", 14)),
+            el("button", { class: "icon-only", type: "button", title: tr("Forget this place"), "aria-label": tr("Forget my place"), onclick: () => { show(null); listen?.forget(); } }, svg("trash", 16))));
         pop.addEventListener("mousedown", (e) => { if (e.target.closest("button")) e.preventDefault(); });
         layer.append(pop);
         const high = pop.offsetHeight;
@@ -366,7 +366,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
       const flag = el("button", {
         class: "bm-flag" + (colour ? "" : " plain") + (open ? " on" : ""), type: "button",
         style: `left:${x}px;top:${top}px;${colour ? `--bm:${colour}` : ""}`,
-        title: m.label || "Bookmark", "aria-label": m.label ? `Bookmark: ${m.label}` : "Bookmark", "aria-expanded": String(open),
+        title: m.label || tr("Bookmark"), "aria-label": m.label ? tr("Bookmark: {label}", { label: m.label }) : tr("Bookmark"), "aria-expanded": String(open),
       }, svg("bookmark", 13));
       flag.addEventListener("mousedown", (e) => e.preventDefault());
       flag.addEventListener("click", () => show(open ? null : m.id));
@@ -381,12 +381,12 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
       } else {
         layer.append(el("div", { class: "bm-point", style: `left:${first.left - base.left - 1}px;top:${first.top - base.top}px;height:${first.height}px;--bm:${tint}` }));
       }
-      const pop = el("div", { class: "bm-pop", role: "dialog", "aria-label": "Bookmark", style: `right:${base.width - x + 6}px;top:${top - 4}px` },
+      const pop = el("div", { class: "bm-pop", role: "dialog", "aria-label": tr("Bookmark"), style: `right:${base.width - x + 6}px;top:${top - 4}px` },
         m.label ? el("div", { class: "bm-pop-label" }, m.label, m.author ? el("small", {}, `by ${m.author}`) : null)
-          : el("div", { class: "bm-pop-label none" }, m.author ? `No label · by ${m.author}` : "No label"),
+          : el("div", { class: "bm-pop-label none" }, m.author ? tr("No label · by {author}", { author: m.author }) : tr("No label")),
         el("div", { class: "bm-pop-actions" },
-          el("button", { class: "icon-only", type: "button", title: "Read aloud from here", "aria-label": "Read aloud from here", onclick: () => { show(null); onRead?.(textFrom(m.from, m.to), { toEnd: m.to <= m.from, from: m.to > m.from ? m.from : wordStart(m.from) }); } }, svg("speak", 16)),
-          el("button", { class: "icon-only", type: "button", title: "Edit or delete the bookmark", "aria-label": "Edit bookmark", onclick: () => edit(m) }, svg("pen", 16))));
+          el("button", { class: "icon-only", type: "button", title: tr("Read aloud from here"), "aria-label": tr("Read aloud from here"), onclick: () => { show(null); onRead?.(textFrom(m.from, m.to), { toEnd: m.to <= m.from, from: m.to > m.from ? m.from : wordStart(m.from) }); } }, svg("speak", 16)),
+          el("button", { class: "icon-only", type: "button", title: tr("Edit or delete"), "aria-label": tr("Edit bookmark"), onclick: () => edit(m) }, svg("pen", 16))));
       pop.addEventListener("mousedown", (e) => { if (e.target.closest("button")) e.preventDefault(); });
       layer.append(pop);
       // Above the line, so the words it marks stay in sight; below it at the top of the text.
@@ -422,7 +422,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
 
   async function create(range) {
     const sel = range ?? surface.selection() ?? (point != null ? { from: point, to: point } : null);
-    if (!sel) { micToast("Click in the text, or select some, to bookmark it."); return; }
+    if (!sel) { micToast(tr("Click or select text to bookmark it.")); return; }
     const text = surface.text();
     let { from, to } = sel;
     if (to < from) [from, to] = [to, from];
@@ -443,7 +443,7 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     marks.sort((x, y) => x.from - y.from);
     save();
     show(fresh.id);
-    if (!isShown({ ...fresh, ...result })) micToast("Added, but bookmarks like it are hidden. Hold the Bookmark button to show them.");
+    if (!isShown({ ...fresh, ...result })) micToast(tr("Added, but bookmarks like it are hidden. Hold Bookmark to show them."));
   }
 
   async function edit(m) {
@@ -533,14 +533,14 @@ function attachBookmarks({ surface, holder, noteId, ensureNote = async () => not
     const here = selected ?? (at != null ? { from: at, to: at } : null);
     const mod = modKey();
     showContextMenu(e.clientX, e.clientY, [
-      { icon: "speak", text: selected ? "Read aloud" : "Read aloud from here", disabled: !here, run: () => onRead?.(textFrom(here.from, here.to), { toEnd: !selected, from: selected ? here.from : wordStart(here.from) }) },
-      onVoice && { icon: "speak", text: "Voice for this book…", run: () => onVoice(here) },
-      { icon: "bookmark", text: selected ? "Bookmark…" : "Bookmark here…", disabled: !here, run: () => create(here) },
+      { icon: "speak", text: selected ? tr("Read aloud") : tr("Read aloud from here"), disabled: !here, run: () => onRead?.(textFrom(here.from, here.to), { toEnd: !selected, from: selected ? here.from : wordStart(here.from) }) },
+      onVoice && { icon: "speak", text: tr("Voice for this book…"), run: () => onVoice(here) },
+      { icon: "bookmark", text: selected ? tr("Bookmark…") : tr("Bookmark here…"), disabled: !here, run: () => create(here) },
       "-",
-      !surface.readOnly && { icon: "cut", text: "Cut", keys: `${mod}X`, disabled: !selected, run: () => document.execCommand("cut") },
-      { icon: "copy", text: "Copy", keys: `${mod}C`, disabled: !selected, run: () => document.execCommand("copy") },
-      !surface.readOnly && surface.paste && { icon: "paste", text: "Paste", keys: `${mod}V`, run: async () => {
-        try { surface.paste(await navigator.clipboard.readText()); } catch { micToast(`Paste with ${mod}V.`); }
+      !surface.readOnly && { icon: "cut", text: tr("Cut"), keys: `${mod}X`, disabled: !selected, run: () => document.execCommand("cut") },
+      { icon: "copy", text: tr("Copy"), keys: `${mod}C`, disabled: !selected, run: () => document.execCommand("copy") },
+      !surface.readOnly && surface.paste && { icon: "paste", text: tr("Paste"), keys: `${mod}V`, run: async () => {
+        try { surface.paste(await navigator.clipboard.readText()); } catch { micToast(tr("Paste with {mod}V.", { mod: mod })); }
       } },
     ]);
   });
@@ -554,12 +554,12 @@ const LISTEN_ID = "listened";
 /// "just now", "5 minutes ago", "yesterday", "3 days ago", or the date.
 function agoText(seconds) {
   const s = Math.max(0, Date.now() / 1000 - (seconds || 0));
-  if (s < 90) return "just now";
-  if (s < 3600) return `${Math.round(s / 60)} minutes ago`;
-  if (s < 86400) { const h = Math.round(s / 3600); return `${h} hour${h === 1 ? "" : "s"} ago`; }
+  if (s < 90) return tr("just now");
+  if (s < 3600) return tr("{0} minutes ago", { "0": Math.round(s / 60) });
+  if (s < 86400) { const h = Math.round(s / 3600); return trn(h, "{n} hour ago", "{n} hours ago"); }
   if (s < 2 * 86400) return "yesterday";
-  if (s < 14 * 86400) return `${Math.floor(s / 86400)} days ago`;
-  return new Date(seconds * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  if (s < 14 * 86400) return tr("{0} days ago", { "0": Math.floor(s / 86400) });
+  return new Date(seconds * 1000).toLocaleDateString(UI_LOCALE, { day: "numeric", month: "short", year: "numeric" });
 }
 
 // ----- Where reading aloud stopped in a book
@@ -585,7 +585,7 @@ function listenPlace(bookId) {
       try {
         await invoke("set_book_listen_place", { id: bookId, place: next });
       } catch (e) {
-        micToast(`Where you stopped listening wasn't kept: ${e}`);
+        micToast(tr("Place not saved: {e}", { e: e }));
       }
     },
     forget() { return this.set(null); },
@@ -638,7 +638,7 @@ function toldListenPlace(moved) {
   try { told = Number(localStorage.getItem("listen-place-told")) || 0; } catch {}
   if (told >= 3) return;
   try { localStorage.setItem("listen-place-told", String(told + 1)); } catch {}
-  micToast(`${moved ? "Moved" : "Kept"} where you stopped listening. Read aloud goes on from there; hold it for more.`);
+  micToast(tr("{0} where you stopped. Read aloud continues from there; hold for more.", { "0": moved ? tr("Moved") : tr("Kept") }));
 }
 
 /// Asks for a bookmark's label and colour. Gives { label, color }, { remove: true }, or null.
@@ -646,8 +646,8 @@ function bookmarkDialog(m, quote, fresh) {
   return new Promise((done) => {
     let result = null;
     let colour = m.color ?? "";
-    const label = el("input", { type: "text", value: m.label ?? "", placeholder: "A few words, or leave it empty", maxlength: "120", "aria-label": "Label" });
-    const swatches = el("div", { class: "bm-swatches", role: "radiogroup", "aria-label": "Colour" });
+    const label = el("input", { type: "text", value: m.label ?? "", placeholder: tr("A few words, or empty"), maxlength: "120", "aria-label": tr("Label") });
+    const swatches = el("div", { class: "bm-swatches", role: "radiogroup", "aria-label": tr("Colour") });
     const choose = (key) => {
       colour = key;
       for (const s of swatches.children) {
@@ -656,7 +656,7 @@ function bookmarkDialog(m, quote, fresh) {
         s.setAttribute("aria-checked", String(on));
       }
     };
-    for (const [key, hex, name] of [["", null, "No colour"], ...BOOKMARK_COLOURS]) {
+    for (const [key, hex, name] of [["", null, tr("No colour")], ...BOOKMARK_COLOURS]) {
       const s = el("button", { type: "button", role: "radio", class: "bm-swatch" + (hex ? "" : " none"), style: hex ? `--bm:${hex}` : "", title: name, "aria-label": name });
       s.dataset.key = key;
       s.addEventListener("click", () => choose(key));
@@ -665,16 +665,16 @@ function bookmarkDialog(m, quote, fresh) {
     choose(colour);
     const finish = (value) => { result = value; dialog.close(); };
     const shortQuote = quote.length > 180 ? `${quote.slice(0, 177).trimEnd()}…` : quote;
-    const dialog = el("dialog", { class: "sheet bm-dialog", "aria-label": fresh ? "Add bookmark" : "Edit bookmark" },
-      el("h2", {}, fresh ? "Add bookmark" : "Edit bookmark"),
-      shortQuote.trim() ? el("blockquote", { class: "bm-quote" }, shortQuote) : el("p", { class: "hint bm-quote-none" }, "Marks a place in the text."),
-      el("label", { class: "field" }, "Label", label),
-      el("div", { class: "field" }, "Colour", swatches),
+    const dialog = el("dialog", { class: "sheet bm-dialog", "aria-label": fresh ? tr("Add bookmark") : tr("Edit bookmark") },
+      el("h2", {}, fresh ? tr("Add bookmark") : tr("Edit bookmark")),
+      shortQuote.trim() ? el("blockquote", { class: "bm-quote" }, shortQuote) : el("p", { class: "hint bm-quote-none" }, tr("Marks a place in the text.")),
+      el("label", { class: "field" }, tr("Label"), label),
+      el("div", { class: "field" }, tr("Colour"), swatches),
       el("div", { class: "actions" },
         fresh ? null : el("button", { class: "link danger", type: "button", onclick: () => finish({ remove: true }) }, "Delete"),
         el("span", { class: "grow" }),
-        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
-        el("button", { class: "primary pill", type: "button", onclick: () => finish({ label: label.value.trim(), color: colour }) }, fresh ? "Add" : "Save")));
+        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, tr("Cancel")),
+        el("button", { class: "primary pill", type: "button", onclick: () => finish({ label: label.value.trim(), color: colour }) }, fresh ? tr("Add") : tr("Save"))));
     label.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); finish({ label: label.value.trim(), color: colour }); } });
     dialog.addEventListener("close", () => { dialog.remove(); done(result); });
     document.body.append(dialog);
@@ -710,7 +710,7 @@ function bookmarkFilter(bookId) {
     async load() { f.view = await invoke("book_bookmark_view", { id: bookId }).catch(() => f.view); return f.view; },
     async set(view) {
       f.view = view;
-      await invoke("set_book_bookmark_view", { id: bookId, view }).catch((e) => micToast(`Not kept: ${e}`));
+      await invoke("set_book_bookmark_view", { id: bookId, view }).catch((e) => micToast(tr("Not kept: {e}", { e: e })));
     },
   };
   return f;
@@ -729,22 +729,22 @@ const bookmarkAuthor = {
 /// changes, `onChange("marks")` after bookmarks were imported or deleted.
 async function bookBookmarksDialog(book, filter, onChange, { chapter = null } = {}) {
   const plural = (n, one, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
-  const title = book.title || "this book";
-  const colourName = (c) => BOOKMARK_COLOURS.find(([k]) => k === c)?.[2] ?? "No colour";
+  const title = book.title || tr("this book");
+  const colourName = (c) => BOOKMARK_COLOURS.find(([k]) => k === c)?.[2] ?? tr("No colour");
   const swatch = (c) => {
     const hex = bookmarkColour(c);
     return el("span", { class: "bm-chip-swatch" + (hex ? "" : " none"), style: hex ? `--bm:${hex}` : "" });
   };
-  const authorName = (a) => a || "You";
+  const authorName = (a) => a || tr("You");
 
-  const dialog = el("dialog", { class: "sheet bm-book-dialog", "aria-label": `Bookmarks in ${title}` });
+  const dialog = el("dialog", { class: "sheet bm-book-dialog", "aria-label": tr("Bookmarks in {title}", { title: title }) });
   const body = el("div", { class: "bm-book-body" });
   const status = el("p", { class: "hint bm-book-status", "aria-live": "polite" });
   const say = (...parts) => status.replaceChildren(...parts);
-  const exportButton = el("button", { class: "pill with-icon", type: "button" }, svg("export", 14), "Export");
-  const importButton = el("button", { class: "pill with-icon", type: "button" }, svg("import", 14), "Import…");
-  dialog.append(el("div", { class: "bm-book-head" }, el("h2", {}, `Bookmarks in ${title}`),
-      el("button", { class: "icon-only", type: "button", title: "Close", "aria-label": "Close", onclick: () => dialog.close() }, svg("close", 16))),
+  const exportButton = el("button", { class: "pill with-icon", type: "button" }, svg("export", 14), tr("Export"));
+  const importButton = el("button", { class: "pill with-icon", type: "button" }, svg("import", 14), tr("Import…"));
+  dialog.append(el("div", { class: "bm-book-head" }, el("h2", {}, tr("Bookmarks in {title}", { title: title })),
+      el("button", { class: "icon-only", type: "button", title: tr("Close"), "aria-label": tr("Close"), onclick: () => dialog.close() }, svg("close", 16))),
     body, status,
     el("div", { class: "bm-book-foot" }, importButton, el("span", { class: "grow" }), exportButton));
   dialog.addEventListener("close", () => dialog.remove());
@@ -754,7 +754,7 @@ async function bookBookmarksDialog(book, filter, onChange, { chapter = null } = 
   const [chapters] = await Promise.all([invoke("book_contents", { id: book.id }).catch(() => []), filter.load()]);
   const chapterName = (id) => {
     const c = chapters.find((x) => x.id === id);
-    return c ? [c.label, c.title].filter(Boolean).join(" · ") || "Untitled" : "A chapter";
+    return c ? [c.label, c.title].filter(Boolean).join(" · ") || tr("Untitled") : tr("A chapter");
   };
   // This chapter's, or the whole book's; a chapter only when there is one open.
   let wide = !chapter;
@@ -792,11 +792,11 @@ async function bookBookmarksDialog(book, filter, onChange, { chapter = null } = 
     listed = wide ? shown : here;
 
     // This chapter, or the whole book.
-    const scope = chapter ? el("div", { class: "bm-scope", role: "group", "aria-label": "Which bookmarks" },
+    const scope = chapter ? el("div", { class: "bm-scope", role: "group", "aria-label": tr("Which bookmarks") },
       el("button", { class: "bm-scope-tab" + (wide ? "" : " on"), type: "button", "aria-pressed": String(!wide), onclick: () => { wide = false; draw(); } },
-        "This chapter", el("small", {}, here.length.toLocaleString())),
+        tr("This chapter"), el("small", {}, here.length.toLocaleString())),
       el("button", { class: "bm-scope-tab" + (wide ? " on" : ""), type: "button", "aria-pressed": String(wide), onclick: () => { wide = true; draw(); } },
-        "Whole book", el("small", {}, shown.length.toLocaleString()))) : null;
+        tr("Whole book"), el("small", {}, shown.length.toLocaleString()))) : null;
 
     // What the list is narrowed to, each with a cross to widen it again.
     const v = filter.view;
@@ -804,23 +804,23 @@ async function bookBookmarksDialog(book, filter, onChange, { chapter = null } = 
     const shownAuthors = authors.filter((a) => !v.hidden_authors.includes(a));
     const narrowed = [];
     if (colours.some((c) => v.hidden_colours.includes(c))) {
-      narrowed.push(el("button", { class: "bm-chip on", type: "button", title: "Show every colour", onclick: () => widen("hidden_colours") },
+      narrowed.push(el("button", { class: "bm-chip on", type: "button", title: tr("All colours"), onclick: () => widen("hidden_colours") },
         shownColours.length === 1 ? swatch(shownColours[0]) : null,
         el("span", {}, shownColours.length === 1 ? colourName(shownColours[0]) : `${plural(shownColours.length, "colour")}`), svg("close", 12)));
     }
     let removeTheirs = null;
     if (authors.some((a) => v.hidden_authors.includes(a))) {
       const only = shownAuthors.length === 1 ? shownAuthors[0] : null;
-      narrowed.push(el("button", { class: "bm-chip on", type: "button", title: "Show everyone's", onclick: () => widen("hidden_authors") },
+      narrowed.push(el("button", { class: "bm-chip on", type: "button", title: tr("Everyone's"), onclick: () => widen("hidden_authors") },
         el("span", {}, only != null ? authorName(only) : `${plural(shownAuthors.length, "person", "people")}`), svg("close", 12)));
       // Someone else's, narrowed to: theirs can be deleted, as they can be imported again.
       if (only) {
         const n = all.filter((m) => (m.author ?? "") === only).length;
-        removeTheirs = el("button", { class: "link danger bm-remove-theirs", type: "button" }, `Delete ${only}'s ${n === 1 ? "bookmark" : "bookmarks"}`);
+        removeTheirs = el("button", { class: "link danger bm-remove-theirs", type: "button" }, trn(n, "Delete {who}'s bookmark", "Delete {who}'s bookmarks", { who: only }));
         removeTheirs.addEventListener("click", async () => {
           if (!removeTheirs.dataset.armed) {
             removeTheirs.dataset.armed = "1";
-            removeTheirs.textContent = `Press again to delete ${plural(n, "bookmark")}`;
+            removeTheirs.textContent = tr("Press again to delete {0}", { "0": plural(n, "bookmark") });
             say(`They can be imported again from ${only}'s file.`);
             setTimeout(() => { if (removeTheirs.isConnected) draw(); }, 4000);
             return;
@@ -836,7 +836,7 @@ async function bookBookmarksDialog(book, filter, onChange, { chapter = null } = 
       }
     }
     const filters = narrowed.length ? el("div", { class: "bm-narrowed" },
-      el("span", { class: "hint" }, "Only"), ...narrowed, el("span", { class: "grow" }), removeTheirs) : null;
+      el("span", { class: "hint" }, tr("Only")), ...narrowed, el("span", { class: "grow" }), removeTheirs) : null;
 
     // One bookmark: its colour, what it marks (which opens it), and who made it.
     const row = (m) => {
@@ -845,12 +845,12 @@ async function bookBookmarksDialog(book, filter, onChange, { chapter = null } = 
       const quote = (m.quote ?? "").trim();
       const short = quote.length > 140 ? `${quote.slice(0, 137).trimEnd()}…` : quote;
       return el("li", { class: "bm-item" },
-        el("button", { class: "bm-item-colour", type: "button", title: `Only ${colourName(c).toLowerCase()} bookmarks`, "aria-label": `Only ${colourName(c).toLowerCase()} bookmarks`,
+        el("button", { class: "bm-item-colour", type: "button", title: tr("Only {0} bookmarks", { "0": colourName(c).toLowerCase() }), "aria-label": tr("Only {0} bookmarks", { "0": colourName(c).toLowerCase() }),
           disabled: shownColours.length === 1, onclick: () => narrow("color", c, colours) }, swatch(c)),
-        el("button", { class: "bm-item-main", type: "button", title: "Go to it" },
+        el("button", { class: "bm-item-main", type: "button", title: tr("Go to it") },
           m.label ? el("span", { class: "bm-item-label" }, m.label) : null,
-          short ? el("span", { class: "bm-item-quote" + (m.label ? "" : " alone") }, `“${short}”`) : (m.label ? null : el("span", { class: "bm-item-quote alone" }, "A place in the text"))),
-        el("button", { class: "bm-item-author link", type: "button", title: `Only ${a ? `${a}'s` : "yours"}`,
+          short ? el("span", { class: "bm-item-quote" + (m.label ? "" : " alone") }, `“${short}”`) : (m.label ? null : el("span", { class: "bm-item-quote alone" }, tr("A place in the text")))),
+        el("button", { class: "bm-item-author link", type: "button", title: tr("Only {0}", { "0": a ? `${a}'s` : "yours" }),
           disabled: shownAuthors.length === 1, onclick: () => narrow("author", a, authors) }, authorName(a)));
     };
     const rowsOf = (marks) => {
@@ -861,16 +861,16 @@ async function bookBookmarksDialog(book, filter, onChange, { chapter = null } = 
 
     let content;
     if (!all.length) {
-      content = el("p", { class: "hint bm-empty" }, "No bookmarks in this book yet. Select some words or click in the text, then press Bookmark.");
+      content = el("p", { class: "hint bm-empty" }, tr("No bookmarks yet. Select words or click in the text, then press Bookmark."));
     } else if (!listed.length) {
-      content = el("p", { class: "hint bm-empty" }, wide ? "None match. Press a cross above to see more." :
-        (shown.length ? "None in this chapter" + (narrowed.length ? " that match." : ".") : "None match.") + " ",
-        !wide && shown.length ? el("button", { class: "link inline", type: "button", onclick: () => { wide = true; draw(); } }, `See the whole book's ${shown.length.toLocaleString()}`) : null);
+      content = el("p", { class: "hint bm-empty" }, wide ? tr("None match. Clear a filter above to see more.") :
+        (shown.length ? tr("None in this chapter") + (narrowed.length ? tr(" that match.") : ".") : tr("None match.")) + " ",
+        !wide && shown.length ? el("button", { class: "link inline", type: "button", onclick: () => { wide = true; draw(); } }, tr("See all {0} in the book", { "0": shown.length.toLocaleString() })) : null);
     } else if (wide) {
       content = el("div", { class: "bm-chapters" }, ...notesIn.filter((n) => listed.some((m) => m.note === n)).map((n) => {
         const marks = listed.filter((m) => m.note === n);
         return el("section", { class: "bm-chapter" + (n === chapter ? " current" : "") },
-          el("h3", {}, el("span", {}, chapterName(n)), el("small", {}, n === chapter ? "this chapter" : "")), rowsOf(marks));
+          el("h3", {}, el("span", {}, chapterName(n)), el("small", {}, n === chapter ? tr("this chapter") : "")), rowsOf(marks));
       }));
     } else {
       content = rowsOf(listed);
@@ -878,9 +878,9 @@ async function bookBookmarksDialog(book, filter, onChange, { chapter = null } = 
     body.replaceChildren(...[scope, filters, content].filter(Boolean));
 
     exportButton.disabled = !listed.length;
-    exportButton.replaceChildren(svg("export", 14), listed.length ? `Export ${plural(listed.length, "bookmark")}` : "Export");
-    exportButton.title = listed.length === all.length ? "Save every bookmark in the book to a file to give someone"
-      : "Save the bookmarks listed to a file to give someone";
+    exportButton.replaceChildren(svg("export", 14), listed.length ? tr("Export {0}", { "0": plural(listed.length, "bookmark") }) : tr("Export"));
+    exportButton.title = listed.length === all.length ? tr("Save all the book's bookmarks to a file to share")
+      : tr("Save these bookmarks to a file to share");
   }
 
   // Export: the list as it stands. The person's own go out under their name, asked for the first time.
@@ -898,9 +898,9 @@ async function bookBookmarksDialog(book, filter, onChange, { chapter = null } = 
       const rename = el("button", { class: "link inline", type: "button", onclick: async () => {
         const next = await askBookmarkName(who);
         if (next) say(`Next time yours go out as “${next}”.`);
-      } }, "Change");
+      } }, tr("Change"));
       say(`Saved ${plural(marks.length, "bookmark")} to ${path}. `,
-        el("button", { class: "link inline", type: "button", onclick: () => invoke("reveal_export", { path }).catch((e) => say(String(e))) }, "Show in folder"),
+        el("button", { class: "link inline", type: "button", onclick: () => invoke("reveal_export", { path }).catch((e) => say(String(e))) }, tr("Show in folder")),
         ...(marks.some((m) => !m.author) ? [` · Yours are marked “${who}”. `, rename] : []));
     } catch (e) {
       say(el("span", { class: "danger" }, String(e)));
@@ -917,7 +917,7 @@ async function bookBookmarksDialog(book, filter, onChange, { chapter = null } = 
 function askBookmarkName(current = "") {
   return new Promise((done) => {
     let result = null;
-    const name = el("input", { type: "text", value: current || bookmarkAuthor.get(), placeholder: "Your name", maxlength: "80" });
+    const name = el("input", { type: "text", value: current || bookmarkAuthor.get(), placeholder: tr("Your name"), maxlength: "80" });
     const finish = () => {
       const who = name.value.trim();
       if (!who) return name.focus();
@@ -925,13 +925,13 @@ function askBookmarkName(current = "") {
       result = who;
       dialog.close();
     };
-    const dialog = el("dialog", { class: "sheet bm-dialog", "aria-label": "Your name" },
-      el("h2", {}, "Your name on your bookmarks"),
-      el("p", { class: "hint" }, "Whoever imports them sees your bookmarks marked with this name, beside their own."),
-      el("label", { class: "field" }, "Your name", name),
+    const dialog = el("dialog", { class: "sheet bm-dialog", "aria-label": tr("Your name") },
+      el("h2", {}, tr("Your name on your bookmarks")),
+      el("p", { class: "hint" }, tr("Whoever imports them sees your bookmarks marked with this name.")),
+      el("label", { class: "field" }, tr("Your name"), name),
       el("div", { class: "actions" }, el("span", { class: "grow" }),
-        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
-        el("button", { class: "primary pill", type: "button", onclick: finish }, current ? "Save" : "Export")));
+        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, tr("Cancel")),
+        el("button", { class: "primary pill", type: "button", onclick: finish }, current ? tr("Save") : tr("Export"))));
     name.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); finish(); } });
     dialog.addEventListener("close", () => { dialog.remove(); done(result); });
     document.body.append(dialog);
@@ -948,16 +948,16 @@ function importBookmarksDialog(book, done) {
   const were = (n, rest) => `${n.toLocaleString()} ${n === 1 ? "was" : "were"} ${rest}`;
   const picker = el("input", { type: "file", accept: ".json,application/json", hidden: true });
   const preview = el("div", { class: "bm-import-preview" });
-  const choose = el("button", { class: "primary pill with-icon", type: "button", onclick: () => picker.click() }, svg("import", 14), "Choose file…");
+  const choose = el("button", { class: "primary pill with-icon", type: "button", onclick: () => picker.click() }, svg("import", 14), tr("Choose file…"));
   const actions = el("div", { class: "actions" }, el("span", { class: "grow" }),
-    el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"), choose);
-  const dialog = el("dialog", { class: "sheet bm-dialog bm-import-dialog", "aria-label": "Import bookmarks" },
-    el("h2", {}, "Import bookmarks"),
-    el("p", {}, `Someone who has ${book.title ? `“${book.title}”` : "this book"} can export their bookmarks and send you the file. Importing it adds their bookmarks beside yours, each marked with their name.`),
+    el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, tr("Cancel")), choose);
+  const dialog = el("dialog", { class: "sheet bm-dialog bm-import-dialog", "aria-label": tr("Import bookmarks") },
+    el("h2", {}, tr("Import bookmarks")),
+    el("p", {}, tr("Someone with {0} can export their bookmarks and send you the file. Importing adds theirs beside yours, marked with their name.", { "0": book.title ? `“${book.title}”` : tr("this book") })),
     el("ul", { class: "hint bm-import-points" },
-      el("li", {}, "Yours stay as they are. Any you both have aren't added twice."),
-      el("li", {}, "Theirs can be shown on their own, or deleted all at once, from the list."),
-      el("li", {}, "The file is a bookmarks file exported from Superteem, ending in .json.")),
+      el("li", {}, tr("Yours stay as they are. Shared ones aren't added twice.")),
+      el("li", {}, tr("Theirs can be shown alone, or deleted at once, from the list.")),
+      el("li", {}, tr("A bookmarks file exported from Superteem, ending in .json."))),
     picker, preview, actions);
   dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
@@ -971,34 +971,34 @@ function importBookmarksDialog(book, done) {
     try {
       file = JSON.parse(await chosen.text());
     } catch {
-      return preview.replaceChildren(el("p", { class: "danger" }, "That file can't be read as bookmarks."));
+      return preview.replaceChildren(el("p", { class: "danger" }, tr("Can't read that file as bookmarks.")));
     }
     if (file?.kind !== "superteem-bookmarks" || typeof file.notes !== "object") {
-      return preview.replaceChildren(el("p", { class: "danger" }, "That isn't a file of bookmarks exported from Superteem."));
+      return preview.replaceChildren(el("p", { class: "danger" }, tr("Not a Superteem bookmarks file.")));
     }
     const incoming = Object.entries(file.notes).flatMap(([note, list]) => (Array.isArray(list) ? list.map((m) => ({ ...m, note })) : []));
     const makers = [...new Set(incoming.map((m) => m.author || "someone"))];
     const shared = incoming.filter((m) => book.notes?.includes(m.note)).length;
-    const go = el("button", { class: "primary pill", type: "button", disabled: !shared }, shared ? `Import ${plural(shared, "bookmark")}` : "Nothing to import");
+    const go = el("button", { class: "primary pill", type: "button", disabled: !shared }, shared ? tr("Import {0}", { "0": plural(shared, "bookmark") }) : tr("Nothing to import"));
     go.addEventListener("click", async () => {
       go.disabled = true;
       try {
         const r = await invoke("import_book_bookmarks", { id: book.id, file, author: "" });
         dialog.close();
-        done([`Imported ${plural(r.added, "bookmark")}.`, r.already ? `${were(r.already, "already here")}.` : "",
-          r.elsewhere ? `${were(r.elsewhere, "for chapters not in this book")}.` : ""].filter(Boolean).join(" "));
+        done([tr("Imported {0}.", { "0": plural(r.added, "bookmark") }), r.already ? `${were(r.already, "already here")}.` : "",
+          r.elsewhere ? `${were(r.elsewhere, tr("for chapters not in this book"))}.` : ""].filter(Boolean).join(" "));
       } catch (e) {
         go.disabled = false;
         preview.append(el("p", { class: "danger" }, String(e)));
       }
     });
     preview.replaceChildren(
-      el("p", {}, `${plural(incoming.length, "bookmark")} by ${makers.join(", ")}${file.title ? ` for “${file.title}”` : ""}.`),
-      file.book && file.book !== book.id ? el("p", { class: "hint" }, `These were made for another book. Only those in chapters this book has (${shared.toLocaleString()}) can come in.`) : null,
+      el("p", {}, `${plural(incoming.length, "bookmark")} by ${makers.join(", ")}${file.title ? tr(" for “{title}”", { title: file.title }) : ""}.`),
+      file.book && file.book !== book.id ? el("p", { class: "hint" }, tr("These were made for another book. Only those in shared chapters ({shared}) can come in.", { shared: shared.toLocaleString() })) : null,
       file.version && book.version && file.version !== book.version
-        ? el("p", { class: "hint" }, `They were made in version ${file.version}; this is version ${book.version}. Where the text changed, a few may land near their place rather than on it.`) : null);
-    choose.replaceChildren(svg("import", 14), "Another file…");
+        ? el("p", { class: "hint" }, tr("Made in version {version}; this is {version_}. Where the text changed, some may land nearby.", { version: file.version, version_: book.version })) : null);
+    choose.replaceChildren(svg("import", 14), tr("Another file…"));
     choose.classList.remove("primary");
-    actions.replaceChildren(el("span", { class: "grow" }), el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"), choose, go);
+    actions.replaceChildren(el("span", { class: "grow" }), el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, tr("Cancel")), choose, go);
   });
 }

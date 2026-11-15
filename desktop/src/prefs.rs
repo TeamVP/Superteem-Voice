@@ -34,6 +34,8 @@ pub struct Script {
 #[serde(default)]
 pub struct Prefs {
     pub theme: String,
+    /// The language the app's own words show in ("en", "uk", "es", "zh-CN"); empty for English.
+    pub ui_lang: String,
     /// Inputs ticked for the last recording.
     pub inputs: Vec<String>,
     pub pins: bool,

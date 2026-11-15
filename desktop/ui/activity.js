@@ -27,17 +27,17 @@ function activityViewing(kind, id) {
 function jobText(job, running) {
   const t = job.template;
   if (t.startsWith("label:")) return null;
-  if (t === "chat") return running ? "answering…" : "question waiting";
-  if (t.startsWith("translate:")) return running ? "translating…" : "translation waiting";
-  return running ? "analysing…" : "analysis waiting";
+  if (t === "chat") return running ? tr("answering…") : tr("question waiting");
+  if (t.startsWith("translate:")) return running ? tr("translating…") : tr("translation waiting");
+  return running ? tr("analysing…") : tr("analysis waiting");
 }
 
 /// What's ready once a job finishes.
 function readyText(job, error) {
   const t = job.template;
-  if (t === "chat") return error ? "no answer" : "answer ready";
-  if (t.startsWith("translate:")) return error ? "translation failed" : "translation ready";
-  return error ? "analysis failed" : "analysis ready";
+  if (t === "chat") return error ? tr("no answer") : tr("answer ready");
+  if (t.startsWith("translate:")) return error ? tr("translation failed") : tr("translation ready");
+  return error ? tr("analysis failed") : tr("analysis ready");
 }
 
 /// What the list shows for one note or meeting, or a book (with the notes in it): { text, busy, ready }, or null.
@@ -51,7 +51,7 @@ function activityFor(kind, id, notes = null) {
   }
   const key = activityKey(kind, id);
   if (activityViewing(kind, id)) activityReady.delete(key);
-  if (kind === "note" && activity.dictating.has(id)) return { text: "writing in dictation…", busy: true };
+  if (kind === "note" && activity.dictating.has(id)) return { text: tr("writing in dictation…"), busy: true };
   const mine = (j) => j && listKind(j.kind) === kind && j.id === id && jobText(j, false);
   const current = activity.analyses.current;
   if (mine(current)) return { text: jobText(current, true), busy: true };
@@ -82,7 +82,7 @@ function refreshActivity() {
 function activityToast(kind, id, text) {
   const name = activityNames.get(activityKey(kind, id))?.trim() || (kind === "session" ? "a meeting" : "a note");
   document.getElementById("activity-toast")?.remove();
-  const open = el("button", { class: "link", type: "button" }, "Open");
+  const open = el("button", { class: "link", type: "button" }, tr("Open"));
   const toast = el("div", { class: "activity-toast", id: "activity-toast", role: "status" },
     el("span", { class: "grow" }, `${text[0].toUpperCase()}${text.slice(1)} · ${name}`), open);
   open.addEventListener("click", () => {
@@ -112,7 +112,7 @@ listen("analysed", (e) => {
 });
 listen("processed", (e) => {
   const { id, summary } = e.payload;
-  activityDone("session", id, summary?.Err ? "couldn't process" : "transcript ready", !!summary?.Err);
+  activityDone("session", id, summary?.Err ? tr("couldn't process") : tr("transcript ready"), !!summary?.Err);
 });
 listen("note-dictated", (e) => {
   activity.dictating.delete(e.payload);

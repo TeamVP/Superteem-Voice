@@ -26,8 +26,10 @@ let platform = "windows";
 /// iPhone are phones, which do neither.
 const isDesktop = () => platform === "windows" || platform === "macos";
 const isPhone = () => platform === "android" || platform === "ios";
+/// "phone" or "computer", in the chosen language, for words like "Optimise for this computer".
+const deviceWord = () => (isPhone() ? tr("phone") : tr("computer"));
 /// Where deleted meetings go, on the computers that have one.
-const binName = () => platform === "macos" ? "Trash" : "Recycle Bin";
+const binName = () => platform === "macos" ? tr("Trash") : tr("Recycle Bin");
 let progress = null;
 // Meetings being processed one at a time, while another can be recorded: { current, waiting }.
 let queue = { current: null, waiting: [] };
@@ -112,7 +114,7 @@ async function writeClipboard(text, html) {
 
 /// An icon button that copies what `text()` returns — a string, or { text, html } — and shows a tick
 /// for a moment, the way a chat app copies one reply.
-function copyIconButton(text, label = "Copy") {
+function copyIconButton(text, label = tr("Copy")) {
   const button = el("button", { class: "icon-only copy-btn", type: "button", title: label, "aria-label": label }, svg("copy", 16));
   let timer = null;
   // The cursor stays where it was, so copying a note doesn't drop the caret out of it.
@@ -123,7 +125,7 @@ function copyIconButton(text, label = "Copy") {
     const html = value && typeof value === "object" ? value.html : null;
     const ok = await writeClipboard(plain, html);
     button.classList.toggle("copied", ok);
-    const said = ok ? "Copied" : "Couldn't copy";
+    const said = ok ? tr("Copied") : tr("Couldn't copy");
     button.title = said;
     button.setAttribute("aria-label", said);
     button.replaceChildren(svg(ok ? "check" : "close", 16));
@@ -176,18 +178,18 @@ function longClock(seconds) {
 
 function dateText(unix) {
   if (!unix) return "";
-  return new Date(unix * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return new Date(unix * 1000).toLocaleString(UI_LOCALE, { dateStyle: "medium", timeStyle: "short" });
 }
 
 /// How long ago, as "3h ago", for recent things; the date for older ones.
 function agoText(unix) {
   if (!unix) return "";
   const s = Date.now() / 1000 - unix;
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d ago`;
-  return new Date(unix * 1000).toLocaleDateString(undefined, { dateStyle: "medium" });
+  if (s < 60) return tr("just now");
+  if (s < 3600) return tr("{0}m ago", { "0": Math.floor(s / 60) });
+  if (s < 86400) return tr("{0}h ago", { "0": Math.floor(s / 3600) });
+  if (s < 7 * 86400) return tr("{0}d ago", { "0": Math.floor(s / 86400) });
+  return new Date(unix * 1000).toLocaleDateString(UI_LOCALE, { dateStyle: "medium" });
 }
 
 /// A note's last save, as "Just now" or "4h ago", kept current while it shows.
@@ -195,8 +197,8 @@ let savedTimer = null;
 function showSaved(status) {
   const draw = () => {
     const at = note?.savedAt;
-    status.textContent = !at ? "New note" : Date.now() / 1000 - at < 60 ? "Just now" : agoText(at);
-    status.title = at ? `Saved ${dateText(at)}` : "";
+    status.textContent = !at ? tr("New note") : Date.now() / 1000 - at < 60 ? tr("Just now") : agoText(at);
+    status.title = at ? tr("Saved {at}", { at: dateText(at) }) : "";
   };
   draw();
   clearInterval(savedTimer);
@@ -210,8 +212,8 @@ function showSaved(status) {
 /// returns its path, which is then offered to show in File Explorer.
 function exportMenu(choices, run) {
   const wrap = el("span", { class: "export-menu" });
-  const button = el("button", { class: "link export-button", type: "button", "aria-haspopup": "menu", "aria-expanded": "false", title: "Export" },
-    svg("export", 16), el("span", { class: "wide-only" }, "Export"));
+  const button = el("button", { class: "link export-button", type: "button", "aria-haspopup": "menu", "aria-expanded": "false", title: tr("Export") },
+    svg("export", 16), el("span", { class: "wide-only" }, tr("Export")));
   const menu = el("div", { class: "menu", role: "menu", hidden: true });
   const status = el("div", { class: "export-status", role: "status", "aria-live": "polite", hidden: true });
   const close = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outside, true); };
@@ -240,13 +242,13 @@ function exportMenu(choices, run) {
   // On a computer, where exports go, and a way to choose another folder.
   if (isDesktop() && window.__TAURI__.dialog) {
     const where = el("small", {}, "");
-    const showWhere = (path) => { where.textContent = `Saves to ${path.split(/[\\/]/).filter(Boolean).pop() ?? path}`; where.title = path; };
+    const showWhere = (path) => { where.textContent = tr("Saves to {0}", { "0": path.split(/[\\/]/).filter(Boolean).pop() ?? path }); where.title = path; };
     invoke("export_dir").then(showWhere).catch(() => {});
-    const change = el("button", { type: "button", role: "menuitem", class: "export-folder" }, el("strong", {}, "Choose the folder…"), where);
+    const change = el("button", { type: "button", role: "menuitem", class: "export-folder" }, el("strong", {}, tr("Choose folder…")), where);
     change.addEventListener("click", async () => {
       close();
       const current = await invoke("export_dir").catch(() => undefined);
-      const picked = await window.__TAURI__.dialog.open({ directory: true, defaultPath: current, title: "Export to this folder" }).catch(() => null);
+      const picked = await window.__TAURI__.dialog.open({ directory: true, defaultPath: current, title: tr("Export here") }).catch(() => null);
       if (typeof picked === "string") {
         try { showWhere(await invoke("set_export_dir", { path: picked })); } catch (e) { showError(status, e); status.hidden = false; }
       }
@@ -258,16 +260,16 @@ function exportMenu(choices, run) {
     item.addEventListener("click", async () => {
       close();
       status.hidden = false;
-      status.replaceChildren(el("span", { class: "spinner" }), "Exporting…");
+      status.replaceChildren(el("span", { class: "spinner" }), tr("Exporting…"));
       try {
         const path = await run(format);
         const name = path.split(/[\\/]/).pop();
-        status.replaceChildren(svg("check", 14), ` Exported ${name}`,
-          isDesktop() ? el("button", { class: "link inline", type: "button", onclick: () => invoke("reveal_export", { path }).catch(() => {}) }, platform === "macos" ? "Show in Finder" : "Show in folder") : ` to ${path}`,
-          el("button", { class: "icon-only", type: "button", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { status.hidden = true; } }, svg("close", 14)));
+        status.replaceChildren(svg("check", 14), tr(" Exported {name}", { name: name }),
+          isDesktop() ? el("button", { class: "link inline", type: "button", onclick: () => invoke("reveal_export", { path }).catch(() => {}) }, platform === "macos" ? tr("Show in Finder") : tr("Show in folder")) : ` to ${path}`,
+          el("button", { class: "icon-only", type: "button", "aria-label": tr("Dismiss"), title: tr("Dismiss"), onclick: () => { status.hidden = true; } }, svg("close", 14)));
       } catch (e) {
         status.replaceChildren(el("span", { class: "danger" }, String(e)),
-          el("button", { class: "icon-only", type: "button", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { status.hidden = true; } }, svg("close", 14)));
+          el("button", { class: "icon-only", type: "button", "aria-label": tr("Dismiss"), title: tr("Dismiss"), onclick: () => { status.hidden = true; } }, svg("close", 14)));
       }
     });
     menu.append(item);
@@ -278,14 +280,14 @@ function exportMenu(choices, run) {
 }
 
 const TRANSCRIPT_EXPORTS = [
-  ["txt", "Transcript as text", ".txt, with bookmarks and action items"],
-  ["md", "Transcript as Markdown", ".md, for documents and wikis"],
-  ["srt", "Subtitles", ".srt, timed lines for video"],
-  ["vtt", "Web subtitles", ".vtt, timed lines with speakers"],
+  ["txt", tr("Transcript (text)"), tr(".txt, with bookmarks and action items")],
+  ["md", tr("Transcript (Markdown)"), tr(".md, for documents and wikis")],
+  ["srt", tr("Subtitles"), tr(".srt, timed lines for video")],
+  ["vtt", tr("Web subtitles"), tr(".vtt, timed lines with speakers")],
 ];
 
 function timeText(unix) {
-  return unix ? new Date(unix * 1000).toLocaleTimeString(undefined, { timeStyle: "short" }) : "";
+  return unix ? new Date(unix * 1000).toLocaleTimeString(UI_LOCALE, { timeStyle: "short" }) : "";
 }
 
 function showError(target, error) {
@@ -297,7 +299,7 @@ function showError(target, error) {
 /// a button to the permissions page.
 function micHelp(problem) {
   if (platform !== "android" || !/microphone|silence|access/i.test(String(problem))) return "";
-  return el("div", { class: "actions" }, el("button", { class: "pill", onclick: () => showPermissions() }, "Check app permissions"));
+  return el("div", { class: "actions" }, el("button", { class: "pill", onclick: () => showPermissions() }, tr("Check permissions")));
 }
 
 /// On a phone the list and the page take turns filling the screen. Opening a page from the list leaves
@@ -317,7 +319,7 @@ function backToList() {
   refreshItems();
 }
 
-/// A meeting's top bar (and on a phone, a note's) stays in place, under "Back to Feed" on a phone, while the page scrolls
+/// A meeting's top bar (and on a phone, a note's) stays in place, under "Back" on a phone, while the page scrolls
 /// beneath it. Its height is kept in --pin-top, so the formatting bar can stay just under it.
 let pinWatch = null;
 function pinTopBar(bar) {
@@ -351,7 +353,7 @@ function wordCount(text) {
   return n;
 }
 function wordsText(n) {
-  return `${n.toLocaleString()} word${n === 1 ? "" : "s"}`;
+  return trn(n, "{n} word", "{n} words", { n: n.toLocaleString() });
 }
 
 /// Leaves whatever page was open: stops playback and polling, and saves a note being edited.
@@ -426,19 +428,19 @@ function dayLabel(unix) {
   const today = new Date();
   const start = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const diff = Math.round((start(today) - start(day)) / 86400000);
-  if (diff <= 0) return "Today";
-  if (diff === 1) return "Yesterday";
-  if (diff < 7) return day.toLocaleDateString(undefined, { weekday: "long" });
-  return day.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  if (diff <= 0) return tr("Today");
+  if (diff === 1) return tr("Yesterday");
+  if (diff < 7) return day.toLocaleDateString(UI_LOCALE, { weekday: "long" });
+  return day.toLocaleDateString(UI_LOCALE, { month: "long", year: "numeric" });
 }
 
 /// The person's own workflow for notes and meetings. No status is the default.
-const STATUSES = [["", "No status"], ["in_progress", "In progress"], ["ready", "Ready"], ["exported", "Exported"], ["done", "Done"]];
-const statusName = (status) => STATUSES.find(([value]) => value === (status ?? ""))?.[1] ?? "No status";
+const STATUSES = [["", tr("No status")], ["in_progress", tr("In progress")], ["ready", tr("Ready")], ["exported", tr("Exported")], ["done", tr("Done")]];
+const statusName = (status) => STATUSES.find(([value]) => value === (status ?? ""))?.[1] ?? tr("No status");
 
 /// A dropdown showing the current status, coloured to match the list.
 function statusPicker(status, onChange) {
-  const select = el("select", { class: "status-picker", "aria-label": "Status", title: "Status" },
+  const select = el("select", { class: "status-picker", "aria-label": tr("Status"), title: tr("Status") },
     ...STATUSES.map(([value, label]) => el("option", { value, selected: value === (status ?? "") }, label)));
   select.dataset.status = status ?? "";
   select.addEventListener("change", async () => {
@@ -465,7 +467,7 @@ function isUntitled(title) {
 }
 
 function meetingTitle(id, title) {
-  return isUntitled(title) ? meetingNames[id] ?? "Meeting" : title;
+  return isUntitled(title) ? meetingNames[id] ?? tr("Meeting") : title;
 }
 
 /// Numbers every meeting within its local day, counting all of them, not only those a search shows.
@@ -475,7 +477,7 @@ function nameMeetings(all) {
     const day = new Date(s.created * 1000);
     const key = day.toDateString();
     byDay[key] = (byDay[key] ?? 0) + 1;
-    const label = day.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric" }).replace(",", "");
+    const label = day.toLocaleDateString(UI_LOCALE ?? "en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric" }).replace(",", "");
     meetingNames[s.id] = `${byDay[key]}- ${label}`;
   }
 }
@@ -495,13 +497,13 @@ async function refreshItems() {
   const items = [
     // Archived notes are left out of the list but still found by search.
     ...books.map((b) => ({ kind: "book", id: b.id, title: b.title, when: b.updated, notes: b.notes,
-      sub: `Book · ${timeText(b.updated)} · ${b.notes.length} note${b.notes.length === 1 ? "" : "s"}` })),
+      sub: `${tr("Book")} · ${timeText(b.updated)} · ${trn(b.notes.length, "{n} note", "{n} notes")}` })),
     ...notes.filter((n) => (query.trim() || !n.archived) && !inBook.has(n.id)).map((n) => ({ kind: "note", id: n.id, title: n.title, when: n.updated, status: n.status,
-      sub: [`Note · ${timeText(n.updated)}`, n.words ? `${n.words} words` : null, n.archived ? "Archived" : null].filter(Boolean).join(" · ") })),
+      sub: [tr("Note · {0}", { "0": timeText(n.updated) }), n.words ? trn(n.words, "{n} word", "{n} words") : null, n.archived ? tr("Archived") : null].filter(Boolean).join(" · ") })),
     ...sessions.map((s) => ({ kind: "session", id: s.id, title: meetingTitle(s.id, s.title), when: s.created, status: s.status,
-      sub: [`Meeting · ${timeText(s.created)}`, s.duration_s ? clock(s.duration_s) : null,
-        queue.current === s.id ? "processing…" : queue.waiting.includes(s.id) ? "waiting to process" : null,
-        s.needs_processing ? "not processed" : null, s.compacted ? "audio deleted" : null].filter(Boolean).join(" · ") })),
+      sub: [tr("Meeting · {0}", { "0": timeText(s.created) }), s.duration_s ? clock(s.duration_s) : null,
+        queue.current === s.id ? tr("processing…") : queue.waiting.includes(s.id) ? tr("queued") : null,
+        s.needs_processing ? tr("not processed") : null, s.compacted ? tr("audio deleted") : null].filter(Boolean).join(" · ") })),
   ].sort((a, b) => b.when - a.when);
 
   itemsNav.replaceChildren();
@@ -511,17 +513,17 @@ async function refreshItems() {
   if (recording) {
     itemsNav.append(el("button", { class: "item" + (view.kind === "recorder" ? " active" : ""), onclick: () => showMeeting() },
       el("span", { class: "icon meeting" }, svg("wave", 16)),
-      el("span", { class: "body" }, el("span", { class: "title rec" }, el("span", { class: "dot" }), "Recording now"),
-        el("span", { class: "sub" }, "Tap to return"))));
+      el("span", { class: "body" }, el("span", { class: "title rec" }, el("span", { class: "dot" }), tr("Recording now")),
+        el("span", { class: "sub" }, tr("Tap to return")))));
   }
   const archived = notes.filter((n) => n.archived).length;
   const archiveLink = !query.trim() && archived
     ? el("button", { class: "item archive-link" + (view.kind === "archive" ? " active" : ""), onclick: () => showArchive() },
       el("span", { class: "icon" }, svg("archive", 16)),
-      el("span", { class: "body" }, el("span", { class: "title" }, "Archive"), el("span", { class: "sub" }, `${archived} note${archived > 1 ? "s" : ""}`)))
+      el("span", { class: "body" }, el("span", { class: "title" }, tr("Archive")), el("span", { class: "sub" }, trn(archived, "{n} note", "{n} notes"))))
     : null;
   if (!items.length) {
-    if (!shut || query) itemsNav.append(el("div", { class: "empty" }, query ? "Nothing matches." : "No notes or meetings yet. Start one above, or say “Hey Superteem”."));
+    if (!shut || query) itemsNav.append(el("div", { class: "empty" }, query ? tr("Nothing matches.") : tr("Nothing yet. Start above, or say “Hey Superteem”.")));
     if (archiveLink) itemsNav.append(archiveLink);
     return;
   }
@@ -552,12 +554,12 @@ async function showArchive() {
   view = { kind: "archive" };
   refreshItems();
   const notes = (await invoke("list_notes", { query: "" }).catch(() => [])).filter((n) => n.archived);
-  const page = el("div", { class: "page" }, el("h1", {}, "Archive"),
-    el("p", { class: "legend" }, "Archived notes are kept out of the list. Search still finds them."));
+  const page = el("div", { class: "page" }, el("h1", {}, tr("Archive")),
+    el("p", { class: "legend" }, tr("Archived notes are hidden from the list. Search still finds them.")));
   page.append(el("div", { class: "group" }, notes.length ? notes.map((n) => el("div", { class: "row" },
-    el("button", { class: "label link-label", onclick: () => openNote(n.id) }, n.title, el("small", {}, `${timeText(n.updated)} · ${n.preview || "Empty"}`)),
-    el("button", { class: "pill", onclick: async () => { await invoke("archive_note", { id: n.id, archived: false }); showArchive(); } }, "Unarchive")))
-    : el("div", { class: "row" }, el("span", { class: "label" }, "Nothing archived."))));
+    el("button", { class: "label link-label", onclick: () => openNote(n.id) }, n.title, el("small", {}, `${timeText(n.updated)} · ${n.preview || tr("Empty")}`)),
+    el("button", { class: "pill", onclick: async () => { await invoke("archive_note", { id: n.id, archived: false }); showArchive(); } }, tr("Unarchive"))))
+    : el("div", { class: "row" }, el("span", { class: "label" }, tr("Nothing archived.")))));
   main.replaceChildren(page);
 }
 
@@ -648,22 +650,22 @@ function showHome() {
   showNewHome();
 }
 
-/// Four things to make, two of them not built yet.
+/// Two things to make, and three not built yet: calls, events and the library of books.
 function showNewHome() {
   const kinds = [
     // While the vault is shut, these show the way back in: nothing could be saved.
-    { name: "Note", sub: "Write or dictate a thought", icon: "pen", open: vaultGate(() => openNote(null)) },
-    { name: "Meeting", sub: "Record and transcribe", icon: "wave", open: vaultGate(() => showMeeting()) },
-    { name: "Call", sub: "Capture a phone call", icon: "phone" },
-    { name: "Event", sub: "Notes for a talk or session", icon: "calendar" },
-    { name: "Book", sub: "Gather notes into one place", icon: "book", open: vaultGate(() => newBook()), wide: true },
+    { name: tr("Note"), sub: tr("Write or dictate"), label: tr("New note"), icon: "pen", open: vaultGate(() => openNote(null)) },
+    { name: tr("Meeting"), sub: tr("Record and transcribe"), label: tr("New meeting"), icon: "wave", open: vaultGate(() => showMeeting()) },
+    { name: tr("Call"), sub: tr("Phone calls"), icon: "phone" },
+    { name: tr("Event"), sub: tr("Talks and sessions"), icon: "calendar" },
+    { name: tr("Library"), sub: tr("A library of books"), icon: "book", wide: true },
   ];
   const tiles = kinds.map((k) => el("button", {
     class: `new-tile${k.open ? "" : " soon"}${k.wide ? " wide" : ""}`, "aria-disabled": k.open ? null : "true",
-    "aria-label": k.open ? `New ${k.name.toLowerCase()}` : `${k.name}, coming soon`,
-    onclick: k.open ?? (() => micToast(`${k.name}s are coming soon`)),
+    "aria-label": k.open ? k.label : tr("{name}: coming soon", { name: k.name }),
+    onclick: k.open ?? (() => micToast(tr("{name}: coming soon", { name: k.name }))),
   }, el("span", { class: "tile-head" }, svg(k.icon, 31), el("span", { class: "tile-name" }, k.name),
-      k.open ? null : el("span", { class: "tile-badge" }, "Soon")),
+      k.open ? null : el("span", { class: "tile-badge" }, tr("Soon"))),
     el("span", { class: "tile-sub" }, k.sub)));
   main.replaceChildren(el("div", { class: "home phone-home" },
     // The wordmark, as in the sidebar.
@@ -671,9 +673,9 @@ function showNewHome() {
       el("span", { class: "product" }, "Voice"), el("span", { class: "by" }, "by"),
       el("img", { class: "logo-light-mode", src: "logo-light-mode.png", alt: "" }),
       el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" })),
-    el("h1", {}, "Start something new"),
+    el("h1", {}, tr("Start new")),
     el("div", { class: "new-grid" }, tiles),
-    el("div", { class: "hint" }, "Pick one to start")));
+    el("div", { class: "hint" }, tr("Pick one to start"))));
   homeExtras();
 }
 
@@ -683,8 +685,8 @@ function homeExtras() {
   invoke("just_updated").then((u) => {
     if (!u || view.kind !== "home") return;
     const hint = main.querySelector(".home > .hint");
-    hint?.after(el("p", { class: "just-updated" }, svg("check", 14), `Updated to ${u.version}`, " · ",
-      el("button", { class: "link inline", onclick: () => invoke("open_link", { url: u.notes }).catch(() => {}) }, "What's new")));
+    hint?.after(el("p", { class: "just-updated" }, svg("check", 14), tr("Updated to {version}", { version: u.version }), " · ",
+      el("button", { class: "link inline", onclick: () => invoke("open_link", { url: u.notes }).catch(() => {}) }, tr("What's new"))));
   }).catch(() => {});
   // The vault: the way back in when it's shut, what was moved into it, or a reminder to save the words.
   refreshVault().then(() => {
@@ -696,14 +698,6 @@ function homeExtras() {
 }
 
 // ---------- Books: notes gathered in order ----------
-
-async function newBook() {
-  try {
-    openBook(await invoke("create_book", { title: "" }), { naming: true });
-  } catch (e) {
-    micToast(String(e));
-  }
-}
 
 /// Scrolls that follow opening a note, so focusing the cursor doesn't count as the person scrolling.
 let noteOpenQuiet = 0;
@@ -727,8 +721,8 @@ function openAtTop(node) {
 /// has left the screen. Both fade over a second after three seconds still.
 function noteScrollButtons(topEl, { floor = null, cover = null } = {}) {
   const motion = () => (matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
-  const up = el("button", { class: "jump-end jump-up", type: "button", title: "Go to the top", "aria-label": "Go to the top of the note", tabindex: "-1" }, svg("up", 20));
-  const down = el("button", { class: "jump-end", type: "button", title: "Go to the end", "aria-label": "Go to the end of the note", tabindex: "-1" }, svg("down", 20));
+  const up = el("button", { class: "jump-end jump-up", type: "button", title: tr("Top"), "aria-label": tr("Go to top"), tabindex: "-1" }, svg("up", 20));
+  const down = el("button", { class: "jump-end", type: "button", title: tr("End"), "aria-label": tr("Go to end"), tabindex: "-1" }, svg("down", 20));
   let timer = null;
   let box = null;
   const hide = () => { up.classList.remove("show"); down.classList.remove("show"); };
@@ -784,7 +778,7 @@ function toggledPanel({ label, hide, about, head, content }) {
   };
   link.addEventListener("click", () => toggle(panel.hidden));
   panel.append(el("div", { class: "commentary-head" }, el("span", {}, head),
-    el("button", { class: "icon-only", type: "button", title: `Hide ${head.toLowerCase()}`, "aria-label": `Hide ${head.toLowerCase()}`, onclick: () => toggle(false) }, svg("close", 16))), content);
+    el("button", { class: "icon-only", type: "button", title: tr("Hide {head}", { head: head.toLowerCase() }), "aria-label": tr("Hide {head}", { head: head.toLowerCase() }), onclick: () => toggle(false) }, svg("close", 16))), content);
   return { link, panel };
 }
 
@@ -807,7 +801,7 @@ function commentary(markdown, about, book = null) {
   const fileUrl = (file) => (book && file.startsWith("book/") ? bookFileUrl(book, file.slice(5)) : "");
   const content = guardLinks(markdownInto(el("div", { class: "commentary-body" }), markdown, fileUrl), { book });
   if (book) bookPicturesIn(content, book);
-  return toggledPanel({ label: "Commentary", hide: "Hide commentary", about: `Commentary on ${about}`, head: "Commentary", content });
+  return toggledPanel({ label: tr("Commentary"), hide: tr("Hide commentary"), about: tr("Commentary on {about}", { about: about }), head: tr("Commentary"), content });
 }
 
 // ---------- A book's pictures: the gallery, and each one full screen
@@ -845,7 +839,7 @@ function bookPicturesIn(root, book, { titles = null, goTo = null } = {}) {
     img.alt = img.alt || f.alt;
     img.tabIndex = 0;
     img.setAttribute("role", "button");
-    img.title = "See it full screen";
+    img.title = tr("Full screen");
     const open = () => pictureViewer(book, pictures, pictures.indexOf(f), { titles, goTo });
     img.addEventListener("click", open);
     img.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
@@ -863,8 +857,8 @@ function bookPicturesIn(root, book, { titles = null, goTo = null } = {}) {
 function mediaLink(book, { titles = null, goTo = null } = {}) {
   const n = bookPictures(book).length;
   if (!n) return null;
-  return el("button", { class: "link commentary-link", type: "button", title: "See all the book's pictures",
-    onclick: () => mediaGallery(book, { titles, goTo }) }, svg("image", 13), `Media (${n})`);
+  return el("button", { class: "link commentary-link", type: "button", title: tr("All the book's pictures"),
+    onclick: () => mediaGallery(book, { titles, goTo }) }, svg("image", 13), tr("Media ({n})", { n: n }));
 }
 
 /// All a book's pictures as a grid; pressing one shows it full screen, to go through them one after another.
@@ -873,11 +867,11 @@ function mediaGallery(book, { titles = null, goTo = null } = {}) {
   const grid = el("div", { class: "gallery-grid" }, pictures.map((f, i) => el("button", { class: "gallery-tile", type: "button",
     title: f.caption || f.alt, onclick: () => pictureViewer(book, pictures, i, { titles, goTo, onGo: () => dialog.close() }) },
     el("img", { src: bookFileUrl(book, f.name), alt: f.alt, loading: "lazy" }),
-    el("span", { class: "gallery-caption" }, f.caption || (f.name === book.cover ? "The cover" : f.alt)))));
-  const dialog = el("dialog", { class: "sheet gallery-dialog", "aria-label": `Pictures in ${book.title || "this book"}` },
+    el("span", { class: "gallery-caption" }, f.caption || (f.name === book.cover ? tr("The cover") : f.alt)))));
+  const dialog = el("dialog", { class: "sheet gallery-dialog", "aria-label": tr("Pictures in {0}", { "0": book.title || tr("this book") }) },
     el("div", { class: "gallery-head" },
-      el("h2", {}, "Media", el("small", {}, ` ${pictures.length} in ${book.title || "this book"}`)),
-      el("button", { class: "icon-only", type: "button", title: "Close", "aria-label": "Close", onclick: () => dialog.close() }, svg("close", 18))),
+      el("h2", {}, tr("Media"), el("small", {}, ` ${pictures.length} in ${book.title || tr("this book")}`)),
+      el("button", { class: "icon-only", type: "button", title: tr("Close"), "aria-label": tr("Close"), onclick: () => dialog.close() }, svg("close", 18))),
     grid);
   dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
@@ -901,13 +895,13 @@ function pictureAbout(item) {
   const r = item.rights ?? {};
   const src = item.source;
   const rows = [
-    ["Made by", [c.name, c.lived ? `(${c.lived})` : "", c.role ? `· ${c.role}` : ""].filter(Boolean).join(" ")],
-    ["Made", [item.made, item.made_how].filter(Boolean).join(". ")],
-    ["First in", o ? [o.work, [o.publisher, o.place, o.year].filter(Boolean).join(", "), o.page].filter(Boolean).join(" · ") : ""],
-    ["Rights", [r.licence ? licenceName(r.licence.toLowerCase()) : r.status, r.holder ? `held by ${r.holder}` : ""].filter(Boolean).join(", ")],
-    ["Why it may be used", [r.basis, r.checked ? `Checked ${dayText(r.checked)}.` : ""].filter(Boolean).join(" ")],
-    ["From", src ? [src.url, src.retrieved ? `retrieved ${dayText(src.retrieved)}` : ""].filter(Boolean).join(", ") : ""],
-    ["Changes", (item.adjustments ?? []).length ? item.adjustments.map((a) => [dayText(a.date), a.what, a.by ? `(${a.by})` : ""].filter(Boolean).join(" ")).join("; ") : (src ? "None" : "")],
+    [tr("Made by"), [c.name, c.lived ? `(${c.lived})` : "", c.role ? `· ${c.role}` : ""].filter(Boolean).join(" ")],
+    [tr("Made"), [item.made, item.made_how].filter(Boolean).join(". ")],
+    [tr("First in"), o ? [o.work, [o.publisher, o.place, o.year].filter(Boolean).join(", "), o.page].filter(Boolean).join(" · ") : ""],
+    [tr("Rights"), [r.licence ? licenceName(r.licence.toLowerCase()) : r.status, r.holder ? tr("held by {holder}", { holder: r.holder }) : ""].filter(Boolean).join(", ")],
+    [tr("Why it may be used"), [r.basis, r.checked ? tr("Checked {0}.", { "0": dayText(r.checked) }) : ""].filter(Boolean).join(" ")],
+    [tr("From"), src ? [src.url, src.retrieved ? `retrieved ${dayText(src.retrieved)}` : ""].filter(Boolean).join(", ") : ""],
+    [tr("Changes"), (item.adjustments ?? []).length ? item.adjustments.map((a) => [dayText(a.date), a.what, a.by ? `(${a.by})` : ""].filter(Boolean).join(" ")).join("; ") : (src ? tr("None") : "")],
   ];
   return el("dl", { class: "viewer-about" }, rows.filter(([, v]) => v).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
 }
@@ -921,7 +915,7 @@ function pictureViewer(book, pictures, start = 0, { titles = null, goTo = null, 
   const credit = el("p", { class: "viewer-credit" });
   // Who made it, its rights and its history, from the book's media register: shown when asked for.
   const about = el("div", { class: "viewer-about-holder", hidden: true });
-  const aboutButton = el("button", { class: "link", type: "button", "aria-expanded": "false", hidden: true }, "About this picture");
+  const aboutButton = el("button", { class: "link", type: "button", "aria-expanded": "false", hidden: true }, tr("About"));
   let register = null;
   const drawAbout = () => {
     const item = register?.items?.find((i) => i.path === pictures[at].name);
@@ -932,17 +926,17 @@ function pictureViewer(book, pictures, start = 0, { titles = null, goTo = null, 
   aboutButton.addEventListener("click", () => {
     about.hidden = !about.hidden;
     aboutButton.setAttribute("aria-expanded", String(!about.hidden));
-    aboutButton.textContent = about.hidden ? "About this picture" : "Hide";
+    aboutButton.textContent = about.hidden ? tr("About") : tr("Hide");
   });
   mediaRegister(book).then((r) => { register = r; if (dialog.isConnected) drawAbout(); });
   const count = el("span", { class: "viewer-count", "aria-live": "polite" });
   const where = el("span", { class: "viewer-where" });
-  const prev = el("button", { class: "viewer-nav prev", type: "button", title: "Previous (←)", "aria-label": "Previous picture" }, svg("left", 30));
-  const next = el("button", { class: "viewer-nav next", type: "button", title: "Next (→)", "aria-label": "Next picture" }, svg("right", 30));
+  const prev = el("button", { class: "viewer-nav prev", type: "button", title: tr("Previous (←)"), "aria-label": tr("Previous picture") }, svg("left", 30));
+  const next = el("button", { class: "viewer-nav next", type: "button", title: tr("Next (→)"), "aria-label": tr("Next picture") }, svg("right", 30));
   const stage = el("div", { class: "viewer-stage", tabindex: "-1" }, img, prev, next);
-  const dialog = el("dialog", { class: "picture-viewer", "aria-label": "Picture" },
+  const dialog = el("dialog", { class: "picture-viewer", "aria-label": tr("Picture") },
     el("div", { class: "viewer-top" }, count, el("span", { class: "grow" }),
-      el("button", { class: "viewer-close", type: "button", title: "Close (Esc)", "aria-label": "Close", onclick: () => dialog.close() }, svg("close", 22))),
+      el("button", { class: "viewer-close", type: "button", title: tr("Close (Esc)"), "aria-label": tr("Close"), onclick: () => dialog.close() }, svg("close", 22))),
     stage,
     el("div", { class: "viewer-foot" }, caption, credit, el("div", { class: "viewer-links" }, aboutButton, where), about));
   const show = (i) => {
@@ -950,14 +944,14 @@ function pictureViewer(book, pictures, start = 0, { titles = null, goTo = null, 
     const f = pictures[at];
     img.src = bookFileUrl(book, f.name);
     img.alt = f.alt;
-    caption.textContent = f.caption || (f.name === book.cover ? "The cover" : f.alt);
+    caption.textContent = f.caption || (f.name === book.cover ? tr("The cover") : f.alt);
     credit.textContent = pictureCredit(f);
     count.textContent = `${at + 1} of ${pictures.length}`;
     prev.disabled = at === 0;
     next.disabled = at === pictures.length - 1;
     // The chapters it's in, to go to.
     where.replaceChildren(...(goTo && titles ? (f.used_in ?? []).filter((id) => titles[id]).map((id) => el("button", { class: "link", type: "button",
-      onclick: () => { dialog.close(); onGo?.(); goTo(id); } }, `In ${titles[id]} →`)) : []));
+      onclick: () => { dialog.close(); onGo?.(); goTo(id); } }, tr("In {0} →", { "0": titles[id] }))) : []));
     // The ones either side, ready.
     for (const j of [at - 1, at + 1]) if (pictures[j]) new Image().src = bookFileUrl(book, pictures[j].name);
     drawAbout();
@@ -990,45 +984,45 @@ function pictureViewer(book, pictures, start = 0, { titles = null, goTo = null, 
 
 /// Licences a book can say it has, as people know them.
 const LICENCES = [
-  ["public-domain", "Public domain"],
-  ["cc0-1.0", "CC0: no rights reserved"],
-  ["cc-by-4.0", "Creative Commons Attribution 4.0"],
-  ["cc-by-sa-4.0", "Creative Commons Attribution-ShareAlike 4.0"],
-  ["cc-by-nc-4.0", "Creative Commons Attribution-NonCommercial 4.0"],
-  ["all-rights-reserved", "All rights reserved"],
+  ["public-domain", tr("Public domain")],
+  ["cc0-1.0", tr("CC0: no rights reserved")],
+  ["cc-by-4.0", tr("Creative Commons Attribution 4.0")],
+  ["cc-by-sa-4.0", tr("Creative Commons Attribution-ShareAlike 4.0")],
+  ["cc-by-nc-4.0", tr("Creative Commons Attribution-NonCommercial 4.0")],
+  ["all-rights-reserved", tr("All rights reserved")],
 ];
 const licenceName = (key) => LICENCES.find(([k]) => k === key)?.[1] ?? key;
 
 /// "14 Nov 2026" from "2026-11-14".
 const dayText = (date) => {
   const d = /^\d{4}-\d{2}-\d{2}$/.test(date ?? "") ? new Date(`${date}T12:00:00`) : null;
-  return d ? d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : date ?? "";
+  return d ? d.toLocaleDateString(UI_LOCALE, { day: "numeric", month: "short", year: "numeric" }) : date ?? "";
 };
 
 /// What a book says about itself: its cover, who wrote and translated it, its language, licence and source,
 /// and each version's changes. Gives { link, panel }, both null when it says nothing.
 function aboutBook(book) {
   const listed = (url) => (book.links ?? []).find((l) => l.url === url) ?? null;
-  const outLink = (url, text) => el("button", { class: "link inline out-link", type: "button", title: "Leaves Superteem: opens in your browser",
+  const outLink = (url, text) => el("button", { class: "link inline out-link", type: "button", title: tr("Opens in your browser"),
     onclick: () => followLink(url, { link: listed(url) }) }, text, el("span", { class: "out-mark", "aria-hidden": "true" }, "↗"));
   const source = book.source && (["web", "mail"].includes(linkKind(book.source)) ? outLink(book.source, book.source) : book.source);
   const others = (book.links ?? []).filter((l) => l.url !== book.source && ["web", "mail"].includes(linkKind(l.url)));
   const rows = [
-    ["Author", book.author], ["Translation", book.translator], ["Language", book.language && languageName(book.language)],
-    ["Licence", book.licence && licenceName(book.licence)], ["Source", source], ["Version", book.version ? String(book.version) : ""],
+    [tr("Author"), book.author], [tr("Translation"), book.translator], [tr("Language"), book.language && languageName(book.language)],
+    [tr("Licence"), book.licence && licenceName(book.licence)], [tr("Source"), source], [tr("Version"), book.version ? String(book.version) : ""],
   ].filter(([, v]) => v);
   const changes = [...(book.changes ?? [])].sort((a, b) => b.version - a.version);
   const cover = bookCover(book);
   if (!rows.length && !book.description && !changes.length && !cover && !others.length) return { link: null, panel: null };
   const content = el("div", { class: "commentary-body about-book" },
-    cover ? el("img", { class: "about-cover", src: cover, alt: `The cover of ${book.title || "this book"}` }) : null,
+    cover ? el("img", { class: "about-cover", src: cover, alt: tr("The cover of {0}", { "0": book.title || tr("this book") }) }) : null,
     book.description ? el("p", {}, book.description) : null,
     rows.length ? el("dl", { class: "about-facts" }, ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])) : null,
-    others.length ? el("div", { class: "about-links" }, el("strong", {}, "Outside the library"),
+    others.length ? el("div", { class: "about-links" }, el("strong", {}, tr("Outside the library")),
       el("ul", {}, ...others.map((l) => el("li", {}, outLink(l.url, l.title || l.url), l.about ? el("small", {}, l.about) : null)))) : null,
-    changes.length ? el("details", { class: "about-changes" }, el("summary", {}, "What's changed"),
-      el("ol", {}, ...changes.map((c) => el("li", {}, el("strong", {}, `Version ${c.version}`), c.date ? ` · ${dayText(c.date)}` : "", el("br"), c.summary)))) : null);
-  return toggledPanel({ label: "About this book", hide: "Hide about", about: `About ${book.title || "this book"}`, head: "About this book", content });
+    changes.length ? el("details", { class: "about-changes" }, el("summary", {}, tr("What's changed")),
+      el("ol", {}, ...changes.map((c) => el("li", {}, el("strong", {}, tr("Version {version}", { version: c.version })), c.date ? ` · ${dayText(c.date)}` : "", el("br"), c.summary)))) : null);
+  return toggledPanel({ label: tr("About"), hide: tr("Hide about"), about: tr("About {0}", { "0": book.title || tr("this book") }), head: tr("About"), content });
 }
 
 /// "by A. H. Clough" under a chapter written by someone other than the book's author.
@@ -1074,7 +1068,7 @@ function chapterInto(body, text, format, noteId, bookId = "") {
     n.data.split(/([^]*)/).forEach((part, i) => {
       if (i % 2 === 0) { if (part) frag.append(part); return; }
       const num = order.indexOf(part) + 1;
-      const go = el("button", { type: "button", class: "fn-go", id: `${key(part)}-ref`, title: plain(defs.get(part)), "aria-label": `Footnote ${num}` }, String(num));
+      const go = el("button", { type: "button", class: "fn-go", id: `${key(part)}-ref`, title: plain(defs.get(part)), "aria-label": tr("Footnote {num}", { num: num }) }, String(num));
       go.addEventListener("click", () => flash(body.querySelector(`#${key(part)}`)));
       frag.append(el("sup", { class: "fn-ref", "data-noread": "" }, go));
     });
@@ -1085,9 +1079,9 @@ function chapterInto(body, text, format, noteId, bookId = "") {
     const only = said.children.length === 1 && said.firstElementChild.tagName === "P" ? said.firstElementChild : said;
     const back = body.querySelector(`#${key(id)}-ref`);
     return el("li", { id: key(id), value: String(i + 1) }, el("span", {}, ...only.childNodes),
-      back ? el("button", { type: "button", class: "fn-back", title: "Back to the text", "aria-label": "Back to the text", onclick: () => { flash(back); back.focus(); } }, "↩") : null);
+      back ? el("button", { type: "button", class: "fn-back", title: tr("Back to text"), "aria-label": tr("Back to text"), onclick: () => { flash(back); back.focus(); } }, "↩") : null);
   });
-  body.append(el("section", { class: "footnotes", "data-noread": "", "aria-label": "Footnotes" }, el("h3", {}, "Notes"), el("ol", {}, ...items)));
+  body.append(el("section", { class: "footnotes", "data-noread": "", "aria-label": tr("Footnotes") }, el("h3", {}, tr("Notes")), el("ol", {}, ...items)));
   return body;
 }
 
@@ -1101,8 +1095,8 @@ function lineDialog(heading, label, value, hint) {
       el("h2", {}, heading),
       el("label", { class: "field" }, label, hint ? el("small", {}, hint) : null, input),
       el("div", { class: "actions" }, el("span", { class: "grow" }),
-        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
-        el("button", { class: "primary pill", type: "button", onclick: () => finish(input.value.trim()) }, "Save")));
+        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, tr("Cancel")),
+        el("button", { class: "primary pill", type: "button", onclick: () => finish(input.value.trim()) }, tr("Save"))));
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); finish(input.value.trim()); } });
     dialog.addEventListener("close", () => { dialog.remove(); done(result); });
     document.body.append(dialog);
@@ -1121,27 +1115,27 @@ function bookDetailsDialog(book) {
       input.value = book[key] ?? "";
       return [key, input, el("label", { class: "field" }, label, hint ? el("small", {}, hint) : null, input)];
     };
-    const licence = el("select", { "aria-label": "Licence" }, el("option", { value: "" }, "Not said"),
+    const licence = el("select", { "aria-label": tr("Licence") }, el("option", { value: "" }, tr("Not said")),
       ...LICENCES.map(([k, name]) => el("option", { value: k, selected: book.licence === k }, name)));
     if (book.licence && !LICENCES.some(([k]) => k === book.licence)) licence.append(el("option", { value: book.licence, selected: true }, book.licence));
     const fields = [
-      field("Author", "author", "Who wrote it, as it should be shown."),
-      field("Translation", "translator", "Who translated it, if it's a translation."),
-      field("What it is", "description", "A sentence or two.", { rows: "3", maxlength: "1000" }),
-      field("Language", "language", "A language code, such as en, fr or mi.", { maxlength: "20" }),
-      field("Source", "source", "Where the text came from: a web address, or the printed edition.", { maxlength: "500" }),
+      field(tr("Author"), "author", tr("Author, as it should be shown.")),
+      field(tr("Translation"), "translator", tr("Translator, if any.")),
+      field(tr("What it is"), "description", tr("A sentence or two."), { rows: "3", maxlength: "1000" }),
+      field(tr("Language"), "language", tr("A language code, like en, fr or mi."), { maxlength: "20" }),
+      field(tr("Source"), "source", tr("Where the text is from: a web address or printed edition."), { maxlength: "500" }),
     ];
     const finish = () => {
       result = Object.fromEntries([...fields.map(([k, input]) => [k, input.value.trim()]), ["licence", licence.value]]);
       dialog.close();
     };
-    const dialog = el("dialog", { class: "sheet extras-dialog details-dialog", "aria-label": "About this book" },
-      el("h2", {}, "About this book"),
+    const dialog = el("dialog", { class: "sheet extras-dialog details-dialog", "aria-label": tr("About") },
+      el("h2", {}, tr("About")),
       ...fields.map(([, , f]) => f),
-      el("label", { class: "field" }, "Licence", el("small", {}, "Who may copy it. A book shared in the library needs one."), licence),
+      el("label", { class: "field" }, tr("Licence"), el("small", {}, tr("Who may copy it. Books shared in the library need one.")), licence),
       el("div", { class: "actions" }, el("span", { class: "grow" }),
-        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
-        el("button", { class: "primary pill", type: "button", onclick: finish }, "Save")));
+        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, tr("Cancel")),
+        el("button", { class: "primary pill", type: "button", onclick: finish }, tr("Save"))));
     dialog.addEventListener("close", () => { dialog.remove(); done(result); });
     document.body.append(dialog);
     dialog.showModal();
@@ -1154,19 +1148,19 @@ function bookDetailsDialog(book) {
 function commentaryDialog(about, text) {
   return new Promise((done) => {
     let result = null;
-    const area = el("textarea", { rows: "12", "aria-label": "Commentary", placeholder: "Background, context, things to look out for…" });
+    const area = el("textarea", { rows: "12", "aria-label": tr("Commentary"), placeholder: tr("Background, context, things to look out for…") });
     area.value = text ?? "";
     const finish = (value) => { result = value; dialog.close(); };
-    const dialog = el("dialog", { class: "sheet extras-dialog", "aria-label": "Commentary" },
-      el("h2", {}, `Commentary on ${about}`),
-      el("p", { class: "hint" }, "Hidden until a reader presses Commentary, then shown at the top. It's never read aloud. "
-        + "Markdown works: *italic*, **bold**, - lists, and a blank line between paragraphs."),
+    const dialog = el("dialog", { class: "sheet extras-dialog", "aria-label": tr("Commentary") },
+      el("h2", {}, tr("Commentary on {about}", { about: about })),
+      el("p", { class: "hint" }, tr("Hidden until a reader presses Commentary, then shown at the top. Never read aloud. ")
+        + tr("Markdown works: *italic*, **bold**, - lists, blank line between paragraphs.")),
       area,
       el("div", { class: "actions" },
-        text?.trim() ? el("button", { class: "link danger", type: "button", onclick: () => finish("") }, "Remove") : null,
+        text?.trim() ? el("button", { class: "link danger", type: "button", onclick: () => finish("") }, tr("Remove")) : null,
         el("span", { class: "grow" }),
-        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
-        el("button", { class: "primary pill", type: "button", onclick: () => finish(area.value.trim()) }, "Save")));
+        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, tr("Cancel")),
+        el("button", { class: "primary pill", type: "button", onclick: () => finish(area.value.trim()) }, tr("Save"))));
     dialog.addEventListener("close", () => { dialog.remove(); done(result); });
     document.body.append(dialog);
     dialog.showModal();
@@ -1185,10 +1179,10 @@ function pronounceDialog(about, words, { fresh = "", inherited = null, voice = n
     let result = null;
     const rows = el("div", { class: "pron-rows" });
     const addRow = (written = "", said = "") => {
-      const word = el("input", { type: "text", value: written, placeholder: "Word as written", "aria-label": "Word as written", maxlength: "60", autocomplete: "off", spellcheck: "false" });
-      const sound = el("input", { type: "text", value: said, placeholder: "How it sounds", "aria-label": "How it sounds", maxlength: "120", autocomplete: "off", spellcheck: "false" });
-      const hear = el("button", { class: "icon-only", type: "button", title: "Hear it", "aria-label": "Hear it" }, svg("speak", 16));
-      hear.dataset.what = "Hear it";
+      const word = el("input", { type: "text", value: written, placeholder: tr("Written"), "aria-label": tr("Written"), maxlength: "60", autocomplete: "off", spellcheck: "false" });
+      const sound = el("input", { type: "text", value: said, placeholder: tr("Said"), "aria-label": tr("Said"), maxlength: "120", autocomplete: "off", spellcheck: "false" });
+      const hear = el("button", { class: "icon-only", type: "button", title: tr("Hear it"), "aria-label": tr("Hear it") }, svg("speak", 16));
+      hear.dataset.what = tr("Hear it");
       hear.addEventListener("click", () => {
         if (reading?.button === hear) return stopReading();
         stopReading();
@@ -1204,20 +1198,20 @@ function pronounceDialog(about, words, { fresh = "", inherited = null, voice = n
           const book = defaults[w];
           const mine = w && (book == null || sound.value.trim() !== book);
           clash.classList.toggle("mine", !!mine);
-          clash.replaceChildren(...(!mine ? [] : book == null ? ["Your own word."] : [`Your own way. The book says “${book}”.`,
-            el("button", { class: "link", type: "button", onclick: () => { sound.value = book; showClash(); } }, "Reset")]));
+          clash.replaceChildren(...(!mine ? [] : book == null ? [tr("Your own word.")] : [tr("Yours. The book says “{book}”.", { book: book }),
+            el("button", { class: "link", type: "button", onclick: () => { sound.value = book; showClash(); } }, tr("Reset"))]));
           clash.hidden = !mine;
           return;
         }
         const theirs = inherited?.[w];
-        clash.textContent = theirs ? `The book says “${theirs}”. This note's way is used here instead.` : "";
+        clash.textContent = theirs ? tr("The book says “{theirs}”; this note's way is used here.", { theirs: theirs }) : "";
         clash.hidden = !theirs;
       };
       word.addEventListener("input", showClash);
       sound.addEventListener("input", showClash);
       showClash();
       const row = el("div", { class: "pron-row" }, word, el("span", { class: "pron-arrow", "aria-hidden": "true" }, "→"), sound, hear,
-        el("button", { class: "icon-only", type: "button", title: "Take this word out", "aria-label": "Take this word out", onclick: () => { row.remove(); showEmpty(); } }, svg("close", 16)), clash);
+        el("button", { class: "icon-only", type: "button", title: tr("Remove word"), "aria-label": tr("Remove word"), onclick: () => { row.remove(); showEmpty(); } }, svg("close", 16)), clash);
       // Enter in the spelling goes on to a new word.
       sound.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addRow().querySelector("input").focus(); } });
       word.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sound.focus(); } });
@@ -1227,9 +1221,9 @@ function pronounceDialog(about, words, { fresh = "", inherited = null, voice = n
       showEmpty();
       return row;
     };
-    const empty = el("p", { class: "hint pron-empty" }, "No words yet.");
+    const empty = el("p", { class: "hint pron-empty" }, tr("No words yet."));
     // A long list can be searched, by the word or how it sounds.
-    const search = el("input", { type: "search", class: "pron-search", placeholder: "Search words", "aria-label": "Search words", autocomplete: "off", spellcheck: "false" });
+    const search = el("input", { type: "search", class: "pron-search", placeholder: tr("Search words"), "aria-label": tr("Search words"), autocomplete: "off", spellcheck: "false" });
     const filter = () => {
       const q = search.value.trim().toLowerCase();
       let shown = 0;
@@ -1238,7 +1232,7 @@ function pronounceDialog(about, words, { fresh = "", inherited = null, voice = n
         row.hidden = !hit;
         if (hit) shown++;
       }
-      empty.textContent = q ? "No words match." : "No words yet.";
+      empty.textContent = q ? tr("No words match.") : tr("No words yet.");
       empty.hidden = shown > 0;
     };
     search.addEventListener("input", filter);
@@ -1259,19 +1253,19 @@ function pronounceDialog(about, words, { fresh = "", inherited = null, voice = n
     };
     const finish = (value) => { result = value; dialog.close(); };
     const theirs = Object.keys(inherited ?? {}).length;
-    const dialog = el("dialog", { class: "sheet extras-dialog pron-dialog", "aria-label": "Pronunciation" },
-      el("h2", {}, `Pronunciation in ${about}`),
-      el("p", { class: "hint" }, "Fix words the voice says wrong. Type the word as written, then spell it as it sounds. "
-        + "A few hyphenated chunks work best, like Themistocles → Thur-mistic-klees."),
-      defaults ? el("p", { class: "hint" }, "Your changes stay on this device and replace the book's. "
-        + "Remove a word to have it read as written.") : null,
-      theirs ? el("p", { class: "hint" }, `The book's own ${theirs} word${theirs === 1 ? " is" : "s are"} used too. A word here is said this way in this note only, even when the book says it another way.`) : null,
+    const dialog = el("dialog", { class: "sheet extras-dialog pron-dialog", "aria-label": tr("Pronunciation") },
+      el("h2", {}, tr("Pronunciation in {about}", { about: about })),
+      el("p", { class: "hint" }, tr("Fix words the voice says wrong: type the word, then spell it as it sounds. ")
+        + tr("Hyphenated chunks work best, like Themistocles → Thur-mistic-klees.")),
+      defaults ? el("p", { class: "hint" }, tr("Your changes stay on this device and replace the book's. ")
+        + tr("Remove a word to read it as written.")) : null,
+      theirs ? el("p", { class: "hint" }, tr("The book's {theirs} word{1} used too. Words here apply to this note only.", { theirs: theirs, "1": theirs === 1 ? " is" : "s are" })) : null,
       search, rows, empty,
       el("div", { class: "actions" },
-        el("button", { class: "pill with-icon pron-add", type: "button", onclick: () => addRow().querySelector("input").focus() }, svg("plus", 14), "Add a word"),
+        el("button", { class: "pill with-icon pron-add", type: "button", onclick: () => addRow().querySelector("input").focus() }, svg("plus", 14), tr("Add a word")),
         el("span", { class: "grow" }),
-        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"),
-        el("button", { class: "primary pill", type: "button", onclick: () => finish(read()) }, "Save")));
+        el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, tr("Cancel")),
+        el("button", { class: "primary pill", type: "button", onclick: () => finish(read()) }, tr("Save"))));
     dialog.addEventListener("close", () => { stopReading(); dialog.remove(); done(result); });
     document.body.append(dialog);
     dialog.showModal();
@@ -1288,7 +1282,7 @@ function selectedWord() {
 /// How many words a pronunciation list has, as a button says it.
 const pronounceCount = (words) => {
   const n = Object.keys(words ?? {}).length;
-  return n ? `Pronunciation (${n})` : "Pronunciation";
+  return n ? tr("Pronunciation ({n})", { n: n }) : tr("Pronunciation");
 };
 
 // ---------- Links: inside the library, and leaving it
@@ -1321,28 +1315,28 @@ function leaveDialog(href, link = null) {
     const mail = u?.protocol === "mailto:";
     const site = mail ? decodeURIComponent(u.pathname) : (u?.hostname ?? href).replace(/^www\./, "");
     const finish = (value) => { result = value; dialog.close(); };
-    const stay = el("button", { class: "primary pill", type: "button", onclick: () => dialog.close() }, "Stay here");
+    const stay = el("button", { class: "primary pill", type: "button", onclick: () => dialog.close() }, tr("Stay here"));
     const copied = el("span", { class: "hint", "aria-live": "polite" });
-    const dialog = el("dialog", { class: "sheet leave-dialog", "aria-label": "This link leaves Superteem" },
-      el("h2", {}, mail ? "This writes an email outside Superteem" : "This link leaves Superteem"),
+    const dialog = el("dialog", { class: "sheet leave-dialog", "aria-label": tr("This link leaves Superteem") },
+      el("h2", {}, mail ? tr("This writes an email outside Superteem") : tr("This link leaves Superteem")),
       el("p", { class: "leave-site" }, svg("up", 16), site),
       link?.title ? el("p", { class: "leave-title" }, link.title) : null,
       el("p", { class: "leave-url" }, href),
       el("p", { class: "hint" }, mail
-        ? "Your email app opens with this address. Nothing is sent until you send it."
+        ? tr("Your email app opens with this address. Nothing is sent until you send it.")
         : [
-          link?.checked ? `The library checked this page on ${dayText(link.checked)}, but what's there now may have changed, and it isn't part of the library.`
-            : "The library hasn't checked this page. What's there isn't part of the library.",
-          u?.protocol === "http:" ? " This site doesn't use a secure connection." : "",
-          " It opens in your browser, not in Superteem.",
+          link?.checked ? tr("The library checked this page on {0}, but it may have changed, and it isn't part of the library.", { "0": dayText(link.checked) })
+            : tr("The library hasn't checked this page. It isn't part of the library."),
+          u?.protocol === "http:" ? tr(" This site isn't secure.") : "",
+          tr(" It opens in your browser."),
         ].join("")),
       el("div", { class: "actions leave-actions" },
         el("button", { class: "link", type: "button", onclick: async () => {
-          try { await navigator.clipboard.writeText(href); copied.textContent = "Copied."; } catch { copied.textContent = "It couldn't be copied."; }
-        } }, "Copy link"), copied,
+          try { await navigator.clipboard.writeText(href); copied.textContent = tr("Copied."); } catch { copied.textContent = tr("Couldn't copy."); }
+        } }, tr("Copy link")), copied,
         el("span", { class: "grow" }),
-        link?.archive ? el("button", { class: "pill", type: "button", onclick: () => finish("archive") }, "Open the saved copy") : null,
-        el("button", { class: "pill", type: "button", onclick: () => finish("open") }, mail ? "Open email app" : "Open in browser"),
+        link?.archive ? el("button", { class: "pill", type: "button", onclick: () => finish("archive") }, tr("Open saved copy")) : null,
+        el("button", { class: "pill", type: "button", onclick: () => finish("open") }, mail ? tr("Open email app") : tr("Open in browser")),
         stay));
     dialog.addEventListener("close", () => { dialog.remove(); done(result); });
     document.body.append(dialog);
@@ -1365,9 +1359,9 @@ async function followLink(href, { root = null, noteId = "", link = null } = {}) 
   if (kind === "file") return invoke("open_note_link", { id: noteId, href }).catch((e) => micToast(String(e)));
   if (kind === "library") {
     const [section, bookId, chapter] = new URL(href).pathname.split("/").filter(Boolean);
-    if (section !== "books" || !bookId) return micToast("That part of the library isn't in the app yet.");
+    if (section !== "books" || !bookId) return micToast(tr("That part of the library isn't in the app yet."));
     const here = await invoke("get_book", { id: bookId }).catch(() => null);
-    if (!here) return micToast("That book isn't in your library yet.");
+    if (!here) return micToast(tr("That book isn't in your library yet."));
     return openBook(bookId, { chapter: chapter ?? null });
   }
   if (kind === "web" || kind === "mail") {
@@ -1376,7 +1370,7 @@ async function followLink(href, { root = null, noteId = "", link = null } = {}) 
     const url = choice === "archive" ? link.archive : href;
     return invoke("open_external", { url }).catch((e) => micToast(String(e)));
   }
-  micToast("That link can't be opened.");
+  micToast(tr("Can't open that link."));
 }
 
 /// Keeps every link in text shown for reading inside the app's boundary. A link out of the app is marked as
@@ -1386,20 +1380,20 @@ async function followLink(href, { root = null, noteId = "", link = null } = {}) 
 function guardLinks(root, { book = null, noteId = "" } = {}) {
   if (!root) return root;
   const listed = new Map((book?.links ?? []).map((l) => [l.url, l]));
-  if (book?.source && !listed.has(book.source)) listed.set(book.source, { url: book.source, title: "Where this book's text came from" });
+  if (book?.source && !listed.has(book.source)) listed.set(book.source, { url: book.source, title: tr("Source of this book's text") });
   const strict = book?.editable === false;
   const asText = (a, why) => a.replaceWith(el("span", { class: "link-blocked", title: why }, a.textContent));
   for (const a of [...root.querySelectorAll("a[href]")]) {
     const href = a.getAttribute("href");
     const kind = linkKind(href);
     a.removeAttribute("target");
-    if (kind === "bad") { asText(a, "This link can't be opened."); continue; }
+    if (kind === "bad") { asText(a, tr("Can't open this link.")); continue; }
     if (kind !== "web" && kind !== "mail") { if (kind === "library") a.classList.add("lib-link"); continue; }
-    if (strict && !listed.has(href)) { asText(a, "The library hasn't checked this link, so it can't be opened from here."); continue; }
+    if (strict && !listed.has(href)) { asText(a, tr("The library hasn't checked this link, so it can't open here.")); continue; }
     a.classList.add("out-link");
     let site = href;
     try { site = new URL(href).hostname.replace(/^www\./, "") || href; } catch {}
-    a.title = `Leaves Superteem: ${site}`;
+    a.title = tr("Leaves Superteem: {site}", { site: site });
     a.append(el("span", { class: "out-mark", "aria-hidden": "true", "data-noread": "" }, "↗"));
   }
   const press = (e) => {
@@ -1422,20 +1416,20 @@ const shortQuote = (q, n = 70) => (q.length > n ? `${q.slice(0, n - 1).trimEnd()
 /// The top of the Read aloud button's hold menu: where reading aloud last stopped in the book, or how a place
 /// comes to be kept.
 function listenHeading(p, where, inThis) {
-  if (!p) return { heading: "No listening place yet", sub: `Stop reading aloud after a few sentences (more than ${LISTEN_MIN_WORDS} words) and where you stopped is kept.` };
-  const at = inThis ? "in this chapter" : where ? `in ${chapterName(where)}` : "in this book";
-  return { heading: `You stopped listening ${at}`, sub: [p.quote ? `“${shortQuote(p.quote)}”` : "At the start of the chapter", agoText(p.created)].join(" · ") };
+  if (!p) return { heading: tr("No place saved yet"), sub: tr("Stop reading aloud after over {LISTEN_MIN_WORDS} words and your place is kept.", { LISTEN_MIN_WORDS: LISTEN_MIN_WORDS }) };
+  const at = inThis ? tr("in this chapter") : where ? `in ${chapterName(where)}` : tr("in this book");
+  return { heading: tr("You stopped listening {at}", { at: at }), sub: [p.quote ? `“${shortQuote(p.quote)}”` : tr("Start of the chapter"), agoText(p.created)].join(" · ") };
 }
 
 /// A book's, or one of its chapter's, Pronunciation button: how the voice says the names in it, which the
 /// person can change for themselves (see myPronounceDialog). Shows how many they've changed.
 function pronounceLink(book, chapter = null, lang = null) {
   const count = () => Object.keys(myPronounce(chapter ? chapter.id : book.id)).length;
-  const what = chapter ? "How the voice says the names in this chapter: change any for yourself" : "How the voice says the names in this book: change any for yourself";
+  const what = chapter ? tr("How the voice says names in this chapter") : tr("How the voice says names in this book");
   const button = el("button", { class: "link commentary-link", type: "button" }, svg("cog", 14));
   // Just the cog: what it's for, and how many the person has changed, show when pointed at.
   const draw = () => {
-    const label = count() ? `Pronunciation (${count()} yours). ${what}` : `Pronunciation. ${what}`;
+    const label = count() ? tr("Pronunciation ({0} yours). {what}", { "0": count(), what: what }) : tr("Pronunciation. {what}", { what: what });
     button.title = label;
     button.setAttribute("aria-label", label);
   };
@@ -1445,14 +1439,14 @@ function pronounceLink(book, chapter = null, lang = null) {
   button.addEventListener("click", async () => {
     if (await myPronounceDialog(book, chapter, { lang: typeof lang === "function" ? lang() : lang })) {
       draw();
-      micToast(reading ? "Saved. They're used from the next time you press Read aloud." : "Saved on this device.");
+      micToast(reading ? tr("Saved. Used from the next Read aloud.") : tr("Saved on this device."));
     }
   });
   return button;
 }
 
-const READ_CHAPTER = "Read the chapter aloud (from where you click, or what you select). Hold for more";
-const READ_ON = "Read on from where you stopped listening (or from where you click, or what you select). Hold for more";
+const READ_CHAPTER = tr("Read the chapter aloud (from a click or selection). Hold for more");
+const READ_ON = tr("Read on from where you stopped (or a click or selection). Hold for more");
 
 /// A book kept for reading: a contents list, then one chapter at a time. Nothing in it can be changed.
 /// `listen` opens the chapter at the place reading aloud stopped: "show" to go there, "read" to read on.
@@ -1480,9 +1474,9 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     const kicker = [chapter.part, chapter.label].filter(Boolean).join(" · ");
     const body = bookPicturesIn(guardLinks(chapterInto(el("div", { class: "book-chapter-body" }), note.body, note.format, note.id, book.id), { book, noteId: note.id }), book);
     const turn = () => el("div", { class: "book-turn" },
-      el("button", { class: "pill", disabled: index === 0, onclick: () => openBook(book.id, { chapter: contents[index - 1].id }) }, "Previous"),
+      el("button", { class: "pill", disabled: index === 0, onclick: () => openBook(book.id, { chapter: contents[index - 1].id }) }, tr("Previous")),
       el("span", { class: "book-kicker" }, `${index + 1} of ${contents.length}`),
-      el("button", { class: "pill", disabled: index === contents.length - 1, onclick: () => openBook(book.id, { chapter: contents[index + 1].id }) }, "Next"));
+      el("button", { class: "pill", disabled: index === contents.length - 1, onclick: () => openBook(book.id, { chapter: contents[index + 1].id }) }, tr("Next")));
     const heading = el("h1", {}, note.title || chapter.title);
     const bodyHolder = el("div", { class: "book-chapter-holder" }, body);
     const lang = () => itemLanguages(note)[0];
@@ -1498,7 +1492,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     const stoppedHere = () => (place.get()?.note === note.id ? marks?.listenFrom() ?? null : null);
     const readFrom = (from) => {
       const rest = from > 0 ? marks.textFrom(from) : whole();
-      if (!rest.trim()) return micToast("That's the end of the chapter.");
+      if (!rest.trim()) return micToast(tr("End of the chapter."));
       speak.readText(rest, lang(), { chapter: 0, at: from });
     };
     // Goes to where reading aloud last stopped, or reads on from there: in this chapter, or opens the one it's in.
@@ -1526,14 +1520,14 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
       return [
         listenHeading(p, p && contents.find((c) => c.id === p.note), p?.note === note.id),
         "-",
-        { icon: "play", text: "Read on from where you stopped", disabled: !p, run: () => toListenPlace("read") },
-        { icon: "bookmark", text: "Go to where you stopped", disabled: !p, run: () => toListenPlace("show") },
-        { icon: "speak", text: "Read this chapter from the start", run: () => readFrom(0) },
+        { icon: "play", text: tr("Read on"), disabled: !p, run: () => toListenPlace("read") },
+        { icon: "bookmark", text: tr("Go to where you stopped"), disabled: !p, run: () => toListenPlace("show") },
+        { icon: "speak", text: tr("Read from the start"), run: () => readFrom(0) },
         "-",
-        { icon: "trash", text: "Forget where you stopped", disabled: !p, run: () => { place.forget(); micToast("Forgotten. Read aloud starts at the top of the chapter again."); } },
+        { icon: "trash", text: tr("Forget my place"), disabled: !p, run: () => { place.forget(); micToast(tr("Forgotten. Reading starts at the top of the chapter.")); } },
         "-",
         followItem(),
-        { icon: "cog", text: "Settings…", run: () => bookReadingDialog(book, { button: speak, chapter: note, lang: lang() }) },
+        { icon: "cog", text: tr("Settings…"), run: () => bookReadingDialog(book, { button: speak, chapter: note, lang: lang() }) },
       ];
     };
     // What is selected, or from where the text was last clicked, or where reading aloud stopped in this chapter;
@@ -1548,7 +1542,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     }, READ_CHAPTER, { lang, voice: (l) => bookVoice(book, l), pronounce, speed: bookSpeed,
       onPiece: readingFollower((k) => (k === 0 ? surface : null), (k, at) => marks?.readingAt(k === 0 ? at : null)),
       startOf: () => ({ chapter: 0, at: startAt }), onEnd: keepWhereStopped, menu: listenMenu });
-    const mark = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or where you clicked. Hold for all the book's bookmarks", "aria-label": "Bookmark" }, svg("bookmark", 16));
+    const mark = el("button", { class: "icon-only", type: "button", title: tr("Bookmark the selection or click. Hold for all bookmarks"), "aria-label": tr("Bookmark") }, svg("bookmark", 16));
     mark.addEventListener("mousedown", (e) => e.preventDefault());
     mark.addEventListener("click", () => marks?.create());
     // Which bookmarks show, by colour and maker; held, the button opens all the book's bookmarks.
@@ -1556,7 +1550,7 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
     onHold(mark, () => bookBookmarksDialog(book, filter, (what) => (what === "marks" ? marks?.reload() : marks?.redraw()), { chapter: note.id }));
     const notes = commentary(note.commentary, note.title || chapter.title, book);
     const bar = el("div", { class: "book-contents-bar" },
-      el("span", { class: "book-bar-links" }, el("button", { class: "link", onclick: () => openBook(book.id) }, "Contents"), notes.link,
+      el("span", { class: "book-bar-links" }, el("button", { class: "link", onclick: () => openBook(book.id) }, tr("Contents")), notes.link,
         pronounceLink(book, note, lang)),
       el("span", { class: "top-actions" }, mark, speak));
     const page = el("div", { class: "page book book-read" },
@@ -1597,17 +1591,17 @@ async function openReadingBook(book, chapterId, find = null, listen = null) {
         el("small", {}, [wordsText(c.words), c.author && c.author !== book.author ? `by ${c.author}` : ""].filter(Boolean).join(" · ")))));
   });
   // One width for every number, so each title and its details line up under the others'.
-  const list = el("div", { class: "group book-notes" + (contents.some((c) => c.label) ? " labelled" : "") }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "This book has no chapters.")));
+  const list = el("div", { class: "group book-notes" + (contents.some((c) => c.label) ? " labelled" : "") }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, tr("This book has no chapters."))));
   const search = bookSearch(book.id, list, (hit, snippet) => openBook(book.id, { chapter: hit.id, find: snippet }));
-  const notes = commentary(book.commentary, book.title || "this book", book);
+  const notes = commentary(book.commentary, book.title || tr("this book"), book);
   const about = aboutBook(book);
   const cover = bookCover(book);
   const page = el("div", { class: "page book book-read" },
     el("div", { class: "book-head" },
       cover ? el("img", { class: "book-cover", src: cover, alt: "" }) : el("span", { class: "book-icon" }, svg("book", 22)),
       // The pill sits in the heading's line, so its bottom rests on the title's baseline.
-      el("h1", { class: "book-locked-title" }, book.title || "Untitled book",
-        el("span", { class: "reader-pill", title: "For reading: the chapters stay as they are" }, "Reader"))),
+      el("h1", { class: "book-locked-title" }, book.title || tr("Untitled book"),
+        el("span", { class: "reader-pill", title: tr("For reading: chapters can't be changed") }, tr("Reader")))),
     el("div", { class: "book-meta" },
       book.author ? el("p", { class: "book-byline" }, `by ${book.author}`) : "",
       el("div", { class: "book-links" }, about.link, notes.link,
@@ -1631,12 +1625,12 @@ function listenResume(bookId, contents, open) {
     if (!c) return box.replaceChildren();
     box.replaceChildren(
       el("span", { class: "listen-resume-icon" }, svg("speak", 18)),
-      el("div", { class: "listen-resume-text" }, el("strong", {}, "Carry on listening"),
+      el("div", { class: "listen-resume-text" }, el("strong", {}, tr("Keep listening")),
         el("small", {}, [chapterName(c), p.quote ? `“${shortQuote(p.quote, 60)}”` : "", agoText(p.created)].filter(Boolean).join(" · "))),
       el("span", { class: "listen-resume-actions" },
-        el("button", { class: "primary pill with-icon", type: "button", onclick: () => open(c, "read") }, svg("play", 12), "Read on"),
-        el("button", { class: "pill", type: "button", onclick: () => open(c, "show") }, "Go there"),
-        el("button", { class: "icon-only", type: "button", title: "Forget where you stopped", "aria-label": "Forget where you stopped listening", onclick: () => place.forget() }, svg("close", 16))));
+        el("button", { class: "primary pill with-icon", type: "button", onclick: () => open(c, "read") }, svg("play", 12), tr("Read on")),
+        el("button", { class: "pill", type: "button", onclick: () => open(c, "show") }, tr("Go there")),
+        el("button", { class: "icon-only", type: "button", title: tr("Forget my place"), "aria-label": tr("Forget my place"), onclick: () => place.forget() }, svg("close", 16))));
   });
   return box;
 }
@@ -1647,9 +1641,9 @@ const bookSearchQuery = new Map();
 /// A search through every note in a book, under its title. While it holds words, what it finds takes the
 /// place of `list`; `onPick(hit, snippet)` opens a chapter at a place found.
 function bookSearch(bookId, list, onPick) {
-  const input = el("input", { type: "search", placeholder: "Search this book", "aria-label": "Search this book", autocomplete: "off", enterkeyhint: "search" });
+  const input = el("input", { type: "search", placeholder: tr("Search book"), "aria-label": tr("Search book"), autocomplete: "off", enterkeyhint: "search" });
   const count = el("span", { class: "hint", "aria-live": "polite" });
-  const clear = el("button", { class: "icon-only", type: "button", title: "Clear the search", "aria-label": "Clear the search", hidden: true }, svg("close", 16));
+  const clear = el("button", { class: "icon-only", type: "button", title: tr("Clear search"), "aria-label": tr("Clear search"), hidden: true }, svg("close", 16));
   const bar = el("div", { class: "note-search book-search", role: "search" }, svg("search", 16), input, count, clear);
   const results = el("div", { class: "book-results", hidden: true });
   let timer = null;
@@ -1663,20 +1657,20 @@ function bookSearch(bookId, list, onPick) {
     if (q.length < 2) {
       results.hidden = true;
       list.hidden = false;
-      count.textContent = q ? "Keep typing" : "";
+      count.textContent = q ? tr("Keep typing") : "";
       return;
     }
     const hits = await invoke("search_book", { id: bookId, query: q }).catch(() => []);
     if (mine !== asked) return;
     const total = hits.reduce((n, h) => n + h.count, 0);
-    count.textContent = total ? `${total} in ${plural(hits.length, "chapter")}` : "Not found";
+    count.textContent = total ? `${total} in ${plural(hits.length, "chapter")}` : tr("Not found");
     results.replaceChildren(...(hits.length ? hits.map((h) => el("div", { class: "group book-hit" },
       el("button", { class: "book-hit-head", type: "button", onclick: () => onPick(h, h.snippets[0]) },
         h.label ? el("span", { class: "book-num chapter" }, h.label) : null,
         el("span", { class: "label" }, h.title, el("small", {}, [h.part, `${plural(h.count, "match", "matches")}`].filter(Boolean).join(" · ")))),
       ...h.snippets.map((s) => el("button", { class: "book-snippet", type: "button", onclick: () => onPick(h, s) }, s.before, el("mark", {}, s.hit), s.after)),
       h.count > h.snippets.length ? el("div", { class: "book-hit-more hint" }, `and ${plural(h.count - h.snippets.length, "more place")}`) : null))
-      : [el("p", { class: "hint" }, `No chapter has “${q}” in it.`)]));
+      : [el("p", { class: "hint" }, tr("No chapter has “{q}” in it.", { q: q }))]));
     results.hidden = false;
     list.hidden = true;
   }
@@ -1730,29 +1724,29 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
   if (view !== mine) return;
   const reopen = (opts = {}) => openBook(id, { reading, ...opts });
 
-  const title = el("input", { class: "note-title", placeholder: "Untitled book", value: book.title, "aria-label": "Book title" });
+  const title = el("input", { class: "note-title", placeholder: tr("Untitled book"), value: book.title, "aria-label": tr("Book title") });
   let titleTimer = null;
   const saveTitle = () => { clearTimeout(titleTimer); invoke("rename_book", { id, title: title.value }).then(refreshItems).catch(() => {}); };
   title.addEventListener("input", () => { clearTimeout(titleTimer); titleTimer = setTimeout(saveTitle, 500); });
   title.addEventListener("change", saveTitle);
 
-  const remove = el("button", { class: "icon-only danger", title: "Delete book", "aria-label": "Delete book" }, svg("trash", 18));
+  const remove = el("button", { class: "icon-only danger", title: tr("Delete book"), "aria-label": tr("Delete book") }, svg("trash", 18));
   remove.addEventListener("click", async () => {
     if (!remove.dataset.armed) {
       remove.dataset.armed = "1";
       remove.classList.add("armed");
-      remove.replaceChildren(svg("trash", 16), "Click again to delete the book (its notes stay)");
+      remove.replaceChildren(svg("trash", 16), tr("Click again to delete the book (notes stay)"));
       setTimeout(() => { delete remove.dataset.armed; remove.classList.remove("armed"); remove.replaceChildren(svg("trash", 18)); }, 4000);
       return;
     }
     await invoke("delete_book", { id }).catch(() => {});
     showHome();
   });
-  const modes = el("div", { class: "book-mode", role: "group", "aria-label": "View" },
-    el("button", { class: "pill" + (reading ? "" : " on"), "aria-pressed": String(!reading), onclick: () => reopen({ reading: false }) }, "Notes"),
-    el("button", { class: "pill" + (reading ? " on" : ""), "aria-pressed": String(reading), onclick: () => reopen({ reading: true }) }, "Read"));
-  const bookNotes = commentary(book.commentary, book.title || "this book", book);
-  const about = () => title.value.trim() || "this book";
+  const modes = el("div", { class: "book-mode", role: "group", "aria-label": tr("View") },
+    el("button", { class: "pill" + (reading ? "" : " on"), "aria-pressed": String(!reading), onclick: () => reopen({ reading: false }) }, tr("Notes")),
+    el("button", { class: "pill" + (reading ? " on" : ""), "aria-pressed": String(reading), onclick: () => reopen({ reading: true }) }, tr("Read")));
+  const bookNotes = commentary(book.commentary, book.title || tr("this book"), book);
+  const about = () => title.value.trim() || tr("this book");
   const saveExtras = async (change) => {
     try {
       await invoke("set_book_extras", { id, commentary: null, pronounce: null, ...change });
@@ -1761,13 +1755,13 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
       micToast(String(e));
     }
   };
-  const editCommentary = el("button", { class: "link commentary-link", type: "button" }, svg("pen", 13), book.commentary?.trim() ? "Edit commentary" : "Add commentary");
+  const editCommentary = el("button", { class: "link commentary-link", type: "button" }, svg("pen", 13), book.commentary?.trim() ? tr("Edit commentary") : tr("Add commentary"));
   editCommentary.addEventListener("click", async () => {
     const text = await commentaryDialog(about(), book.commentary);
     if (text != null && text !== (book.commentary ?? "")) saveExtras({ commentary: text });
   });
   // Just a cog; what it is, and how many words it has, show on hover and to a screen reader.
-  const pronounceWhat = `${pronounceCount(book.pronounce)}: how the voice says words it gets wrong, in this book`;
+  const pronounceWhat = tr("{0}: how the voice says hard words in this book", { "0": pronounceCount(book.pronounce) });
   const editPronounce = el("button", { class: "link commentary-link", type: "button", title: pronounceWhat, "aria-label": pronounceWhat }, svg("cog", 14));
   // A word selected in the text starts a new row.
   editPronounce.addEventListener("mousedown", (e) => e.preventDefault());
@@ -1777,7 +1771,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
     if (words) saveExtras({ pronounce: words });
   });
   const aboutPanel = aboutBook(book);
-  const editDetails = el("button", { class: "link commentary-link", type: "button", title: "Who wrote it, what it is, where it came from and its licence" }, svg("pen", 13), "Details");
+  const editDetails = el("button", { class: "link commentary-link", type: "button", title: tr("Author, summary, source and licence") }, svg("pen", 13), tr("Details"));
   editDetails.addEventListener("click", async () => {
     const details = await bookDetailsDialog(book);
     if (!details) return;
@@ -1797,7 +1791,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
 
   if (reading) {
     // All the notes one after another, each under its title, which opens it.
-    if (!chapters.length) page.append(el("p", { class: "hint" }, "This book has no notes yet."));
+    if (!chapters.length) page.append(el("p", { class: "hint" }, tr("This book has no notes yet.")));
     // Read aloud reads the whole book; or what is selected, or from where it was last clicked to the end.
     const attached = [];
     let lastClicked = null;
@@ -1824,7 +1818,7 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
       attached[k].surface.reveal(found.from, Math.max(found.to, found.from + 1));
       if (how === "read") readOnFrom(k, found.from);
     };
-    const READ_BOOK = "Read the book aloud (from where you click, or what you select). Hold for more";
+    const READ_BOOK = tr("Read the book aloud (from a click or selection). Hold for more");
     const speak = readAloudButton(() => {
       const from = attached.find((a) => a.bodyEl.contains(getSelection()?.anchorNode)) ?? lastClicked;
       const i = from ? attached.indexOf(from) : -1;
@@ -1862,14 +1856,14 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
         return [
           listenHeading(p, p && chapters.find((c) => c.id === p.note), false),
           "-",
-          { icon: "play", text: "Read on from where you stopped", disabled: !p, run: () => toListenPlace("read") },
-          { icon: "bookmark", text: "Go to where you stopped", disabled: !p, run: () => toListenPlace("show") },
-          { icon: "speak", text: "Read the book from the start", disabled: !attached.length, run: () => readOnFrom(0, 0) },
+          { icon: "play", text: tr("Read on"), disabled: !p, run: () => toListenPlace("read") },
+          { icon: "bookmark", text: tr("Go to where you stopped"), disabled: !p, run: () => toListenPlace("show") },
+          { icon: "speak", text: tr("Read from the start"), disabled: !attached.length, run: () => readOnFrom(0, 0) },
           "-",
-          { icon: "trash", text: "Forget where you stopped", disabled: !p, run: () => { place.forget(); micToast("Forgotten. Read aloud starts at the top of the book again."); } },
+          { icon: "trash", text: tr("Forget my place"), disabled: !p, run: () => { place.forget(); micToast(tr("Forgotten. Reading starts at the top of the book.")); } },
           "-",
           followItem(),
-          { icon: "cog", text: "Settings…", run: () => bookReadingDialog(book, { button: speak }) },
+          { icon: "cog", text: tr("Settings…"), run: () => bookReadingDialog(book, { button: speak }) },
         ];
       },
     });
@@ -1930,12 +1924,12 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
     rows.push(el("div", { class: "row" },
       el("span", { class: "book-num" + (c.label ? " chapter" : "") }, c.label || String(i + 1)),
       el("button", { class: "label link-label", onclick: () => openNote(c.id) }, c.title,
-        el("small", {}, `${timeText(c.updated)} · ${c.words} word${c.words === 1 ? "" : "s"}`)),
-      el("button", { class: "icon-only", title: "Move up", "aria-label": `Move ${c.title} up`, disabled: i === 0 || otherPart(i - 1), onclick: () => move(i, -1) }, svg("up", 16)),
-      el("button", { class: "icon-only", title: "Move down", "aria-label": `Move ${c.title} down`, disabled: i === chapters.length - 1 || otherPart(i + 1), onclick: () => move(i, 1) }, svg("down", 16)),
-      el("button", { class: "pill", onclick: async () => { await invoke("remove_note_from_book", { id, note: c.id }).catch(() => {}); reopen(); } }, "Take out")));
+        el("small", {}, `${timeText(c.updated)} · ${trn(c.words, "{n} word", "{n} words")}`)),
+      el("button", { class: "icon-only", title: tr("Move up"), "aria-label": tr("Move {title} up", { title: c.title }), disabled: i === 0 || otherPart(i - 1), onclick: () => move(i, -1) }, svg("up", 16)),
+      el("button", { class: "icon-only", title: tr("Move down"), "aria-label": tr("Move {title} down", { title: c.title }), disabled: i === chapters.length - 1 || otherPart(i + 1), onclick: () => move(i, 1) }, svg("down", 16)),
+      el("button", { class: "pill", onclick: async () => { await invoke("remove_note_from_book", { id, note: c.id }).catch(() => {}); reopen(); } }, tr("Take out"))));
   });
-  const list = el("div", { class: "group book-notes" + (chapters.some((c) => c.label) ? " labelled" : "") }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, "No notes yet. Write a new one, or add notes you have.")));
+  const list = el("div", { class: "group book-notes" + (chapters.some((c) => c.label) ? " labelled" : "") }, rows.length ? rows : el("div", { class: "row" }, el("span", { class: "label" }, tr("No notes yet. Write one, or add notes you have."))));
 
   const newNote = el("button", { class: "pill", onclick: async () => {
     try {
@@ -1943,10 +1937,10 @@ async function openBook(id, { naming = false, reading = false, chapter = null, f
       await invoke("add_note_to_book", { id, note: n });
       openNote(n);
     } catch (e) { micToast(String(e)); }
-  } }, svg("pen", 14), "New note in this book");
+  } }, svg("pen", 14), tr("New note here"));
   const others = allNotes.filter((n) => !order.includes(n.id));
-  const picker = el("select", { "aria-label": "Add a note you have", disabled: !others.length },
-    el("option", { value: "" }, others.length ? "Add a note you have…" : "No other notes to add"),
+  const picker = el("select", { "aria-label": tr("Add a note"), disabled: !others.length },
+    el("option", { value: "" }, others.length ? tr("Add a note…") : tr("No other notes")),
     ...others.map((n) => el("option", { value: n.id }, n.title)));
   picker.addEventListener("change", async () => {
     if (!picker.value) return;
@@ -1984,7 +1978,7 @@ async function openNote(id, { dictate } = {}) {
     // meanwhile is saved over them.
     await dictationHandoff;
     if (await invoke("dictation_writing", { id }).catch(() => false)) {
-      main.replaceChildren(el("div", { class: "page" }, el("p", { class: "hint" }, "Writing in your dictation…")));
+      main.replaceChildren(el("div", { class: "page" }, el("p", { class: "hint" }, tr("Writing dictation…"))));
       const mine = view = { kind: "note", id };
       await new Promise((resolve) => {
         const check = async () => ((await invoke("dictation_writing", { id }).catch(() => false)) ? setTimeout(check, 400) : resolve());
@@ -2013,13 +2007,13 @@ function renderNote(data, dictate) {
   showSaved(status);
   // The words show only in the phone's "more" menu, where the buttons are rows.
   const menuText = (text) => el("span", { class: "menu-text" }, text);
-  const remove = el("button", { class: "icon-only danger", title: "Delete", "aria-label": "Delete note" }, svg("trash", 18), menuText("Delete"));
+  const remove = el("button", { class: "icon-only danger", title: "Delete", "aria-label": tr("Delete note") }, svg("trash", 18), menuText("Delete"));
   remove.addEventListener("click", async () => {
     if (!note.id) return showHome();
     if (!remove.dataset.armed) {
       remove.dataset.armed = "1";
       remove.classList.add("armed");
-      remove.replaceChildren(svg("trash", 16), "Click again to delete");
+      remove.replaceChildren(svg("trash", 16), tr("Click again to delete"));
       setTimeout(() => {
         delete remove.dataset.armed;
         remove.classList.remove("armed");
@@ -2033,7 +2027,7 @@ function renderNote(data, dictate) {
   });
   const archive = el("button", { class: "icon-only" });
   const showArchived = () => {
-    const label = note.archived ? "Unarchive" : "Archive";
+    const label = note.archived ? tr("Unarchive") : tr("Archive");
     archive.title = label;
     archive.setAttribute("aria-label", label);
     archive.replaceChildren(svg(note.archived ? "unarchive" : "archive", 18), menuText(label));
@@ -2062,11 +2056,11 @@ function renderNote(data, dictate) {
       refreshItems();
       return true;
     } catch (e) {
-      status.textContent = `Not saved: ${e}`;
+      status.textContent = tr("Not saved: {e}", { e: e });
       return false;
     }
   });
-  const title = el("input", { class: "note-title", placeholder: "Title", value: data.title, "aria-label": "Title" });
+  const title = el("input", { class: "note-title", placeholder: tr("Title"), value: data.title, "aria-label": tr("Title") });
   note.languages = itemLanguages(data);
   const noteLanguage = () => note.languages[0];
   const langNotice = el("div", { class: "notice language-notice", hidden: true, "aria-live": "polite" });
@@ -2080,8 +2074,8 @@ function renderNote(data, dictate) {
   const ed = NoteEditor.create({
     element: editorHolder,
     placeholder: isPhone()
-      ? "Start typing, or press Dictate and talk."
-      : "Start typing, or press Dictate (Ctrl + Space) and talk.",
+      ? tr("Type, or press Dictate and talk.")
+      : tr("Type, or press Dictate (Ctrl + Space) and talk."),
     host: {
       onChange: () => changed(),
       onSearchJump: () => closeSearch(),
@@ -2109,7 +2103,7 @@ function renderNote(data, dictate) {
       html = `${heading ? `<h1>${safe}</h1>` : ""}${NoteEditor.toHTML(ed.markdown(), () => "")}`;
     } catch { /* The plain text still copies. */ }
     return { text: plain, html };
-  }, "Copy note");
+  }, tr("Copy note"));
   const copyCount = el("span", { class: "hint" });
   const noteEnd = el("div", { class: "note-end", hidden: true }, copyNote, copyCount);
   let countTimer = null;
@@ -2127,7 +2121,7 @@ function renderNote(data, dictate) {
     note.doc = ed.json();
     note.rich = true;
     note.dirty = true;
-    status.textContent = "Editing…";
+    status.textContent = tr("Editing…");
     countSoon();
     clearTimeout(noteTimer);
     noteTimer = setTimeout(() => saveNote(status), 600);
@@ -2136,16 +2130,16 @@ function renderNote(data, dictate) {
 
   // Search: the note folds to its chapters (Heading 1) and sections (Heading 2), and shows only what holds
   // the word typed, under its headings. A click on a heading opens it; a click on text unfolds the note there.
-  const searchInput = el("input", { type: "search", placeholder: "Search this note", "aria-label": "Search this note", autocomplete: "off", enterkeyhint: "search" });
+  const searchInput = el("input", { type: "search", placeholder: tr("Search note"), "aria-label": tr("Search note"), autocomplete: "off", enterkeyhint: "search" });
   const searchCount = el("span", { class: "hint", "aria-live": "polite" });
   const searchBar = el("div", { class: "note-search", role: "search", hidden: true }, svg("search", 16), searchInput, searchCount,
-    el("button", { class: "icon-only", type: "button", title: "Close search", "aria-label": "Close search", onclick: () => closeSearch() }, svg("close", 16)));
-  const searchLink = el("button", { class: "link add-analysis", type: "button", title: "Search this note", "aria-label": "Search this note", "aria-expanded": "false",
+    el("button", { class: "icon-only", type: "button", title: tr("Close search"), "aria-label": tr("Close search"), onclick: () => closeSearch() }, svg("close", 16)));
+  const searchLink = el("button", { class: "link add-analysis", type: "button", title: tr("Search note"), "aria-label": tr("Search note"), "aria-expanded": "false",
     onclick: () => (ed.search.active() ? closeSearch() : openSearch()) },
-    el("span", { class: "with-icon" }, svg("search", 16), el("span", { class: "wide-only" }, "Search")));
+    el("span", { class: "with-icon" }, svg("search", 16), el("span", { class: "wide-only" }, tr("Search"))));
   const showFound = (found, at) => {
-    searchCount.textContent = !searchInput.value.trim() ? (ed.search.structured() ? "Tap a chapter, or type" : "")
-      : !found ? "Not found" : at ? `${at} of ${found}` : `${found} found`;
+    searchCount.textContent = !searchInput.value.trim() ? (ed.search.structured() ? tr("Tap a chapter, or type") : "")
+      : !found ? tr("Not found") : at ? `${at} of ${found}` : `${found} found`;
   };
   // Anything pressed outside the note and the search closes it.
   const outsideSearch = (e) => {
@@ -2193,10 +2187,10 @@ function renderNote(data, dictate) {
   note.showVersion = async () => {
     const n = note.id ? await invoke("note_version_number", { id: note.id }).catch(() => 0) : 0;
     versionNumber.textContent = n ? `V${n}` : "";
-    versionNumber.parentElement?.closest("button")?.setAttribute("aria-label", n ? `Versions: this is version ${n}` : "Versions");
+    versionNumber.parentElement?.closest("button")?.setAttribute("aria-label", n ? tr("Versions: this is {n}", { n: n }) : tr("Versions"));
   };
-  const versionsLink = () => el("button", { class: "link add-analysis", type: "button", title: "Earlier versions of this note", onclick: () => showNoteVersions(status) },
-    el("span", { class: "with-icon" }, svg("history", 16), el("span", { class: "wide-only" }, "Versions"), versionNumber));
+  const versionsLink = () => el("button", { class: "link add-analysis", type: "button", title: tr("Earlier versions"), onclick: () => showNoteVersions(status) },
+    el("span", { class: "with-icon" }, svg("history", 16), el("span", { class: "wide-only" }, tr("Versions")), versionNumber));
   const stackSlot = el("div", { class: "analyses-slot" });
   let stackFor = null;
   note.syncStack = () => {
@@ -2207,11 +2201,11 @@ function renderNote(data, dictate) {
         lead: [searchLink], links: [versionsLink()], translations: translationStack("note", note.id, note.languages) }));
       note.showVersion();
     } else if (!stackSlot.firstChild) {
-      const off = (name, text) => el("button", { class: "link add-analysis", type: "button", disabled: true, title: "Write something in the note first" },
+      const off = (name, text) => el("button", { class: "link add-analysis", type: "button", disabled: true, title: tr("Write something first") },
         el("span", { class: "with-icon" }, svg(name, 16), text));
-      stackSlot.replaceChildren(el("section", { class: "analyses", "aria-label": "Analyses and translations" },
-        el("div", { class: "analysis-add" }, searchLink, off("sparkle", el("span", {}, "Analysis", el("span", { class: "wide-only" }, " templates"))), el("span", { class: "grow" }),
-          off("history", el("span", { class: "wide-only" }, "Versions")), off("globe", "Translate"))));
+      stackSlot.replaceChildren(el("section", { class: "analyses", "aria-label": tr("Analyses & translations") },
+        el("div", { class: "analysis-add" }, searchLink, off("sparkle", el("span", {}, tr("Analysis"), el("span", { class: "wide-only" }, " templates"))), el("span", { class: "grow" }),
+          off("history", el("span", { class: "wide-only" }, tr("Versions"))), off("globe", tr("Translate")))));
     }
   };
   // Puts a text the app made in the editor: an assistant's rewrite, or an earlier version brought back.
@@ -2246,20 +2240,20 @@ function renderNote(data, dictate) {
   const chat = noteChat(status);
   title.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); body.focus(); } });
 
-  const talk = el("button", { class: "talk", id: "talk", onclick: () => { closeSearch(); startDictation(); } }, svg("mic", 18), "Dictate");
+  const talk = el("button", { class: "talk", id: "talk", onclick: () => { closeSearch(); startDictation(); } }, svg("mic", 18), tr("Dictate"));
   // Pressing Dictate leaves the cursor where it was, so the words can go there.
   talk.addEventListener("mousedown", (e) => e.preventDefault());
   const live = el("div", { class: "dictating", id: "dictating", hidden: true, "aria-live": "polite" });
 
   const exporter = exportMenu([
-    ["txt", "Text", ".txt"],
-    ["md", "Markdown", ".md"],
-    ["package", "With dictation audio", "The note and the audio of its dictations, while they are kept"],
+    ["txt", tr("Text"), ".txt"],
+    ["md", tr("Markdown"), ".md"],
+    ["package", tr("With dictation audio"), tr("The note and its dictation audio, while kept")],
   ], async (format) => {
     // What's on screen is saved first, so the export has it.
     clearTimeout(noteTimer);
     await saveNote(status);
-    if (!note.id) throw new Error("Write something in the note first.");
+    if (!note.id) throw new Error(tr("Write something first."));
     return invoke("export_note", { id: note.id, format });
   });
   // Reads what is selected, or from where the note was last clicked; otherwise the whole note, title first.
@@ -2269,8 +2263,8 @@ function renderNote(data, dictate) {
   let noteCommentary = data?.commentary ?? "";
   let noteAuthor = data?.author ?? "";
   const speakNote = readAloudButton(() => marks?.readingText() ?? `${HEADING}${title.value}\n${ed.text()}`,
-    "Read the note aloud (from where you click, or what you select)", { lang: noteLanguage, pronounce: notePronounce });
-  const noteAbout = () => title.value.trim() || "this note";
+    tr("Read the note aloud (from a click or selection)"), { lang: noteLanguage, pronounce: notePronounce });
+  const noteAbout = () => title.value.trim() || tr("this note");
   const saveNoteExtras = async (change) => {
     const id = await note.save();
     await invoke("set_note_extras", { id, commentary: null, pronounce: null, author: null, ...change });
@@ -2281,7 +2275,7 @@ function renderNote(data, dictate) {
     try {
       await saveNoteExtras({ commentary: text });
       noteCommentary = text;
-      micToast(text ? "Commentary saved. In a book, readers open it from the Commentary link." : "Commentary removed.");
+      micToast(text ? tr("Commentary saved. In a book, readers open it with Commentary.") : tr("Commentary removed."));
     } catch (e) {
       micToast(String(e));
     }
@@ -2301,17 +2295,17 @@ function renderNote(data, dictate) {
       micToast(String(e));
     }
   };
-  const extras = el("button", { class: "icon-only more-action", type: "button", title: "Commentary and pronunciation", "aria-label": "Commentary and pronunciation" }, svg("commentary", 18), menuText("Commentary"));
+  const extras = el("button", { class: "icon-only more-action", type: "button", title: tr("Commentary and pronunciation"), "aria-label": tr("Commentary and pronunciation") }, svg("commentary", 18), menuText(tr("Commentary")));
   extras.addEventListener("mousedown", (e) => e.preventDefault());
   extras.addEventListener("click", () => {
     const word = selectedWord();
     const r = extras.getBoundingClientRect();
     showContextMenu(Math.max(8, r.right - 240), r.bottom + 6, [
-      { icon: "commentary", text: noteCommentary ? "Edit commentary…" : "Add commentary…", run: editNoteCommentary },
+      { icon: "commentary", text: noteCommentary ? tr("Edit commentary…") : tr("Add commentary…"), run: editNoteCommentary },
       { icon: "speak", text: `${pronounceCount(notePronounce)}…`, run: () => editNotePronounce(word) },
-      { icon: "pen", text: noteAuthor ? `Author: ${noteAuthor}…` : "Author…", run: async () => {
-        const name = await lineDialog("Who wrote this note", "Author", noteAuthor,
-          "In a book, leave it empty when it's the book's own author; fill it in for a preface by the translator or a guest chapter.");
+      { icon: "pen", text: noteAuthor ? tr("Author: {noteAuthor}…", { noteAuthor: noteAuthor }) : tr("Author…"), run: async () => {
+        const name = await lineDialog(tr("Who wrote this"), tr("Author"), noteAuthor,
+          tr("In a book, leave empty for the book's author; fill in for a translator's preface or guest chapter."));
         if (name == null || name === noteAuthor) return;
         try {
           await saveNoteExtras({ author: name });
@@ -2322,7 +2316,7 @@ function renderNote(data, dictate) {
       } },
     ]);
   });
-  const markButton = el("button", { class: "icon-only", type: "button", title: "Bookmark what's selected, or the cursor's place. In a book, hold for all its bookmarks", "aria-label": "Bookmark" }, svg("bookmark", 16), menuText("Bookmark"));
+  const markButton = el("button", { class: "icon-only", type: "button", title: tr("Bookmark the selection or cursor. In a book, hold for all bookmarks"), "aria-label": tr("Bookmark") }, svg("bookmark", 16), menuText(tr("Bookmark")));
   markButton.addEventListener("mousedown", (e) => e.preventDefault());
   markButton.addEventListener("click", () => marks?.create());
   // A note in a book shows the book's choice of bookmarks, and holding Bookmark opens all of them.
@@ -2339,7 +2333,7 @@ function renderNote(data, dictate) {
   });
   onHold(markButton, async () => {
     const book = await noteBook();
-    if (!book) return micToast("Holding Bookmark opens all of a book's bookmarks, for a note that's in a book.");
+    if (!book) return micToast(tr("In a book, holding Bookmark opens all its bookmarks."));
     noteFilter ??= bookmarkFilter(book.id);
     bookBookmarksDialog(book, noteFilter, (what) => (what === "marks" ? marks?.reload() : marks?.redraw()), { chapter: note.id });
   });
@@ -2356,7 +2350,7 @@ function renderNote(data, dictate) {
           note.syncStack?.();
         }
       } catch (e) {
-        status.textContent = `Not saved: ${e}`;
+        status.textContent = tr("Not saved: {e}", { e: e });
         return false;
       }
       const result = await changeItemLanguages("note", note.id, list, langNotice);
@@ -2412,7 +2406,7 @@ async function saveNote(status) {
     refreshItems();
   } catch (e) {
     note.dirty = true;
-    if (status?.isConnected) status.textContent = `Not saved: ${e}`;
+    if (status?.isConnected) status.textContent = tr("Not saved: {e}", { e: e });
   }
 }
 
@@ -2500,7 +2494,7 @@ let voiceRecording = null; // The voice button now recording, so only one record
 /// down, they go to `keep` instead (if given), so they're there on return rather than lost.
 function voiceButton(field, { onWords, keep } = {}) {
   const label = el("span", { class: "rec-time" });
-  const b = el("button", { class: "icon-only voice-btn", type: "button", title: "Speak instead of typing (up to two minutes)", "aria-label": "Speak instead of typing" }, svg("mic", 18));
+  const b = el("button", { class: "icon-only voice-btn", type: "button", title: tr("Speak instead of typing (up to 2 min)"), "aria-label": tr("Speak instead of typing") }, svg("mic", 18));
   b.addEventListener("mousedown", (e) => e.preventDefault());
   let timer = null, started = 0;
   const idle = () => {
@@ -2508,7 +2502,7 @@ function voiceButton(field, { onWords, keep } = {}) {
     b.classList.remove("recording", "busy");
     b.disabled = false;
     b.replaceChildren(svg("mic", 18));
-    b.setAttribute("aria-label", "Speak instead of typing");
+    b.setAttribute("aria-label", tr("Speak instead of typing"));
     if (voiceRecording === b) voiceRecording = null;
   };
   const stop = async (auto) => {
@@ -2517,7 +2511,7 @@ function voiceButton(field, { onWords, keep } = {}) {
     b.classList.replace("recording", "busy");
     b.disabled = true;
     b.replaceChildren(el("span", { class: "spinner" }));
-    b.setAttribute("aria-label", "Writing it down");
+    b.setAttribute("aria-label", tr("Writing…"));
     if (auto) stoppedSignal();
     let words = "";
     try {
@@ -2551,7 +2545,7 @@ function voiceButton(field, { onWords, keep } = {}) {
     b.disabled = false;
     started = Date.now();
     b.classList.add("recording");
-    b.setAttribute("aria-label", "Stop and write it down");
+    b.setAttribute("aria-label", tr("Stop and write"));
     label.textContent = "0:00";
     b.replaceChildren(el("span", { class: "rec-dot" }), label);
     timer = setInterval(() => {
@@ -2582,10 +2576,10 @@ async function startDictation() {
   const live = document.getElementById("dictating");
   const elapsed = el("span", { class: "left" }, "0:00");
   const wave = el("span", { class: "wave" }, Array.from({ length: 5 }, () => el("span")));
-  const cancel = el("button", { class: "icon-btn cancel", title: "Stop (Esc). What isn't written yet is dropped, and the audio isn't kept.", "aria-label": "Cancel dictation", onclick: () => cancelDictation() }, svg("close", 18));
-  const done = el("button", { class: "icon-btn keep", title: "Done (Ctrl + Space). It also stops by itself when you stop talking.", "aria-label": "Finish dictation", onclick: () => stopDictation() }, svg("check", 18));
+  const cancel = el("button", { class: "icon-btn cancel", title: tr("Stop (Esc). Unwritten words are dropped and audio isn't kept."), "aria-label": tr("Cancel dictation"), onclick: () => cancelDictation() }, svg("close", 18));
+  const done = el("button", { class: "icon-btn keep", title: tr("Done (Ctrl + Space). Also stops when you stop talking."), "aria-label": tr("Finish dictation"), onclick: () => stopDictation() }, svg("check", 18));
   for (const b of [cancel, done]) b.addEventListener("mousedown", (e) => e.preventDefault());
-  live.replaceChildren(el("span", { class: "rec" }, el("span", { class: "dot" })), el("span", {}, "Dictating"), wave, elapsed, cancel, done);
+  live.replaceChildren(el("span", { class: "rec" }, el("span", { class: "dot" })), el("span", {}, tr("Dictating")), wave, elapsed, cancel, done);
   live.hidden = false;
   document.getElementById("talk").hidden = true;
   // An invisible marker keeps the cursor's place: each clip is written in just before it, in order.
@@ -2654,7 +2648,7 @@ function tidyDictation() {
   const chip = document.getElementById("dictation-chip");
   if (dictation.wrote) dictation.anchor?.remove();
   else removeDictationSlot(dictation.anchor);
-  if (!dictation.wrote && chip) { chip.hidden = false; chip.textContent = "No speech heard."; setTimeout(() => (chip.hidden = true), 2500); }
+  if (!dictation.wrote && chip) { chip.hidden = false; chip.textContent = tr("No speech heard."); setTimeout(() => (chip.hidden = true), 2500); }
   dictation = null;
 }
 
@@ -2735,7 +2729,7 @@ function showDictationError(e) {
   if (!chip) return;
   chip.hidden = false;
   chip.replaceChildren(el("span", { class: "danger" }, String(e)), " ",
-    String(e).includes("model") ? el("button", { class: "pill", onclick: () => showTranscription() }, "Open Transcription settings") : micHelp(e));
+    String(e).includes("model") ? el("button", { class: "pill", onclick: () => showTranscription() }, tr("Transcription settings")) : micHelp(e));
 }
 
 // Ctrl + Space starts dictation in a note, and finishes it; Esc cancels it.
@@ -2784,12 +2778,12 @@ function showProcessing(id) {
   const ahead = queue.waiting.indexOf(id) + (queue.current ? 1 : 0);
   const now = queue.current === id;
   const fraction = now && progress?.id === id ? Math.round(progress.fraction * 100) : 0;
-  main.replaceChildren(el("div", { class: "page" }, el("h1", {}, now ? "Processing" : "Waiting to process"),
+  main.replaceChildren(el("div", { class: "page" }, el("h1", {}, now ? tr("Processing") : tr("Queued")),
     el("p", {}, el("span", { class: "spinner" }), el("span", { id: "process-stage" },
-      now ? (progress?.id === id ? progress.stage : "Starting") : `${ahead} meeting${ahead === 1 ? "" : "s"} ahead`)),
+      now ? (progress?.id === id ? progress.stage : tr("Starting")) : trn(ahead, "{n} meeting ahead", "{n} meetings ahead"))),
     el("div", { class: "meter wide-meter" }, el("div", { id: "process-bar", style: `width:${fraction}%` })),
-    el("p", { class: "legend" }, "Finding who spoke and writing the transcript. The audio is already saved, and you can record another meeting meanwhile."),
-    recording ? null : el("div", { class: "actions" }, el("button", { class: "pill", onclick: () => showMeeting() }, "Start another meeting"))));
+    el("p", { class: "legend" }, tr("Finding speakers and writing the transcript. The audio is saved; you can record another meeting meanwhile.")),
+    recording ? null : el("div", { class: "actions" }, el("button", { class: "pill", onclick: () => showMeeting() }, tr("New meeting")))));
   refreshItems();
 }
 
@@ -2805,7 +2799,7 @@ async function processAgain(id) {
     else refreshItems();
   } catch (e) {
     if (here()) await openSession(id, String(e));
-    else micToast(`Couldn't transcribe the meeting: ${e}`);
+    else micToast(tr("Couldn't transcribe: {e}", { e: e }));
   }
 }
 
@@ -2827,8 +2821,8 @@ async function showMeeting() {
   if (status.recording || stopping) return renderRecording(status);
   const [{ devices, ticked }, ready] = await Promise.all([rememberedInputs(), invoke("model_ready")]);
 
-  const page = el("div", { class: "page" }, el("h1", {}, "New meeting"),
-    el("p", { class: "legend" }, "A timecoded recording with a lane for each microphone and each voice. Transcribed on this device when you stop."));
+  const page = el("div", { class: "page" }, el("h1", {}, tr("New meeting")),
+    el("p", { class: "legend" }, tr("A timecoded recording with a lane per microphone and voice. Transcribed on this device when you stop.")));
 
   // Tracks are only microphones known to work; finding, testing and hiding devices happens in Devices.
   // Android records through its own service, so there every microphone is offered as it is.
@@ -2839,32 +2833,32 @@ async function showMeeting() {
     const box = el("input", { type: "checkbox", disabled: !connected, "aria-label": name });
     box.checked = connected && ticked.includes(name);
     const meter = el("div", { style: "width:0%" });
-    const state = el("span", { class: "mic-state" }, connected ? (testing ? "Connecting…" : "") : "Not connected");
+    const state = el("span", { class: "mic-state" }, connected ? (testing ? tr("Connecting…") : "") : tr("Not connected"));
     const row = el("label", { class: "mic-row" + (connected ? "" : " absent") }, box,
       el("span", { class: "mic-name" }, name, el("span", { class: "meter" }, meter)), state);
     return { name, box, meter, state, row, connected };
   });
   const pins = el("input", { type: "checkbox", checked: prefs.pins });
-  const pinsRow = el("label", { class: "mic-row" }, pins, el("span", { class: "mic-name" }, "Voice Pins (up to 3)"),
-    el("span", { class: "mic-state" }, "Connect when recording starts"));
+  const pinsRow = el("label", { class: "mic-row" }, pins, el("span", { class: "mic-name" }, tr("Voice Pins (up to 3)")),
+    el("span", { class: "mic-state" }, tr("Connect on record")));
   if (!prefs.pins_added) pins.checked = false;
-  page.append(el("div", { class: "section-head" }, el("h2", {}, "Tracks"),
-      testing ? el("button", { class: "pill", onclick: () => showDevices(true) }, "Add or test devices") : null),
+  page.append(el("div", { class: "section-head" }, el("h2", {}, tr("Tracks")),
+      testing ? el("button", { class: "pill", onclick: () => showDevices(true) }, tr("Add or test devices")) : null),
     el("div", { class: "legend" }, testing
-      ? "Each microphone is recorded as its own track. Only microphones that have been heard working are listed."
-      : "A Bluetooth headset can be used once it's connected, even while this page is open. The phone may not record its own mic and a headset at the same time."),
+      ? tr("Each microphone is its own track. Only mics heard working are listed.")
+      : tr("A connected Bluetooth headset can be used, even with this page open. The phone may not record its mic and a headset together.")),
     el("div", { class: "mic-list" },
       boxes.map((b) => b.row),
-      known.length || !testing ? null : el("div", { class: "empty" }, "No tested microphones yet. ",
-        el("button", { class: "link", onclick: () => showDevices(true) }, "Add one in Devices"), "."),
+      known.length || !testing ? null : el("div", { class: "empty" }, tr("No tested microphones. "),
+        el("button", { class: "link", onclick: () => showDevices(true) }, tr("Add one in Devices")), "."),
       prefs.pins_added ? pinsRow : null));
 
   if (!ready) {
-    page.append(el("div", { class: "notice" }, "The transcript needs the speech model. You can record now and transcribe later. ",
-      el("button", { class: "link", onclick: () => showSettings() }, "Get it in Settings")));
+    page.append(el("div", { class: "notice" }, tr("Transcripts need the speech model. Record now and transcribe later. "),
+      el("button", { class: "link", onclick: () => showSettings() }, tr("Get it in Settings"))));
   }
 
-  const start = el("button", { class: "primary pill", disabled: true }, "Start recording");
+  const start = el("button", { class: "primary pill", disabled: true }, tr("Start recording"));
   let sources = null;
   const update = () => {
     start.disabled = !(pins.checked || boxes.some((b) => b.box.checked) || sources?.chosen().length);
@@ -2905,7 +2899,7 @@ async function showMeeting() {
         if (b.box.checked) { b.box.checked = false; b.untickedAway = true; update(); }
         // A headset that isn't connected is shown as any missing microphone is, not as a fault.
         b.row.className = p.state === "absent" ? "mic-row absent" : "mic-row failed";
-        b.state.textContent = p.state === "absent" ? "Not connected" : `Not working: ${p.detail}`;
+        b.state.textContent = p.state === "absent" ? tr("Not connected") : tr("Not working: {detail}", { detail: p.detail });
       } else if (p.state === "listening") {
         // Connected again (or for the first time) while the page is open: usable as a track.
         if (b.box.disabled) {
@@ -2913,7 +2907,7 @@ async function showMeeting() {
           if (b.untickedAway) { b.box.checked = true; b.untickedAway = false; update(); }
         }
         b.row.className = "mic-row working";
-        b.state.replaceChildren(svg("check", 14), p.level > 0.3 ? " Hearing you" : " Connected");
+        b.state.replaceChildren(svg("check", 14), p.level > 0.3 ? tr(" Hearing you") : tr(" Connected"));
       }
     }
   }, 150);
@@ -2928,20 +2922,20 @@ function soundSources(update) {
   const ticked = new Set((prefs.inputs ?? []).filter(isSoundSource));
   const rows = new Map();
   const list = el("div", { class: "mic-list" });
-  const empty = el("div", { class: "empty" }, "Looking for apps playing sound…");
-  const summary = el("summary", {}, "Everything on an output device");
+  const empty = el("div", { class: "empty", "data-looking": "" }, tr("Looking for apps playing sound…"));
+  const summary = el("summary", {}, tr("All output sound"));
   const others = el("details", { class: "hidden-mics" }, summary);
   // Outputs ticked are always in sight, so nothing is recorded that the page doesn't show.
   const showTicked = () => {
     const n = [...ticked].filter((t) => t.startsWith("Everything playing on ")).length;
-    summary.textContent = n ? `Everything on an output device (${n} ticked)` : "Everything on an output device";
+    summary.textContent = n ? tr("All output sound ({n} ticked)", { n: n }) : tr("All output sound");
     if (n) others.open = true;
   };
   const othersList = el("div", { class: "mic-list" });
   others.append(othersList);
   const section = el("div", {},
-    el("div", { class: "section-head" }, el("h2", {}, "Sound from other apps")),
-    el("div", { class: "legend" }, "Record what other people say in a call: tick Teams, Zoom or your browser and their sound is recorded as its own track, beside your microphone. Apps appear here as soon as they play sound. Tick the app rather than your headset as well, or the call is recorded twice. Use a headset, or the call is also picked up by your microphone. Let people know they're being recorded."),
+    el("div", { class: "section-head" }, el("h2", {}, tr("Sound from other apps"))),
+    el("div", { class: "legend" }, tr("Record the other side of a call: tick Teams, Zoom or your browser to record its sound as its own track. Apps appear when they play sound. Don't also tick your headset, or the call is recorded twice. Use a headset so your mic doesn't pick up the call. Tell people they're being recorded.")),
     list, empty, others);
   const row = (s) => {
     const box = el("input", { type: "checkbox", "aria-label": s.label });
@@ -2966,15 +2960,18 @@ function soundSources(update) {
       const r = rows.get(s.name) ?? row(s);
       r.meter.style.width = `${Math.round(Math.min(1, s.level * 1.5) * 100)}%`;
       r.el.className = "mic-row" + (s.active ? " working" : "");
-      if (s.active) r.state.replaceChildren(svg("check", 14), " Playing");
-      else r.state.textContent = s.kind === "app" ? "Quiet" : "";
+      if (s.active) r.state.replaceChildren(svg("check", 14), tr(" Playing"));
+      else r.state.textContent = s.kind === "app" ? tr("Quiet") : "";
     }
     for (const [name, r] of rows) {
-      if (!seen.has(name)) { r.el.className = "mic-row absent"; r.state.textContent = r.box.checked ? "Recorded once it plays" : "Not playing"; }
+      if (!seen.has(name)) { r.el.className = "mic-row absent"; r.state.textContent = r.box.checked ? tr("Recorded when it plays") : tr("Not playing"); }
     }
     showTicked();
     empty.hidden = list.children.length > 0;
-    if (empty.textContent.startsWith("Looking")) empty.textContent = "No apps are playing sound. Start the call and it appears here.";
+    if (empty.hasAttribute("data-looking")) {
+      empty.removeAttribute("data-looking");
+      empty.textContent = tr("No apps are playing sound. Start the call and it appears.");
+    }
   };
   refresh();
   clearInterval(sourceTimer);
@@ -3009,8 +3006,8 @@ async function showDevices(fromTracks = false) {
   const rows = shown.map((name) => {
     const meter = el("div", { style: "width:0%" });
     const worked = knownMics(devices).includes(name);
-    const state = el("span", { class: "mic-state" }, worked ? "Worked before" : "Opening…");
-    const hide = el("button", { class: "link", onclick: () => { hidden.add(name); saveHidden(); } }, "Hide");
+    const state = el("span", { class: "mic-state" }, worked ? tr("Worked before") : tr("Opening…"));
+    const hide = el("button", { class: "link", onclick: () => { hidden.add(name); saveHidden(); } }, tr("Hide"));
     const row = el("div", { class: "mic-row device" + (worked ? " working" : " untested") },
       el("span", { class: "mic-name" }, name, el("span", { class: "meter" }, meter)), state, hide);
     if (worked) state.prepend(svg("check", 14), " ");
@@ -3024,24 +3021,24 @@ async function showDevices(fromTracks = false) {
   });
 
   const page = el("div", { class: "page" },
-    fromTracks ? el("button", { class: "link back-link", onclick: () => showMeeting() }, "‹ Back to the meeting")
-      : el("button", { class: "link back-link", onclick: () => showVoices() }, "‹ Voices"),
-    el("div", { class: "section-head" }, el("h1", {}, "Devices"),
-      el("button", { class: "pill", onclick: () => showDevices(fromTracks) }, "Refresh devices")),
-    el("p", { class: "legend" }, "Say something to test each microphone. Once it hears you it shows ✓ and can be used as a meeting track. Hide any you never use or that don't work."),
-    el("h2", {}, "Microphones"),
+    fromTracks ? el("button", { class: "link back-link", onclick: () => showMeeting() }, tr("‹ Back to meeting"))
+      : el("button", { class: "link back-link", onclick: () => showVoices() }, tr("‹ Voices")),
+    el("div", { class: "section-head" }, el("h1", {}, tr("Devices")),
+      el("button", { class: "pill", onclick: () => showDevices(fromTracks) }, tr("Refresh"))),
+    el("p", { class: "legend" }, tr("Say something to test each mic. Once it hears you it shows ✓ and can be a meeting track. Hide any you don't use.")),
+    el("h2", {}, tr("Microphones")),
     el("div", { class: "mic-list" }, rows.map((r) => r.row),
-      shown.length ? null : el("div", { class: "empty" }, "No microphones to show.")),
-    el("div", { class: "legend" }, `To add a microphone, plug it in or pair it in ${platform === "macos" ? "the Mac's" : "Windows"} Bluetooth settings, then press Refresh devices.`),
-    hiddenList.length ? el("details", { class: "hidden-mics" }, el("summary", {}, `Hidden (${hiddenList.length})`),
+      shown.length ? null : el("div", { class: "empty" }, tr("No microphones."))),
+    el("div", { class: "legend" }, tr("To add a mic, plug it in or pair it in {0} Bluetooth settings, then press Refresh.", { "0": platform === "macos" ? tr("the Mac's") : tr("Windows") })),
+    hiddenList.length ? el("details", { class: "hidden-mics" }, el("summary", {}, tr("Hidden ({n})", { n: hiddenList.length })),
       el("div", { class: "mic-list" }, hiddenList.map((name) => el("div", { class: "mic-row device untested" },
-        el("span", { class: "mic-name" }, name), el("span", { class: "mic-state" }, devices.includes(name) ? "" : "Not connected"),
-        el("button", { class: "link", onclick: () => { hidden.delete(name); saveHidden(); } }, "Show"))))) : null,
-    el("h2", {}, "Voice Pins"),
+        el("span", { class: "mic-name" }, name), el("span", { class: "mic-state" }, devices.includes(name) ? "" : tr("Not connected")),
+        el("button", { class: "link", onclick: () => { hidden.delete(name); saveHidden(); } }, tr("Show")))))) : null,
+    el("h2", {}, tr("Voice Pins")),
     el("div", { class: "group" }, el("label", { class: "row" },
-      el("span", { class: "label" }, "Use Voice Pins", el("small", {}, "Up to 3 pins connect over Bluetooth when a recording starts, each as its own track.")),
+      el("span", { class: "label" }, tr("Use Voice Pins"), el("small", {}, tr("Up to 3 pins connect over Bluetooth when recording starts, each its own track."))),
       pinsOn)),
-    fromTracks ? el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showMeeting() }, "Done")) : null);
+    fromTracks ? el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showMeeting() }, tr("Done"))) : null);
   main.replaceChildren(page);
   if (!shown.length) return;
 
@@ -3056,12 +3053,12 @@ async function showDevices(fromTracks = false) {
       r.meter.style.width = `${Math.round(p.level * 100)}%`;
       if (p.state === "failed") {
         r.row.className = "mic-row device failed";
-        r.state.textContent = `Not working: ${p.detail}`;
+        r.state.textContent = tr("Not working: {detail}", { detail: p.detail });
       } else if (p.heard || r.worked) {
         r.row.className = "mic-row device working";
-        r.state.replaceChildren(svg("check", 14), p.heard ? " Working" : " Worked before");
+        r.state.replaceChildren(svg("check", 14), p.heard ? tr(" Working") : tr(" Worked before"));
       } else if (p.state === "listening") {
-        r.state.textContent = "Say something to test it";
+        r.state.textContent = tr("Say something to test");
       }
     }
   }, 150);
@@ -3092,16 +3089,16 @@ async function startMeeting(devices, pins) {
 /// A track's tooltip: where its sound came from and what happened while recording.
 function trackDetails(name, t) {
   if (!t) return name;
-  const kind = { app: "App sound", output: "Everything on an output", microphone: "Microphone", pin: "Voice Pin" }[t.kind] ?? t.kind;
-  return [`${name} · ${kind}`, t.source !== name ? t.source : "", t.peak === 0 ? "Silent" : "", ...(t.notes ?? [])].filter(Boolean).join("\n");
+  const kind = { app: tr("App sound"), output: tr("All output"), microphone: tr("Microphone"), pin: tr("Voice Pin") }[t.kind] ?? t.kind;
+  return [`${name} · ${kind}`, t.source !== name ? t.source : "", t.peak === 0 ? tr("Silent") : "", ...(t.notes ?? [])].filter(Boolean).join("\n");
 }
 
 /// Readable names for streams: inputs are numbered in the order chosen.
 function streamName(stream, devices = recording?.devices ?? []) {
   const input = /^input(\d+)$/.exec(stream);
-  if (input) return devices[Number(input[1]) - 1] ?? `Input ${input[1]}`;
+  if (input) return devices[Number(input[1]) - 1] ?? tr("Input {0}", { "0": input[1] });
   const pin = /^pin(\d+)$/.exec(stream);
-  if (pin) return `Superteem pin ${pin[1]}`;
+  if (pin) return tr("Superteem pin {0}", { "0": pin[1] });
   return stream;
 }
 
@@ -3119,7 +3116,7 @@ function addMarker(text, kind = "") {
 
 /// Markers saved before action items had a kind were noted as text.
 const isAction = (m) => m.kind === "action" || (!m.kind && m.text === "Action item");
-const markerLabel = (m) => (isAction(m) ? "Action item" : "Bookmark");
+const markerLabel = (m) => (isAction(m) ? tr("Action item") : tr("Bookmark"));
 /// A marker's icon in place of its name, which screen readers and the tooltip still give.
 const markerIcon = (m, size = 16) => {
   const icon = el("span", { class: `marker-icon${isAction(m) ? " action" : ""}`, role: "img", "aria-label": markerLabel(m), title: markerLabel(m) });
@@ -3141,7 +3138,7 @@ function drawMarkers() {
   list.replaceChildren(...recording.markers.map((m) => {
     const what = markerLabel(m).toLowerCase();
     if (m === editingMarker) {
-      const input = el("input", { value: typed(m), placeholder: isAction(m) ? "What needs doing" : "Add a note to this bookmark", "aria-label": `Note for the ${what} at ${clock(m.at_s)}` });
+      const input = el("input", { value: typed(m), placeholder: isAction(m) ? tr("To do") : tr("Add note"), "aria-label": tr("Note for the {what} at {1}", { what: what, "1": clock(m.at_s) }) });
       const close = () => { editingMarker = null; drawMarkers(); };
       const done = () => { if (editingMarker === m) { m.text = input.value.trim(); close(); } };
       input.addEventListener("keydown", (e) => {
@@ -3151,16 +3148,16 @@ function drawMarkers() {
       const remove = () => { recording.markers.splice(recording.markers.indexOf(m), 1); close(); };
       const row = el("div", { class: `marker editing${isAction(m) ? " action" : ""}` }, el("span", { class: "mono" }, clock(m.at_s)),
         markerIcon(m), input,
-        el("button", { class: "icon-btn save", type: "button", title: "Save (Enter)", "aria-label": "Save", onclick: done }, svg("save", 18)),
-        el("button", { class: "icon-btn trash", type: "button", title: `Delete this ${what}`, "aria-label": `Delete this ${what}`, onclick: remove }, svg("trash", 18)));
+        el("button", { class: "icon-btn save", type: "button", title: tr("Save (Enter)"), "aria-label": tr("Save"), onclick: done }, svg("save", 18)),
+        el("button", { class: "icon-btn trash", type: "button", title: tr("Delete {what}", { what: what }), "aria-label": tr("Delete {what}", { what: what }), onclick: remove }, svg("trash", 18)));
       // Clicking anywhere else keeps what was typed; Esc leaves it as it was.
       row.addEventListener("focusout", (e) => { if (!row.contains(e.relatedTarget)) done(); });
       requestAnimationFrame(() => input.focus());
       return row;
     }
     const open = () => { editingMarker = m; drawMarkers(); };
-    const row = el("div", { class: `marker${isAction(m) ? " action" : ""}`, role: "button", tabindex: "0", title: "Click to change the note or delete it" },
-      el("span", { class: "mono" }, clock(m.at_s)), markerIcon(m), typed(m) ? el("span", {}, typed(m)) : el("span", { class: "hint" }, isAction(m) ? "Action item" : "Bookmark"));
+    const row = el("div", { class: `marker${isAction(m) ? " action" : ""}`, role: "button", tabindex: "0", title: tr("Click to edit or delete") },
+      el("span", { class: "mono" }, clock(m.at_s)), markerIcon(m), typed(m) ? el("span", {}, typed(m)) : el("span", { class: "hint" }, isAction(m) ? tr("Action item") : tr("Bookmark")));
     row.addEventListener("click", open);
     row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
     return row;
@@ -3171,7 +3168,7 @@ function drawMarkers() {
 function renderRecording(status) {
   clearInterval(pollTimer);
   if (stopping) {
-    main.replaceChildren(el("div", { class: "page" }, el("h1", {}, "Saving"), el("p", {}, el("span", { class: "spinner" }), "Stopping the inputs")));
+    main.replaceChildren(el("div", { class: "page" }, el("h1", {}, tr("Saving")), el("p", {}, el("span", { class: "spinner" }), tr("Stopping inputs"))));
     return;
   }
   // A recording found running after the window reloaded.
@@ -3179,10 +3176,10 @@ function renderRecording(status) {
   recording.started = Date.now() - status.elapsed_s * 1000;
   // The clock shows once consent is given; until then the question is what matters.
   const time = el("div", { class: "timecode mono", id: "live-time", "aria-live": "off", hidden: !recording.consent }, longClock(status.elapsed_s));
-  const lanes = el("div", { class: "lanes", "aria-label": "Tracks" });
+  const lanes = el("div", { class: "lanes", "aria-label": tr("Tracks") });
   const problem = el("div", { "aria-live": "polite" });
   // Press the bookmark or Enter to mark now, or the tick for an action item, with whatever note is typed.
-  const pinned = el("input", { placeholder: "Mark now, with a note if you like: Enter bookmarks it", "aria-label": "Note pinned to the current time" });
+  const pinned = el("input", { placeholder: tr("Mark now, with an optional note: Enter bookmarks it"), "aria-label": tr("Note at the current time") });
   const at = el("span", { class: "mono" }, `@${clock(status.elapsed_s)}`);
   const mark = (kind) => {
     addMarker(pinned.value.trim(), kind);
@@ -3190,16 +3187,16 @@ function renderRecording(status) {
   };
   liveMark = mark;
   pinned.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); mark(e.ctrlKey ? "action" : ""); } });
-  const bookmark = el("button", { class: "mark-btn bookmark", type: "button", "aria-label": "Bookmark this moment", title: "Bookmark this moment (B, or Enter in the note)", onclick: () => mark("") },
-    svg("bookmark", 18), el("span", { class: "label" }, "Bookmark"), el("kbd", {}, "B"));
-  const actionItem = el("button", { class: "mark-btn action-item", type: "button", "aria-label": "Add an action item", title: "Add an action item (A, or Ctrl + Enter in the note). Type what needs doing, or add it afterwards.", onclick: () => mark("action") },
-    svg("action", 18), el("span", { class: "label" }, "Action item"), el("kbd", {}, "A"));
+  const bookmark = el("button", { class: "mark-btn bookmark", type: "button", "aria-label": tr("Bookmark now"), title: tr("Bookmark now (B, or Enter in the note)"), onclick: () => mark("") },
+    svg("bookmark", 18), el("span", { class: "label" }, tr("Bookmark")), el("kbd", {}, "B"));
+  const actionItem = el("button", { class: "mark-btn action-item", type: "button", "aria-label": tr("Add action item"), title: tr("Add action item (A, or Ctrl + Enter in the note). Type what to do now or later."), onclick: () => mark("action") },
+    svg("action", 18), el("span", { class: "label" }, tr("Action item")), el("kbd", {}, "A"));
   const hint = meetingListening()
-    ? "Say “Bookmark that”, “Action item” or “Hey Superteem, stop recording”"
-    : "Turn on “Hey Superteem” in Settings to mark and stop by voice";
-  const stop = el("button", { class: "stop", "aria-label": "Stop recording", title: "Stop recording" }, el("span"));
+    ? tr("Say “Bookmark that”, “Action item” or “Hey Superteem, stop recording”")
+    : tr("Turn on “Hey Superteem” in Settings to mark and stop by voice");
+  const stop = el("button", { class: "stop", "aria-label": tr("Stop recording"), title: tr("Stop recording") }, el("span"));
   stop.addEventListener("click", () => stopMeeting());
-  const recLabel = el("span", {}, recording.consent ? "REC · consent noted" : "REC · asking for consent");
+  const recLabel = el("span", {}, recording.consent ? tr("REC · consent noted") : tr("REC · asking consent"));
   main.replaceChildren(el("div", { class: "live" },
     el("div", { class: "live-head" }, el("span", { class: "rec" }, el("span", { class: "dot" }), recLabel),
       el("span", { class: "hint" }, hint)),
@@ -3224,7 +3221,7 @@ function renderRecording(status) {
           el("small", { class: failing ? "danger" : "" }, failing || st.state === "reconnecting" || st.state === "waiting" ? st.detail || st.state : st.state)),
         el("span", { class: "spark" }, history.map((l) => el("span", { style: `height:${Math.max(2, Math.round(l * 24))}px;background:${l > 0.35 ? colour : "var(--line)"}` }))));
     }));
-    if (!s.streams.length) lanes.replaceChildren(el("div", { class: "legend" }, "Starting the inputs…"));
+    if (!s.streams.length) lanes.replaceChildren(el("div", { class: "legend" }, tr("Starting inputs…")));
     // Android switched a stream to another microphone: said briefly, once per switch.
     recording.notices ??= {};
     for (const st of s.streams) {
@@ -3238,7 +3235,7 @@ function renderRecording(status) {
     if (!blocked) problem.replaceChildren();
     else if (!problem.firstChild) {
       problem.replaceChildren(el("div", { class: "notice", role: "alert" },
-        el("strong", {}, "Nothing is being recorded. "), s.streams[0].detail || "The microphone isn't working.", micHelp("microphone")));
+        el("strong", {}, tr("Nothing is recording. ")), s.streams[0].detail || tr("The microphone isn't working."), micHelp("microphone")));
     }
   };
   draw(status);
@@ -3253,11 +3250,11 @@ function renderRecording(status) {
 /// recording; no stops it and throws it away.
 function consentChallenge(recLabel) {
   const card = el("div", { class: "consent-card consent-challenge", id: "consent-challenge", role: "alert" },
-    el("strong", {}, "Has everyone being recorded agreed to it?"),
-    el("div", { class: "legend" }, "Recording has started. Ask the room, then answer here. The answer is kept with the recording."),
+    el("strong", {}, tr("Has everyone agreed to be recorded?")),
+    el("div", { class: "legend" }, tr("Recording has started. Ask the room, then answer here. The answer is kept with the recording.")),
     el("div", { class: "actions" },
-      el("button", { class: "pill", onclick: () => refuseConsent() }, "No, stop and discard"),
-      el("button", { class: "primary pill", onclick: () => giveConsent("button") }, "Yes, everyone agreed")));
+      el("button", { class: "pill", onclick: () => refuseConsent() }, tr("No, stop and discard")),
+      el("button", { class: "primary pill", onclick: () => giveConsent("button") }, tr("Yes, everyone agreed"))));
   card.recLabel = recLabel;
   return card;
 }
@@ -3267,7 +3264,7 @@ function giveConsent(how, words = "") {
   if (!recording || recording.consent) return false;
   recording.consent = { at_s: Math.round(nowInRecording() * 10) / 10, how, words };
   const card = document.getElementById("consent-challenge");
-  if (card) { card.recLabel.textContent = "REC · consent noted"; card.remove(); }
+  if (card) { card.recLabel.textContent = tr("REC · consent noted"); card.remove(); }
   const time = document.getElementById("live-time");
   if (time) time.hidden = false;
   return true;
@@ -3318,7 +3315,7 @@ function micNote(record) {
   if (!record || (!record.ok && !record.failed)) return null;
   if (record.last_failed > record.last_ok) {
     return el("span", { class: "mic-note bad", title: record.last_problem },
-      `didn't record last time${record.last_problem ? ` (${record.last_problem})` : ""}`);
+      tr("didn't record last time{0}", { "0": record.last_problem ? ` (${record.last_problem})` : "" }));
   }
   return el("span", { class: "mic-note" }, `worked ${dateText(record.last_ok)}`);
 }
@@ -3523,7 +3520,7 @@ function sizeText(bytes) {
 /// A "more" (three dots) button and the actions it opens. `always` keeps them behind the button at every
 /// width; otherwise they sit side by side on a computer and go behind it only on a phone.
 function moreMenu(items, { always = false } = {}) {
-  const button = el("button", { class: "icon-only top-more-button", type: "button", title: "More", "aria-label": "More actions", "aria-haspopup": "menu", "aria-expanded": "false" }, svg("more", 18));
+  const button = el("button", { class: "icon-only top-more-button", type: "button", title: tr("More"), "aria-label": tr("More"), "aria-haspopup": "menu", "aria-expanded": "false" }, svg("more", 18));
   const list = el("span", { class: "top-more-items" }, items.filter(Boolean));
   const more = el("span", { class: "top-more" + (always ? " always" : "") }, button, list);
   const close = () => { more.classList.remove("open"); button.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outside, true); };
@@ -3542,7 +3539,7 @@ function moreMenu(items, { always = false } = {}) {
 function deleteMenu(choices, run) {
   const wrap = el("span", { class: "export-menu delete-menu" });
   const button = el("button", { class: "icon-only danger", type: "button", "aria-haspopup": "menu", "aria-expanded": "false",
-    title: "Delete this meeting or its audio", "aria-label": "Delete this meeting or its audio" }, svg("trash", 18), el("span", { class: "menu-text" }, "Delete"));
+    title: tr("Delete meeting or audio"), "aria-label": tr("Delete meeting or audio") }, svg("trash", 18), el("span", { class: "menu-text" }, "Delete"));
   const menu = el("div", { class: "menu", role: "menu", hidden: true });
   const close = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outside, true); };
   const outside = (e) => { if (!wrap.contains(e.target)) close(); };
@@ -3646,7 +3643,7 @@ function renderSession(session, processingError, suggestion) {
     const go = el("button", { class: "primary danger-fill", type: "button" }, label);
     go.addEventListener("click", async () => { go.disabled = true; await run(); go.disabled = false; });
     confirmBox.replaceChildren(el("p", {}, text), go,
-      el("button", { type: "button", onclick: () => { confirmBox.hidden = true; } }, "Cancel"));
+      el("button", { type: "button", onclick: () => { confirmBox.hidden = true; } }, tr("Cancel")));
     confirmBox.hidden = false;
     go.focus();
   };
@@ -3654,37 +3651,37 @@ function renderSession(session, processingError, suggestion) {
     stopPlayback();
     if (await save("delete_session", {})) showHome();
   };
-  const compactWhy = session.busy ? "Not while it is being recorded or processed"
-    : session.needs_processing ? "Not processed yet, so there is no transcript to keep"
-    : meta.compacted || !session.audio_bytes ? "Its audio is already deleted" : null;
+  const compactWhy = session.busy ? tr("Not while recording or processing")
+    : session.needs_processing ? tr("Not processed yet: no transcript to keep")
+    : meta.compacted || !session.audio_bytes ? tr("Audio already deleted") : null;
   const compact = async () => {
     stopPlayback();
     try {
       const freed = await invoke("compact_session", { id });
       await reload();
       const notice = main.querySelector(".compacted-notice");
-      if (notice && freed) notice.prepend(`Audio deleted, ${sizeText(freed)} freed. `);
+      if (notice && freed) notice.prepend(tr("Audio deleted, {freed} freed. ", { freed: sizeText(freed) }));
     } catch (e) {
       showError(page, e);
     }
   };
   const remove = deleteMenu([
-    ["delete", isPhone() ? "Delete permanently" : `Move to ${binName()}`,
-      isPhone() ? "The whole meeting, transcript and audio" : `The whole meeting. It can be restored from the ${binName()}.`],
-    ["compact", "Compact", compactWhy ?? `Delete only the audio and keep the transcript · frees ${sizeText(session.audio_bytes)}`, !!compactWhy],
+    ["delete", isPhone() ? tr("Delete permanently") : tr("Move to {0}", { "0": binName() }),
+      isPhone() ? tr("Whole meeting: transcript and audio") : tr("Whole meeting. Restorable from the {0}.", { "0": binName() })],
+    ["compact", tr("Compact"), compactWhy ?? tr("Delete audio, keep transcript · frees {0}", { "0": sizeText(session.audio_bytes) }), !!compactWhy],
   ], (choice) => {
     if (choice === "compact") {
-      askFirst(`Delete this meeting's audio for good and free ${sizeText(session.audio_bytes)}? The transcript, names, bookmarks and action items stay and can still be edited and exported, `
-        + "but the meeting can't be played or transcribed again. This can't be undone.", "Delete audio", compact);
+      askFirst(tr("Delete this meeting's audio for good and free {0}? Transcript, names, bookmarks and action items stay editable and exportable, ", { "0": sizeText(session.audio_bytes) })
+        + tr("but it can't be played or transcribed again. This can't be undone."), tr("Delete audio"), compact);
     } else if (isPhone()) {
-      askFirst("Delete this meeting and its audio for good? This can't be undone.", "Delete", deleteWhole);
+      askFirst(tr("Delete this meeting and its audio for good? This can't be undone."), "Delete", deleteWhole);
     } else {
       deleteWhole();
     }
   });
   const edits = session.segments.filter((s) => s.edited).length;
-  const reprocess = el("button", { class: "icon-only more-action", type: "button", title: "Transcribe again: run speaker detection and transcription again", "aria-label": "Transcribe again" },
-    svg("refresh", 18), el("span", { class: "menu-text" }, "Transcribe again"));
+  const reprocess = el("button", { class: "icon-only more-action", type: "button", title: tr("Re-run speaker detection and transcription"), "aria-label": tr("Re-transcribe") },
+    svg("refresh", 18), el("span", { class: "menu-text" }, tr("Re-transcribe")));
   reprocess.addEventListener("click", () => processAgain(id));
   // A track's own settings, opened from its name: where its sound came from, who is on it, whether
   // everything on it is them, and where it starts. A move takes effect when the meeting is transcribed again.
@@ -3694,11 +3691,11 @@ function renderSession(session, processingError, suggestion) {
   // Where a track's sound came from, as it was chosen when the meeting began, or added.
   const trackSource = (stream) => {
     const imported = session.imports?.find((i) => i.name === stream);
-    if (imported) return imported.label || "Imported recording";
+    if (imported) return imported.label || tr("Imported recording");
     const t = meta.tracks?.[stream];
     return t?.label || t?.source || streamName(stream, meta.inputs ?? []);
   };
-  const TRACK_KINDS = { app: "App sound", output: "Everything on an output", microphone: "Microphone", pin: "Voice Pin" };
+  const TRACK_KINDS = { app: tr("App sound"), output: tr("All output"), microphone: tr("Microphone"), pin: tr("Voice Pin") };
   // Bookmarks and action items only this track has, at meeting times: those made in an imported recording
   // when no other track recorded with it stays, and "Bookmark that" heard only on it and not yet saved.
   const onlyOnTrack = (stream) => {
@@ -3732,45 +3729,45 @@ function renderSession(session, processingError, suggestion) {
     const rows = [];
     const row = (label, value) => { if (value != null && value !== "") rows.push(el("dt", {}, label), el("dd", {}, value)); };
     if (imported) {
-      row("Source", imported.label || "Imported recording");
-      row("Came from", imported.from_session ? "Another person's recording of this meeting" : "A recording added to this meeting");
+      row(tr("Source"), imported.label || tr("Imported recording"));
+      row(tr("Came from"), imported.from_session ? tr("Someone else's recording of this meeting") : tr("A recording added to this meeting"));
       const together = imported.from_session ? session.imports.filter((i) => i.from_session === imported.from_session).length : 1;
-      if (together > 1) row("Recorded with", `${together - 1} other track${together === 2 ? "" : "s"} here`);
-      row("Length", clock(imported.seconds));
+      if (together > 1) row(tr("Recorded with"), trn(together - 1, "{n} other track", "{n} other tracks"));
+      row(tr("Length"), clock(imported.seconds));
       if (imported.started_at && meta.created) {
         const own = imported.utc_offset_min ?? meetingZone(meta);
-        row("Its clock said", `${dayClock(imported.started_at, own)} ${zoneName(imported.started_at, own)} when it started`);
-        if (imported.utc_offset_min == null) row("Its time zone", "Not known: taken to be the meeting's");
+        row(tr("Its clock"), tr("{0} {1} at start", { "0": dayClock(imported.started_at, own), "1": zoneName(imported.started_at, own) }));
+        if (imported.utc_offset_min == null) row(tr("Its time zone"), tr("Unknown: assumed the meeting's"));
       }
-      row("Placed by", { time: "The time of day it started", sound: "Matching its sound to the other tracks", hand: "Typed in by hand" }[imported.placed_by] ?? imported.placed_by);
-      if (imported.matched) row("Sound matched", `${imported.matched[0]} of ${imported.matched[1]} half-minute stretches`);
-      if (imported.confidence != null) row("Match", `${imported.confidence.toFixed(1)}× surer than the next best place`);
+      row(tr("Placed by"), { time: tr("Start time of day"), sound: tr("Matching sound to other tracks"), hand: tr("Typed by hand") }[imported.placed_by] ?? imported.placed_by);
+      if (imported.matched) row(tr("Sound matched"), `${imported.matched[0]} of ${imported.matched[1]} half-minute stretches`);
+      if (imported.confidence != null) row(tr("Match"), tr("{0}× surer than the next best", { "0": imported.confidence.toFixed(1) }));
       if (Math.abs((imported.rate || 1) - 1) > 1e-6) {
         const drift = ((imported.rate || 1) - 1) * 3600;
-        row("Clock", `Ran ${Math.abs(drift).toFixed(1)} s an hour ${drift > 0 ? "slow" : "fast"}; corrected`);
+        row(tr("Clock"), `Ran ${Math.abs(drift).toFixed(1)} s an hour ${drift > 0 ? "slow" : "fast"}; corrected`);
       }
       const marks = (imported.markers ?? []).filter((m) => !m.removed);
-      if (marks.length) row("Marked in it", `${marks.filter((m) => !isAction(m)).length} bookmarks, ${marks.filter(isAction).length} action items`);
+      if (marks.length) row(tr("Marked in it"), tr("{n} bookmarks, {n_} action items", { n: marks.filter((m) => !isAction(m)).length, n_: marks.filter(isAction).length }));
     } else {
-      row("Source", t?.label || streamName(stream, meta.inputs ?? []));
+      row(tr("Source"), t?.label || streamName(stream, meta.inputs ?? []));
       if (t) {
-        row("Kind", TRACK_KINDS[t.kind] ?? t.kind);
-        if (t.source && t.source !== t.label) row("Chosen as", t.source);
-        if (t.program) row("Program", t.program);
-        row("Length", clock(t.frames * 0.02));
-        row("Dropouts", t.lost ? `${(t.lost * 0.02).toFixed(1)} s of sound lost while recording` : "None");
-        row("Loudest", t.peak === 0 ? "Silent: it heard nothing" : t.peak ? `${Math.round(20 * Math.log10(t.peak))} dB` : "");
+        row(tr("Kind"), TRACK_KINDS[t.kind] ?? t.kind);
+        if (t.source && t.source !== t.label) row(tr("Chosen as"), t.source);
+        if (t.program) row(tr("Program"), t.program);
+        row(tr("Length"), clock(t.frames * 0.02));
+        row(tr("Dropouts"), t.lost ? tr("{0} s of sound lost", { "0": (t.lost * 0.02).toFixed(1) }) : tr("None"));
+        row(tr("Loudest"), t.peak === 0 ? tr("Silent: heard nothing") : t.peak ? tr("{0} dB", { "0": Math.round(20 * Math.log10(t.peak)) }) : "");
       }
     }
-    row("Offset", offset ? `${signedClock(offset)} against the meeting` : "None: it starts with the meeting");
-    row("Everything on it", (meta.locked ?? []).includes(stream) ? "Is this person" : "Is matched to people by their voices");
-    row("In the transcript", `${lines} line${lines === 1 ? "" : "s"} taken from it`);
+    row(tr("Offset"), offset ? tr("{offset} against the meeting", { offset: signedClock(offset) }) : tr("None: starts with the meeting"));
+    row(tr("Everything on it"), (meta.locked ?? []).includes(stream) ? tr("Is this person") : tr("Matched to people by voice"));
+    row(tr("In the transcript"), trn(lines, "{n} line", "{n} lines"));
     const notes = t?.notes ?? [];
-    const info = el("dialog", { class: "sheet track-info", "aria-label": `About ${trackSource(stream)}` },
+    const info = el("dialog", { class: "sheet track-info", "aria-label": tr("About {stream}", { stream: trackSource(stream) }) },
       el("h2", {}, trackSource(stream)),
       el("dl", {}, rows),
-      notes.length ? el("div", { class: "field" }, el("span", {}, "While recording"), el("ul", { class: "notes" }, notes.map((n) => el("li", {}, n)))) : null,
-      el("div", { class: "actions" }, el("button", { class: "pill", type: "button", onclick: () => info.close() }, "Close")));
+      notes.length ? el("div", { class: "field" }, el("span", {}, tr("While recording")), el("ul", { class: "notes" }, notes.map((n) => el("li", {}, n)))) : null,
+      el("div", { class: "actions" }, el("button", { class: "pill", type: "button", onclick: () => info.close() }, tr("Close"))));
     info.addEventListener("close", () => info.remove());
     document.body.append(info);
     info.showModal();
@@ -3782,9 +3779,9 @@ function renderSession(session, processingError, suggestion) {
     const group = imported?.from_session ? session.imports.filter((i) => i.from_session === imported.from_session) : [];
     const offset = imported ? imported.offset_s : meta.track_offsets?.[stream] ?? 0;
     const locked = (meta.locked ?? []).includes(stream);
-    const nameInput = el("input", { type: "text", value: speaker?.name ?? name, maxlength: "60", "aria-label": "Name" });
-    const print = el("select", { "aria-label": "Voice print" },
-      el("option", { value: "" }, "None"),
+    const nameInput = el("input", { type: "text", value: speaker?.name ?? name, maxlength: "60", "aria-label": tr("Name") });
+    const print = el("select", { "aria-label": tr("Voice print") },
+      el("option", { value: "" }, tr("None")),
       ...(session.voiceprints ?? []).map((p) => el("option", { value: p.id, selected: speaker?.print?.id === p.id }, p.name)));
     // A recognised print is linked to the person's own print id, which may not be the one listed for them.
     if (speaker?.print && ![...print.options].some((o) => o.value === speaker.print.id)) {
@@ -3792,10 +3789,10 @@ function renderSession(session, processingError, suggestion) {
     }
     // A new print is made from this track's own audio: what its wearer said into it, less hand mutes.
     const NEW_PRINT = "\u0000new";
-    print.append(el("option", { value: NEW_PRINT }, "New voice print from this track…"));
+    print.append(el("option", { value: NEW_PRINT }, tr("New voice print from this track…")));
     const original = print.value;
     const consent = el("input", { type: "checkbox" });
-    const consentRow = el("label", { class: "field check", hidden: true }, consent, el("span", {}, "They agreed to have a voice print kept"));
+    const consentRow = el("label", { class: "field check", hidden: true }, consent, el("span", {}, tr("They agreed to a voice print")));
     print.addEventListener("change", () => {
       const chosen = print.selectedOptions[0];
       consentRow.hidden = print.value !== NEW_PRINT;
@@ -3805,7 +3802,7 @@ function renderSession(session, processingError, suggestion) {
       } else if (print.value) nameInput.value = chosen.textContent;
     });
     const lock = el("input", { type: "checkbox", checked: locked });
-    const start = el("input", { type: "text", class: "mono", size: "9", value: signedClock(offset).replace("−", "-"), "aria-label": "Starts at" });
+    const start = el("input", { type: "text", class: "mono", size: "9", value: signedClock(offset).replace("−", "-"), "aria-label": tr("Starts at") });
     const status = el("div", { class: "hint", role: "status" });
     const fail = (e) => status.replaceChildren(el("span", { class: "danger" }, String(e?.message ?? e)));
     // Bookmarks made in an imported session line it up with the same moment marked here.
@@ -3815,8 +3812,8 @@ function renderSession(session, processingError, suggestion) {
     const mine = allMarkers.filter((m) => !m.removed);
     if (theirs.length && mine.length) {
       const label = (m, at) => `${markerLabel(m)}${markerNote(m) ? ` “${markerNote(m)}”` : ""} · ${clock(at)}`;
-      const theirSelect = el("select", { "aria-label": "Their bookmark" }, theirs.map((m, k) => el("option", { value: k }, label(m, m.at_s))));
-      const mineSelect = el("select", { "aria-label": "Your bookmark" }, mine.map((m, k) => el("option", { value: k }, label(m, m.at_s))));
+      const theirSelect = el("select", { "aria-label": tr("Their bookmark") }, theirs.map((m, k) => el("option", { value: k }, label(m, m.at_s))));
+      const mineSelect = el("select", { "aria-label": tr("Your bookmark") }, mine.map((m, k) => el("option", { value: k }, label(m, m.at_s))));
       // The same note in both, such as "Sync", is the likely pair.
       const same = (a, b) => (markerNote(a) || "").trim().toLowerCase() === (markerNote(b) || "").trim().toLowerCase();
       const pair = theirs.findIndex((t) => markerNote(t) && mine.some((m) => same(t, m)));
@@ -3824,19 +3821,19 @@ function renderSession(session, processingError, suggestion) {
         theirSelect.value = String(pair);
         mineSelect.value = String(mine.findIndex((m) => same(theirs[pair], m)));
       }
-      const go = el("button", { class: "pill", type: "button" }, "Line up");
+      const go = el("button", { class: "pill", type: "button" }, tr("Line up"));
       go.addEventListener("click", async () => {
         go.disabled = true;
         try {
           const moved = await invoke("line_up_track", { id, name: stream, ownS: theirs[theirSelect.value].at_s, meetingS: mine[mineSelect.value].at_s });
           start.value = signedClock(moved.offset_s).replace("−", "-");
-          status.replaceChildren(`Lined up: it now starts ${signedClock(moved.offset_s)} into the meeting. Close this to hear it there; its lines in the transcript follow when you transcribe again.`);
+          status.replaceChildren(tr("Lined up: now starts {0} into the meeting. Its transcript lines follow when you transcribe again.", { "0": signedClock(moved.offset_s) }));
           lined = true;
         } catch (e) { fail(e); }
         go.disabled = false;
       });
-      lineUp = el("div", { class: "field" }, el("span", {}, "Line up by a bookmark",
-        el("small", {}, "Their bookmark is the same moment as yours, such as one everyone made at once.")),
+      lineUp = el("div", { class: "field" }, el("span", {}, tr("Line up by bookmark"),
+        el("small", {}, tr("Their bookmark matches yours, like one everyone made at once."))),
         el("div", { class: "row-pick" }, theirSelect, el("span", { class: "hint" }, "is"), mineSelect, go));
     }
     // An imported track can also be found by its sound. When it started by the time of day is a fact of
@@ -3850,38 +3847,38 @@ function renderSession(session, processingError, suggestion) {
           processAgain(id);
         } catch (e) { fail(e); }
       };
-      finder = el("div", { class: "field" }, el("span", {}, "Match by its sound"),
+      finder = el("div", { class: "field" }, el("span", {}, tr("Match by sound")),
         el("div", { class: "row-pick" },
           el("button", { class: "pill", type: "button", onclick: match(true),
-            title: "Match its sound to the other tracks near where it is now, and find clocks that ran apart. Transcribes the meeting again." }, "Fine-tune"),
+            title: tr("Match its sound to nearby parts of other tracks and correct drifting clocks. Re-transcribes.") }, tr("Fine-tune")),
           el("button", { class: "pill", type: "button", onclick: match(false),
-            title: "Search the whole meeting for where its sound fits, for when it's far out. Transcribes the meeting again." }, "Anywhere")));
+            title: tr("Search the whole meeting for where it fits, when it's far out. Re-transcribes.") }, tr("Anywhere"))));
     }
-    const whose = group.length > 1 ? ` Moves all ${group.length} tracks recorded with it.` : "";
-    const saveButton = el("button", { class: "primary pill", type: "button" }, "Save");
+    const whose = group.length > 1 ? tr(" Moves all {n} tracks recorded with it.", { n: group.length }) : "";
+    const saveButton = el("button", { class: "primary pill", type: "button" }, tr("Save"));
     // Deleting: a recorded track only while there's another and nothing is being processed.
     const canDelete = imported || (streams.length > 1 && !session.busy);
-    const trash = el("button", { class: "icon-only track-delete", type: "button", disabled: !canDelete, "aria-label": "Delete this track",
-      title: canDelete ? "Delete this track" : session.busy ? "The meeting is being processed; delete the track once it's done" : "The meeting's only track can't be deleted" }, svg("trash", 18));
+    const trash = el("button", { class: "icon-only track-delete", type: "button", disabled: !canDelete, "aria-label": tr("Delete track"),
+      title: canDelete ? tr("Delete track") : session.busy ? tr("Processing; delete the track once done") : tr("The only track can't be deleted") }, svg("trash", 18));
     // The time of day it started is a fact of the recording, so it's shown, not edited: the offset places it.
-    const how = imported ? { sound: "matched by sound", hand: "placed by hand" }[imported.placed_by] ?? "placed by time of day" : "";
-    const kind = imported ? ["Imported", `started ${startedText(meta.created + imported.offset_s, meetingZone(meta), imported.utc_offset_min)}`, how].join(" · ")
-      : [t ? TRACK_KINDS[t.kind] ?? t.kind : "", t?.program && t.program !== t.label ? t.program : "", t?.peak === 0 ? "Silent" : ""].filter(Boolean).join(" · ");
-    const more = el("button", { class: "link inline", type: "button", onclick: () => trackInfoDialog(stream) }, "Details");
+    const how = imported ? { sound: tr("matched by sound"), hand: tr("placed by hand") }[imported.placed_by] ?? tr("placed by time of day") : "";
+    const kind = imported ? [tr("Imported"), `started ${startedText(meta.created + imported.offset_s, meetingZone(meta), imported.utc_offset_min)}`, how].join(" · ")
+      : [t ? TRACK_KINDS[t.kind] ?? t.kind : "", t?.program && t.program !== t.label ? t.program : "", t?.peak === 0 ? tr("Silent") : ""].filter(Boolean).join(" · ");
+    const more = el("button", { class: "link inline", type: "button", onclick: () => trackInfoDialog(stream) }, tr("Details"));
     const settings = el("div", { class: "track-settings" },
       el("p", { class: "hint source" }, kind ? `${kind} · ` : "", more),
-      el("label", { class: "field" }, el("span", {}, "Name"), nameInput),
-      el("label", { class: "field" }, el("span", {}, "Voice print"), print),
+      el("label", { class: "field" }, el("span", {}, tr("Name")), nameInput),
+      el("label", { class: "field" }, el("span", {}, tr("Voice print")), print),
       consentRow,
-      el("label", { class: "field check", title: "For when each person has their own microphone or call track. Lines you moved by hand stay put." },
-        lock, el("span", {}, "Everything on this track is this person")),
-      el("label", { class: "field", title: `How far it's shifted against the meeting, as minutes:seconds; − for earlier. You hear a move at once; its lines follow when you transcribe again.${whose}` },
-        el("span", {}, "Offset"), start),
+      el("label", { class: "field check", title: tr("When each person has their own mic or call track. Lines moved by hand stay put.") },
+        lock, el("span", {}, tr("All of this track is this person"))),
+      el("label", { class: "field", title: tr("Shift against the meeting, as minutes:seconds; − for earlier. You hear a move at once; lines follow after re-transcribing.{whose}", { whose: whose }) },
+        el("span", {}, tr("Offset")), start),
       finder, lineUp, status,
-      el("div", { class: "actions" }, trash, el("span", { class: "grow" }), el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, "Cancel"), saveButton));
+      el("div", { class: "actions" }, trash, el("span", { class: "grow" }), el("button", { class: "pill", type: "button", onclick: () => dialog.close() }, tr("Cancel")), saveButton));
     // Asked in the sheet itself, in place of the settings; a second step when bookmarks would go with it.
     const confirm = el("div", { class: "track-confirm", role: "alertdialog", hidden: true });
-    const dialog = el("dialog", { class: "sheet track-dialog", "aria-label": `Track ${name}` }, el("h2", {}, trackSource(stream)), settings, confirm);
+    const dialog = el("dialog", { class: "sheet track-dialog", "aria-label": tr("Track {name}", { name: name }) }, el("h2", {}, trackSource(stream)), settings, confirm);
     const back = () => { confirm.hidden = true; confirm.replaceChildren(); settings.hidden = false; };
     const ask = (...children) => { settings.hidden = true; confirm.hidden = false; confirm.replaceChildren(...children); };
     const removeTrack = async (button, keep, to) => {
@@ -3900,15 +3897,15 @@ function renderSession(session, processingError, suggestion) {
     const askMarkers = (lost) => {
       const bookmarks = lost.filter((m) => !isAction(m)).length;
       const actions = lost.length - bookmarks;
-      const what = [bookmarks ? `${bookmarks} bookmark${bookmarks === 1 ? "" : "s"}` : "", actions ? `${actions} action item${actions === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ");
+      const what = trList([bookmarks ? trn(bookmarks, "{n} bookmark", "{n} bookmarks") : "", actions ? trn(actions, "{n} action item", "{n} action items") : ""].filter(Boolean));
       // Where they can go: the meeting's own marks, shown on its recorded tracks, or another imported track.
       const recorded = streams.filter((s) => s !== stream && !session.imports?.some((i) => i.name === s));
       const others = (session.imports ?? []).filter((i) => i.name !== stream && (!imported?.from_session || i.from_session !== imported.from_session));
-      const target = el("select", { "aria-label": "Move them to" },
-        recorded.length ? el("option", { value: "" }, "The meeting (shown on every recorded track)") : null,
-        others.map((i) => el("option", { value: i.name }, `${laneName(i.name)} (imported)`)));
-      const keepButton = el("button", { class: "primary pill", type: "button", disabled: !target.options.length }, "Move them and delete");
-      const dropButton = el("button", { class: "primary danger-fill", type: "button" }, `Delete them too`);
+      const target = el("select", { "aria-label": tr("Move them to") },
+        recorded.length ? el("option", { value: "" }, tr("The meeting (on every track)")) : null,
+        others.map((i) => el("option", { value: i.name }, tr("{0} (imported)", { "0": laneName(i.name) }))));
+      const keepButton = el("button", { class: "primary pill", type: "button", disabled: !target.options.length }, tr("Move them and delete"));
+      const dropButton = el("button", { class: "primary danger-fill", type: "button" }, tr("Delete them too", {  }));
       keepButton.addEventListener("click", () => removeTrack(keepButton, lost, target.value));
       dropButton.addEventListener("click", () => removeTrack(dropButton, null));
       const shown = lost.slice(0, 6).map((m) => el("li", {}, markerIcon(m, 14), ` ${clock(m.at_s)}${markerNote(m) ? ` · ${markerNote(m)}` : ""}`));
@@ -3916,31 +3913,31 @@ function renderSession(session, processingError, suggestion) {
       ask(el("p", {}, el("strong", {}, `${what[0].toUpperCase()}${what.slice(1)} ${lost.length === 1 ? "is" : "are"} only on this track`),
         ` and will be deleted with it, unless you move ${lost.length === 1 ? "it" : "them"} to another track first.`),
         el("ul", { class: "marks" }, shown),
-        target.options.length ? el("label", { class: "field" }, el("span", {}, "Move them to"), target) : null,
-        el("div", { class: "actions" }, el("button", { class: "pill", type: "button", onclick: back }, "Back"), el("span", { class: "grow" }), dropButton, keepButton));
+        target.options.length ? el("label", { class: "field" }, el("span", {}, tr("Move them to")), target) : null,
+        el("div", { class: "actions" }, el("button", { class: "pill", type: "button", onclick: back }, tr("Back")), el("span", { class: "grow" }), dropButton, keepButton));
       (target.options.length ? keepButton : dropButton).focus();
     };
     trash.addEventListener("click", () => {
       const heard = scriptLines.filter((s) => s.stream === stream).length;
       const edited = session.segments.filter((s) => s.stream === stream && s.edited).length;
-      const lines = imported ? " Its lines leave the transcript, which is transcribed again straight away."
+      const lines = imported ? tr(" Its lines leave the transcript, which is re-transcribed at once.")
         : heard ? ` After transcribing again, the ${heard} line${heard === 1 ? "" : "s"} taken from it will come from the other tracks, where they heard it.` : "";
       const lost = edited ? ` Your edits to ${edited} of its line${edited === 1 ? "" : "s"} will be lost.` : "";
-      const where = isPhone() || imported ? " This can't be undone." : ` Its audio goes to the ${binName()}.`;
+      const where = isPhone() || imported ? tr(" This can't be undone.") : tr(" Its audio goes to the {0}.", { "0": binName() });
       const marks = onlyOnTrack(stream);
-      const go = el("button", { class: "primary danger-fill", type: "button" }, marks.length ? "Delete…" : "Delete track");
+      const go = el("button", { class: "primary danger-fill", type: "button" }, marks.length ? tr("Delete…") : tr("Delete track"));
       go.addEventListener("click", () => (marks.length ? askMarkers(marks) : removeTrack(go, null)));
-      ask(el("p", {}, `Delete ${name} from this meeting?${lines}${lost}${where}`),
-        el("div", { class: "actions" }, el("span", { class: "grow" }), el("button", { class: "pill", type: "button", onclick: back }, "Cancel"), go));
+      ask(el("p", {}, tr("Delete {name} from this meeting?{lines}{lost}{where}", { name: name, lines: lines, lost: lost, where: where })),
+        el("div", { class: "actions" }, el("span", { class: "grow" }), el("button", { class: "pill", type: "button", onclick: back }, tr("Cancel")), go));
       go.focus();
     });
     saveButton.addEventListener("click", async () => {
       const at = parseStart(start.value);
-      if (at == null) return fail("Type the offset as minutes:seconds, such as 0:01.5 or -0:00.4.");
+      if (at == null) return fail(tr("Type the offset as min:s, like 0:01.5 or -0:00.4."));
       const newPrint = print.value === NEW_PRINT;
       const typed = nameInput.value.trim();
-      if (newPrint && !typed) { nameInput.focus(); return fail("Type the person's name for the voice print."); }
-      if (newPrint && !consent.checked) return fail("Tick that they agreed to have a voice print kept.");
+      if (newPrint && !typed) { nameInput.focus(); return fail(tr("Type the person's name.")); }
+      if (newPrint && !consent.checked) return fail(tr("Tick that they agreed to a voice print."));
       saveButton.disabled = true;
       try {
         if (newPrint) await invoke("save_track_print", { id, stream, name: typed, consent: true });
@@ -3985,7 +3982,7 @@ function renderSession(session, processingError, suggestion) {
     return true;
   });
   const exporter = exportMenu([...TRANSCRIPT_EXPORTS, ...(meta.compacted ? [] : [
-    ["package", "Edit package", "Every track and the transcript mix as audio, with an EDL, Premiere and Resolve XML and a REAPER project"]])],
+    ["package", tr("Edit package"), tr("All tracks and the transcript mix as audio, with EDL, Premiere and Resolve XML and a REAPER project")]])],
     (format) => invoke("export_session", { id, title: meetingTitle(id, meta.title), format }));
   // Like a note's: the status and the meeting's actions in a bar of their own across the top.
   const topBar = el("div", { class: "topbar meta meeting-top" },
@@ -3993,30 +3990,30 @@ function renderSession(session, processingError, suggestion) {
     // On a phone this drops to its own line under the status and the buttons.
     el("span", { class: "top-info" }, el("span", { title: dateText(meta.created) }, agoText(meta.created))),
     el("span", { class: "top-actions" },
-    scriptLines.length ? readAloudButton(() => scriptLines.filter((l) => hasWords(l.text)).map((l) => (prefs.read_speakers ?? true ? `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? "Someone"}: ${l.text}` : l.text)).join("\n"), "Read the transcript aloud", { lang: meetingLanguage }) : null,
-    isDesktop() ? el("button", { class: "icon-only", title: meta.compacted ? "Open this meeting's folder, with its transcript and exports" : "Open this meeting's folder, with its audio, transcript and exports",
-      "aria-label": "Open this meeting's folder", onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
+    scriptLines.length ? readAloudButton(() => scriptLines.filter((l) => hasWords(l.text)).map((l) => (prefs.read_speakers ?? true ? `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? tr("Someone")}: ${l.text}` : l.text)).join("\n"), tr("Read transcript aloud"), { lang: meetingLanguage }) : null,
+    isDesktop() ? el("button", { class: "icon-only", title: meta.compacted ? tr("Open meeting folder") : tr("Open meeting folder"),
+      "aria-label": tr("Open meeting folder"), onclick: () => invoke("open_folder", { id }) }, svg("folder", 18)) : null,
     // Export, Transcribe again and Delete sit behind one "more" button.
     moreMenu([session.segments.length ? exporter : null, session.model_ready && !session.needs_processing && !meta.compacted ? reprocess : null, remove], { always: true })));
   page.append(exporter.status, confirmBox, langNotice, title);
 
-  const processNow = el("button", { class: "primary" }, "Process now");
+  const processNow = el("button", { class: "primary" }, tr("Process now"));
   processNow.addEventListener("click", () => processAgain(id));
   if (meta.compacted) {
     page.append(el("div", { class: "notice compacted-notice" },
-      "This meeting's audio was deleted to save space. The transcript can still be read, edited and exported, but not played or transcribed again."));
+      tr("Audio deleted to save space. The transcript can be read, edited and exported, but not played or re-transcribed.")));
   } else if (session.needs_processing) {
     page.append(el("div", { class: "notice" },
-      el("p", {}, "This recording was saved but not processed, perhaps because the app closed while recording. Its audio is safe."),
+      el("p", {}, tr("Saved but not processed, perhaps the app closed while recording. The audio is safe.")),
       processNow));
   } else if (processingError) {
-    page.append(el("div", { class: "notice" }, `Processing failed: ${processingError}`));
+    page.append(el("div", { class: "notice" }, tr("Processing failed: {processingError}", { processingError: processingError })));
   } else if (!session.segments.length) {
-    page.append(el("div", { class: "notice" }, "No speech was found in this recording."));
+    page.append(el("div", { class: "notice" }, tr("No speech found.")));
   } else if (!session.transcribed && !meta.compacted) {
     page.append(el("div", { class: "notice" }, session.model_ready
-      ? "This meeting has no transcript yet. Use Transcribe (↻) above."
-      : "This meeting has no transcript. Get the speech model in Settings, then use Transcribe (↻) above."));
+      ? tr("No transcript yet. Use Transcribe (↻) above.")
+      : tr("No transcript. Get the speech model in Settings, then use Transcribe (↻).")));
   }
   // Analyses sit under the title, above the transcript; their sources jump to the line and play from it.
   if (session.transcribed) {
@@ -4039,9 +4036,9 @@ function renderSession(session, processingError, suggestion) {
   }
   // Shown behind the "?" with the other notes on reading the transcript.
   const extraHelp = [];
-  if (edits) extraHelp.push(el("p", {}, `${edits} line${edits > 1 ? "s" : ""} edited by hand. Transcribing again keeps them.`));
+  if (edits) extraHelp.push(el("p", {}, trn(edits, "{n} line edited by hand. Transcribing again keeps it.", "{n} lines edited by hand. Transcribing again keeps them.")));
   if (doubles.length) {
-    const toggle = el("button", { class: "link inline", type: "button", "aria-pressed": String(showDoubles) }, showDoubles ? "Hide them" : "Show them");
+    const toggle = el("button", { class: "link inline", type: "button", "aria-pressed": String(showDoubles) }, showDoubles ? tr("Hide them") : tr("Show them"));
     toggle.addEventListener("click", () => { showDoubles = !showDoubles; helpOpen = true; renderSession(session, processingError); });
     extraHelp.push(el("p", {},
       `${doubles.length} clip${doubles.length > 1 ? "s" : ""} heard again on another microphone ${doubles.length > 1 ? "are" : "is"} greyed out in the tracks and left out of the script. `, toggle));
@@ -4054,25 +4051,25 @@ function renderSession(session, processingError, suggestion) {
   const speakerForm = el("div", { id: "speaker-form" });
   const usedSpeakers = session.speakers.filter((s) => used.has(s.key));
   for (const sp of usedSpeakers) {
-    const input = el("input", { value: sp.name, title: "Rename everywhere in this meeting", "aria-label": `Rename ${sp.name}` });
+    const input = el("input", { value: sp.name, title: tr("Rename everywhere"), "aria-label": tr("Rename {name}", { name: sp.name }) });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); });
     input.addEventListener("change", async () => {
       if (await save("rename_speaker", { key: sp.key, name: input.value })) reload();
     });
     const badge = sp.print
-      ? el("span", { class: "badge", title: sp.print.score == null ? "Linked to this voice print"
-        : "Recognised from the voice print. Rename or use ⋯ if it is wrong." },
-        sp.print.score == null ? "voice print" : `recognised ${Math.round(sp.print.score * 100)}%`)
-      : sp.suggested.length ? el("span", { class: "badge", title: "Not sure who this is. Pick them below." }, "who?") : null;
+      ? el("span", { class: "badge", title: sp.print.score == null ? tr("Linked to voice print")
+        : tr("Recognised by voice print. Rename or use ⋯ if wrong.") },
+        sp.print.score == null ? "voice print" : tr("recognised {0}%", { "0": Math.round(sp.print.score * 100) }))
+      : sp.suggested.length ? el("span", { class: "badge", title: tr("Not sure who this is. Pick below.") }, tr("who?")) : null;
     const menu = speakerMenu(sp, usedSpeakers, (action) => speakerAction(action, sp));
     speakerBar.append(el("span", { class: "chip", style: `background:${colours.get(sp.key)}` }, input, badge, menu));
   }
   if (used.size) {
     // How to read and fix the transcript, behind a "?" so it isn't in the way once known.
-    const help = el("div", { class: "legend", hidden: !helpOpen, id: "transcript-help" }, el("p", {}, "Rename a voice to update every line, or use ⋯ to merge voices or link a voice print. "
-      + "Dotted lines are less certain; a side bar means two people spoke at once."), extraHelp);
-    const helpButton = el("button", { class: `icon-only help-toggle${helpOpen ? " on" : ""}`, type: "button", title: "How to read and fix the transcript",
-      "aria-label": "How to read and fix the transcript", "aria-expanded": String(helpOpen), "aria-controls": "transcript-help" }, "?");
+    const help = el("div", { class: "legend", hidden: !helpOpen, id: "transcript-help" }, el("p", {}, tr("Rename a voice to update every line, or use ⋯ to merge voices or link a voice print. ")
+      + tr("Dotted lines are less certain; a side bar means two people spoke at once.")), extraHelp);
+    const helpButton = el("button", { class: `icon-only help-toggle${helpOpen ? " on" : ""}`, type: "button", title: tr("Reading and fixing the transcript"),
+      "aria-label": tr("Reading and fixing the transcript"), "aria-expanded": String(helpOpen), "aria-controls": "transcript-help" }, "?");
     helpButton.addEventListener("click", () => {
       help.hidden = !help.hidden;
       helpOpen = !help.hidden;
@@ -4083,15 +4080,15 @@ function renderSession(session, processingError, suggestion) {
     // Speakers the voice prints weren't sure about: the people it might be, to pick from.
     const asks = usedSpeakers.filter((sp) => !sp.print && sp.suggested.length).map((sp) => {
       const choices = sp.suggested.map((p) => {
-        const pick = el("button", { type: "button", title: `Sounds ${Math.round(p.score * 100)}% like ${p.name}'s voice print` },
+        const pick = el("button", { type: "button", title: tr("Sounds {0}% like {name}'s voice print", { "0": Math.round(p.score * 100), name: p.name }) },
           `${p.name} · ${Math.round(p.score * 100)}%`);
         pick.addEventListener("click", () => speakerAction(`link:${p.id}`, sp));
         return pick;
       });
-      const none = el("button", { type: "button", class: "link" }, "None of these");
+      const none = el("button", { type: "button", class: "link" }, tr("None of these"));
       none.addEventListener("click", async () => { if (await save("link_speaker", { key: sp.key, print: null, learn: false })) reload(); });
-      const few = sp.voiced_s < 4 ? ` from only ${Math.max(1, Math.round(sp.voiced_s))} s of speech` : "";
-      return el("div", { class: "inline-form" }, el("span", {}, el("strong", {}, `Who is ${sp.name}?`), ` Not sure${few}. It sounds most like:`),
+      const few = sp.voiced_s < 4 ? tr(" from only {0} s of speech", { "0": Math.max(1, Math.round(sp.voiced_s)) }) : "";
+      return el("div", { class: "inline-form" }, el("span", {}, el("strong", {}, tr("Who is {name}?", { name: sp.name })), tr(" Not sure{few}. It sounds most like:", { few: few })),
         choices, none);
     });
     page.append(speakerBar, ...asks, speakerForm, help);
@@ -4111,28 +4108,28 @@ function renderSession(session, processingError, suggestion) {
       // Teaching the print is offered rather than automatic, so a wrongly grouped speaker can't spoil it.
       const target = main.querySelector("#speaker-form") ?? speakerForm;
       if (sp.voiced_s >= 2) {
-        const learn = el("button", { class: "primary" }, "Yes, learn from this meeting");
+        const learn = el("button", { class: "primary" }, tr("Yes, learn from this"));
         learn.addEventListener("click", async () => {
           try {
             await invoke("link_speaker", { id, key: sp.key, print, learn: true });
-            target.replaceChildren(el("div", { class: "inline-form" }, "Done. They will be recognised better next time."));
+            target.replaceChildren(el("div", { class: "inline-form" }, tr("Done. Better recognition next time.")));
           } catch (e) { showError(target, e); }
         });
         target.replaceChildren(el("div", { class: "inline-form" },
-          el("span", { title: "If they sound unlike their voice prints here, as through a call app or another microphone, this becomes another voice print for them." },
-            `Linked. Also learn how they sounded here (${Math.round(sp.voiced_s)} s of speech)?`),
-          learn, el("button", { onclick: () => target.replaceChildren() }, "No")));
+          el("span", { title: tr("If they sound different here, as on a call or another mic, this becomes another voice print for them.") },
+            tr("Linked. Also learn how they sounded here ({0} s)?", { "0": Math.round(sp.voiced_s) })),
+          learn, el("button", { onclick: () => target.replaceChildren() }, tr("No"))));
       }
     } else if (action === "new-print") {
-      const name = el("input", { type: "text", value: sp.name.startsWith("Guest") || sp.name.startsWith("input") ? "" : sp.name, placeholder: "Their name" });
+      const name = el("input", { type: "text", value: sp.name.startsWith("Guest") || sp.name.startsWith("input") ? "" : sp.name, placeholder: tr("Their name") });
       const consent = el("input", { type: "checkbox" });
-      const create = el("button", { class: "primary" }, "Save voice print");
+      const create = el("button", { class: "primary" }, tr("Save voice print"));
       create.addEventListener("click", async () => {
         if (await save("save_speaker_print", { key: sp.key, name: name.value, consent: consent.checked })) reload();
       });
-      speakerForm.append(el("div", { class: "inline-form" }, el("strong", {}, "New voice print from this speaker:"), name,
-        el("label", { class: "field" }, consent, "They agreed to have a voice print kept"), create,
-        el("button", { onclick: () => speakerForm.replaceChildren() }, "Cancel")));
+      speakerForm.append(el("div", { class: "inline-form" }, el("strong", {}, tr("New voice print from this speaker:")), name,
+        el("label", { class: "field" }, consent, tr("They agreed to a voice print")), create,
+        el("button", { onclick: () => speakerForm.replaceChildren() }, tr("Cancel"))));
       name.focus();
     }
   }
@@ -4141,13 +4138,13 @@ function renderSession(session, processingError, suggestion) {
   if (suggestion?.lines.length) {
     const target = session.speakers.find((s) => s.key === suggestion.speaker);
     const n = suggestion.lines.length;
-    const accept = el("button", { class: "primary" }, `Move ${n === 1 ? "it" : `all ${n}`} to ${target?.name ?? "them"}`);
+    const accept = el("button", { class: "primary" }, tr("Move {0} to {1}", { "0": n === 1 ? "it" : `all ${n}`, "1": target?.name ?? "them" }));
     accept.addEventListener("click", async () => {
       if (await save("move_lines", { segments: suggestion.lines, speaker: suggestion.speaker })) reload();
     });
     page.append(el("div", { class: "suggestion" },
       el("span", {}, `${n} other line${n > 1 ? "s" : ""} sound${n > 1 ? "" : "s"} like the one you moved (outlined below).`),
-      accept, el("button", { onclick: () => reload() }, "Leave them")));
+      accept, el("button", { onclick: () => reload() }, tr("Leave them"))));
   }
 
   const duration = meta.duration_s || Math.max(1, ...session.segments.map((s) => s.end_s));
@@ -4166,39 +4163,39 @@ function renderSession(session, processingError, suggestion) {
   const markerLine = (m) => {
     const note = markerNote(m);
     const typed = note;
-    const body = el("div", { class: "marker-body", role: "button", tabindex: "0", title: `${markerLabel(m)}: click to ${note ? "change the note" : "type a note"} or delete it` },
-      markerIcon(m), note ? el("span", {}, note) : el("span", { class: "hint" }, isAction(m) ? "Action item: tap to say what needs doing" : markerLabel(m)),
-      m.heard ? el("span", { class: "edited", title: "Heard in the recording when it was processed" }, "heard") : null);
+    const body = el("div", { class: "marker-body", role: "button", tabindex: "0", title: tr("{m}: click to {1} or delete", { m: markerLabel(m), "1": note ? tr("change the note") : tr("type a note") }) },
+      markerIcon(m), note ? el("span", {}, note) : el("span", { class: "hint" }, isAction(m) ? tr("Action item: tap to add what to do") : markerLabel(m)),
+      m.heard ? el("span", { class: "edited", title: tr("Heard in the recording during processing") }, "heard") : null);
     // An action item with no note can have a short one suggested, from what was said around it.
     let suggest = null;
     if (isAction(m) && !note) {
       const key = `${id}/${m.at_s}`;
       const busy = labelling.has(key);
       suggest = el("button", { class: "pill with-icon marker-suggest", type: "button", disabled: busy,
-        title: "Have the language model write a short label from what was said here", "aria-label": "Suggest a label for this action item" },
-        busy ? el("span", { class: "spinner" }) : svg("sparkle", 14), busy ? "Writing…" : "Suggest");
+        title: tr("Have the model write a short label from what was said"), "aria-label": tr("Suggest a label") },
+        busy ? el("span", { class: "spinner" }) : svg("sparkle", 14), busy ? tr("Writing…") : tr("Suggest"));
       suggest.addEventListener("click", async () => {
         labelling.add(key);
         suggest.disabled = true;
-        suggest.replaceChildren(el("span", { class: "spinner" }), "Writing…");
+        suggest.replaceChildren(el("span", { class: "spinner" }), tr("Writing…"));
         try {
           await invoke("label_action_item", { id, atS: m.at_s });
         } catch (e) {
           labelling.delete(key);
           suggest.disabled = false;
-          suggest.replaceChildren(svg("sparkle", 14), "Suggest");
+          suggest.replaceChildren(svg("sparkle", 14), tr("Suggest"));
           showError(page, e);
         }
       });
     }
     const line = el("div", { class: `line marker-line${isAction(m) ? " action" : ""}` },
-      el("button", { class: "time mono", title: "Play from here", onclick: () => playFrom(m.at_s) }, clock(m.at_s)),
+      el("button", { class: "time mono", title: tr("Play from here"), onclick: () => playFrom(m.at_s) }, clock(m.at_s)),
       el("div", { class: "marker-row" }, body, suggest));
     const edit = () => {
       if (line.classList.contains("editing")) return;
       line.classList.add("editing");
-      const input = el("input", { value: typed, placeholder: isAction(m) ? "What needs doing" : "Add a note to this bookmark",
-        "aria-label": `Note for the ${markerLabel(m).toLowerCase()} at ${clock(m.at_s)}` });
+      const input = el("input", { value: typed, placeholder: isAction(m) ? tr("To do") : tr("Add note"),
+        "aria-label": tr("Note for the {0} at {1}", { "0": markerLabel(m).toLowerCase(), "1": clock(m.at_s) }) });
       let closed = false;
       const cancel = () => { closed = true; line.classList.remove("editing"); editor.replaceWith(body); };
       const done = () => { if (!closed) input.value.trim() === typed ? cancel() : (closed = true, saveMarker(m, input.value.trim(), false)); };
@@ -4208,8 +4205,8 @@ function renderSession(session, processingError, suggestion) {
       });
       const what = markerLabel(m).toLowerCase();
       const editor = el("div", { class: "marker-edit" }, markerIcon(m), input,
-        el("button", { class: "icon-btn save", type: "button", title: "Save (Enter)", "aria-label": "Save", onclick: done }, svg("save", 18)),
-        el("button", { class: "icon-btn trash", type: "button", title: `Delete this ${what}`, "aria-label": `Delete this ${what}`,
+        el("button", { class: "icon-btn save", type: "button", title: tr("Save (Enter)"), "aria-label": tr("Save"), onclick: done }, svg("save", 18)),
+        el("button", { class: "icon-btn trash", type: "button", title: tr("Delete {what}", { what: what }), "aria-label": tr("Delete {what}", { what: what }),
           onclick: () => { closed = true; saveMarker(m, m.text ?? "", true); } }, svg("trash", 18)));
       // Clicking anywhere else keeps what was typed; Esc leaves it as it was.
       editor.addEventListener("focusout", (e) => { if (!editor.contains(e.relatedTarget)) done(); });
@@ -4231,18 +4228,18 @@ function renderSession(session, processingError, suggestion) {
     }
     if (seg.muted) {
       // Drawn slim and struck through; it doesn't split the lines either side, so they can be joined.
-      const time = el("button", { class: "time mono", title: "Play from this line" }, clock(seg.start_s));
+      const time = el("button", { class: "time mono", title: tr("Play from here") }, clock(seg.start_s));
       time.addEventListener("click", () => { if (player) { player.seek(seg.start_s); player.play(); } });
-      const who = session.speakers.find((sp) => sp.key === seg.speaker)?.name ?? "Someone";
-      const unmute = el("button", { type: "button", title: "Bring this line back into the transcript and the mix" }, "UNMUTE");
+      const who = session.speakers.find((sp) => sp.key === seg.speaker)?.name ?? tr("Someone");
+      const unmute = el("button", { type: "button", title: tr("Restore this line to the transcript and mix") }, "UNMUTE");
       unmute.addEventListener("click", async () => { if (await save("mute_segment", { segment: seg.id, muted: false })) reload(); });
-      transcript.append(el("div", { class: "line muted-line", title: `Muted: ${who}: “${seg.text}”` }, time,
+      transcript.append(el("div", { class: "line muted-line", title: tr("Muted: {who}: “{text}”", { who: who, text: seg.text }) }, time,
         el("span", { class: "muted-text" }, `${who}: ${seg.text}`), el("div", { class: "line-action" }, unmute)));
       continue;
     }
-    const select = el("select", { style: `background:${colours.get(seg.speaker)}`, title: "Change the speaker for this line" },
+    const select = el("select", { style: `background:${colours.get(seg.speaker)}`, title: tr("Change speaker") },
       session.speakers.map((sp) => el("option", { value: sp.key, selected: sp.key === seg.speaker }, sp.name)),
-      el("option", { value: "__new" }, "New person…"));
+      el("option", { value: "__new" }, tr("New person…")));
     select.addEventListener("change", async () => {
       let key = select.value;
       if (key === "__new") {
@@ -4279,13 +4276,13 @@ function renderSession(session, processingError, suggestion) {
     });
     const double = seg.echo_of != null;
     const original = double ? lineById.get(seg.echo_of) : null;
-    const keep = double ? el("button", { class: "link", type: "button", title: "Put this line back in the script, as something said that the other line doesn't have" }, "Keep in script") : null;
+    const keep = double ? el("button", { class: "link", type: "button", title: tr("Keep this line in the script: it has something the other line doesn't") }, tr("Keep in script")) : null;
     keep?.addEventListener("click", async () => { if (await save("keep_segment", { segment: seg.id })) reload(); });
     // In a meeting in two languages, which one each line was heard in; choosing the other hears it again.
     const lineLanguage = seg.language || meetingLanguages[0];
     let languageMark = null;
     if (meetingLanguages.length > 1 && !double) {
-      languageMark = el("select", { class: "line-language", title: "The language this line is in. Choosing the other transcribes it again.", "aria-label": "Language of this line" },
+      languageMark = el("select", { class: "line-language", title: tr("This line's language. Choosing another re-transcribes it."), "aria-label": tr("Line language") },
         meetingLanguages.map((c) => el("option", { value: c, selected: c === lineLanguage }, languageName(c))));
       languageMark.addEventListener("change", async () => {
         languageMark.disabled = true;
@@ -4295,17 +4292,17 @@ function renderSession(session, processingError, suggestion) {
     }
     setLanguage([text], lineLanguage);
     const who = el("div", { class: "who" }, select, languageMark,
-      seg.overlap ? el("span", { class: "mark", title: "Someone else was speaking at the same time" }, "talking at once") : null,
+      seg.overlap ? el("span", { class: "mark", title: tr("Someone else spoke at the same time") }, tr("talking at once")) : null,
       seg.edited ? el("span", { class: "edited" }, "edited") : null,
-      double ? el("span", { class: "mark", title: original ? `Heard more clearly on ${trackName(original.stream)}: “${original.text}”` : "" },
-        `heard better on ${original ? trackName(original.stream) : "another microphone"}${original ? ` at ${clock(original.start_s)}` : ""}`) : null,
+      double ? el("span", { class: "mark", title: original ? tr("Clearer on {0}: “{text}”", { "0": trackName(original.stream), text: original.text }) : "" },
+        tr("heard better on {0}{1}", { "0": original ? trackName(original.stream) : tr("another microphone"), "1": original ? ` at ${clock(original.start_s)}` : "" })) : null,
       keep);
     const low = seg.confidence < session.low_confidence;
     const suggested = suggestion?.lines.includes(seg.id);
     // An overlapping line always shows its speaker, since the one before may be the other voice.
     const same = previous === seg.speaker && !seg.overlap && !double;
     const line = el("div", { class: `line${low ? " low" : ""}${same ? " same-speaker" : ""}${seg.overlap ? " overlap" : ""}${suggested ? " suggest" : ""}${double ? " double" : ""}` });
-    const time = el("button", { class: "time mono", title: streams.length ? "Play from this line" : "No audio to play" }, clock(seg.start_s));
+    const time = el("button", { class: "time mono", title: streams.length ? tr("Play from here") : tr("No audio to play") }, clock(seg.start_s));
     time.addEventListener("click", () => {
       if (!player) return;
       player.seek(seg.start_s);
@@ -4323,11 +4320,11 @@ function renderSession(session, processingError, suggestion) {
   // SPLIT where the cursor sits mid-line; JOIN at the start (onto the line before, taking its speaker)
   // or at the end (the next line joins this one). JOIN is greyed out when the lines can't be joined.
   // Lines over someone else's "Yeah" can be joined; a muted line between two isn't in the way.
-  const joinBlocker = (a, b) => !a || !b ? "There is no line to join"
-    : a.echo_of != null || b.echo_of != null ? "A greyed-out copy can't be joined"
-    : a.stream !== b.stream ? "These lines were heard on different microphones" : null;
+  const joinBlocker = (a, b) => !a || !b ? tr("No line to join")
+    : a.echo_of != null || b.echo_of != null ? tr("Greyed-out copies can't be joined")
+    : a.stream !== b.stream ? tr("These lines are from different mics") : null;
   const muteButton = (entry) => entry.seg.echo_of != null ? null : actionButton("MUTE",
-    "Take this line out of the transcript and silence it in the mix, such as a “Mm-hmm” that breaks up someone's sentence", false,
+    tr("Remove this line from the transcript and mute it in the mix, like a “Mm-hmm” mid-sentence"), false,
     () => applyLineAction(entry, "mute_segment", { segment: entry.seg.id, muted: true }));
   const actionButton = (label, title, disabled, run) => el("button", {
     type: "button", title, disabled,
@@ -4351,7 +4348,7 @@ function renderSession(session, processingError, suggestion) {
       const heard = sel.toString().trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
       const words = heard.split(/\s+/).filter(Boolean).length;
       if (lineEls[i].text.contains(sel.focusNode) && heard && words <= 4) {
-        lineEls[i].action.append(actionButton("SPELL", `Teach Voice to spell “${heard}” another way`, false,
+        lineEls[i].action.append(actionButton("SPELL", tr("Teach Voice to spell “{heard}” differently", { heard: heard }), false,
           () => showTermEditor(null, { id, heard })));
       }
       return;
@@ -4365,17 +4362,17 @@ function renderSession(session, processingError, suggestion) {
     if (!before.trim()) {
       const prev = lineEls[i - 1]?.seg;
       const why = joinBlocker(prev, entry.seg);
-      entry.action.append(actionButton("JOIN", why ?? "Join this line onto the one before; it takes that speaker", !!why,
+      entry.action.append(actionButton("JOIN", why ?? tr("Join onto the line before (takes its speaker)"), !!why,
         () => applyLineAction(entry, "join_segments", { first: prev.id, second: entry.seg.id })));
     } else if (!after.trim()) {
       const next = lineEls[i + 1]?.seg;
       const why = joinBlocker(entry.seg, next);
-      entry.action.append(actionButton("JOIN", why ?? "Join the next line onto this one; it takes this speaker", !!why,
+      entry.action.append(actionButton("JOIN", why ?? tr("Join the next line onto this (takes this speaker)"), !!why,
         () => applyLineAction(lineEls[i + 1], "join_segments", { first: entry.seg.id, second: next.id })));
     } else {
       // The split is counted in the trimmed text the backend holds.
       const at = [...before.replace(/^\s+/, "")].length;
-      entry.action.append(actionButton("SPLIT", "Split this line here, so the rest can be given to another speaker", false,
+      entry.action.append(actionButton("SPLIT", tr("Split here, to give the rest to another speaker"), false,
         () => applyLineAction(entry, "split_segment", { segment: entry.seg.id, at })));
     }
     const mute = muteButton(entry);
@@ -4397,20 +4394,20 @@ function renderSession(session, processingError, suggestion) {
   const changed = (meta.tracks_changed ?? []).filter((n) => !removed.includes(n));
   if ((removed.length || changed.length) && !meta.compacted) {
     const list = (names) => names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-    const again = el("button", { class: "primary pill", type: "button", disabled: session.busy || !session.model_ready }, "Transcribe again");
+    const again = el("button", { class: "primary pill", type: "button", disabled: session.busy || !session.model_ready }, tr("Re-transcribe"));
     again.addEventListener("click", () => processAgain(id));
     const said = [
-      removed.length ? `Removed ${list(removed)}.` : "",
-      changed.length ? `Changed ${list(changed)}: moves play where you put them now.` : "",
-      "The transcript catches up when you transcribe the meeting again.",
+      removed.length ? tr("Removed {removed}.", { removed: list(removed) }) : "",
+      changed.length ? tr("Changed {changed}: moves play where you put them.", { changed: list(changed) }) : "",
+      tr("The transcript catches up when you re-transcribe."),
     ].filter(Boolean).join(" ");
     tracks.append(el("div", { class: "inline-form track-removed", role: "status" }, el("p", {}, said), again));
   }
   if (streams.length) {
     const head = el("span", { class: "playhead" });
     const timeLabel = el("span", { class: "mono hint" });
-    const playButton = el("button", { class: "play", "aria-label": "Play" }, svg("play", 18));
-    const lanes = el("div", { class: "track-lanes", title: "Click to jump to a moment" });
+    const playButton = el("button", { class: "play", "aria-label": tr("Play") }, svg("play", 18));
+    const lanes = el("div", { class: "track-lanes", title: tr("Click to jump") });
     // Where each track is quiet in the transcript mix: greyed out there, and not one of the script's own clips.
     const clipSpans = (s) => (s.parts?.length ? s.parts : [[s.start_s, s.end_s]]);
     const quietIn = new Map(streams.map((stream) => [stream, {
@@ -4464,13 +4461,13 @@ function renderSession(session, processingError, suggestion) {
     // Scrolling by hand while following leaves the transcript where it was put for a few seconds.
     const pauseFollow = () => { if (followPlayback && player?.playing) { followPausedUntil = performance.now() + 5000; followed = null; } };
     for (const type of ["wheel", "touchmove"]) document.addEventListener(type, (e) => { if (!tracks.contains(e.target)) pauseFollow(); }, { signal, passive: true });
-    const followButton = el("button", { class: "pill follow", type: "button" }, "Scroll");
+    const followButton = el("button", { class: "pill follow", type: "button" }, tr("Scroll"));
     const drawFollow = () => {
       followButton.classList.toggle("on", followPlayback);
       followButton.setAttribute("aria-pressed", String(followPlayback));
       followButton.title = followPlayback
-        ? "Following: the transcript scrolls to the line being played. Click to stop."
-        : "Scroll the transcript along with playback, to read it as you listen";
+        ? tr("Following the line being played. Click to stop.")
+        : tr("Scroll the transcript with playback");
     };
     drawFollow();
     followButton.addEventListener("click", () => {
@@ -4481,7 +4478,7 @@ function renderSession(session, processingError, suggestion) {
       drawFollow();
       if (player) onTick(player.t, player.playing);
     });
-    const mixLabel = el("span", { class: "mix-switch", role: "group", "aria-label": "What you hear" });
+    const mixLabel = el("span", { class: "mix-switch", role: "group", "aria-label": tr("What you hear") });
     const drawMix = () => {
       const option = (value, label, title) => {
         const b = el("button", { class: `pill${playMix === value ? " on" : ""}`, type: "button", "aria-pressed": String(playMix === value), title }, label);
@@ -4489,14 +4486,14 @@ function renderSession(session, processingError, suggestion) {
         return b;
       };
       mixLabel.replaceChildren(
-        option("transcript", "Mix", "Hear what the transcript used: each track is muted where its sound is greyed out"),
-        option("manual", "Manual", "Every track plays; mute them yourself with M"));
+        option("transcript", tr("Mix"), tr("What the transcript used: each track muted where greyed out")),
+        option("manual", tr("Manual"), tr("Every track plays; mute with M")));
     };
     drawMix();
     for (const stream of streams) {
       const speaker = session.speakers.find((s) => s.key === stream);
       const name = speaker?.name ?? streamName(stream, session.meta.inputs?.length ? session.meta.inputs : prefs.inputs);
-      const mute = el("button", { class: "mute", "aria-pressed": "false", title: `Mute ${name}. In the transcript mix it lights up while the track is muted; pressing it switches to Manual.` }, "M");
+      const mute = el("button", { class: "mute", "aria-pressed": "false", title: tr("Mute {name}. Lit while muted in the mix; pressing it switches to Manual.", { name: name }) }, "M");
       mute.addEventListener("click", (e) => {
         e.stopPropagation();
         if (e.detail) mute.blur();
@@ -4516,15 +4513,15 @@ function renderSession(session, processingError, suggestion) {
       // Greyed first: what this microphone heard that the script takes from another one.
       const greyed = [
         ...scriptLines.filter((s) => s.stream !== stream && s.also_on?.includes(stream))
-          .map((s) => clip(s.start_s, s.end_s, "", `Also heard here · the script uses ${trackName(s.stream)} · ${clock(s.start_s)}`, "echo")),
+          .map((s) => clip(s.start_s, s.end_s, "", tr("Also heard here · the script uses {0} · {1}", { "0": trackName(s.stream), "1": clock(s.start_s) }), "echo")),
         ...doubles.filter((s) => s.stream === stream).flatMap((s) => {
           const original = lineById.get(s.echo_of);
-          return spans(s).map(([a, b]) => clip(a, b, "", `Left out of the script: heard more clearly ${original ? `on ${trackName(original.stream)}` : "elsewhere"} · “${s.text}”`, "echo"));
+          return spans(s).map(([a, b]) => clip(a, b, "", tr("Left out: clearer {0} · “{text}”", { "0": original ? `on ${trackName(original.stream)}` : "elsewhere", text: s.text }), "echo"));
         }),
       ];
       // Where the mix was changed by hand, over the transcript's own clips.
       const editLayer = el("span", { class: "mix-edits" });
-      const editTitle = (e) => `${e.play ? "Played" : "Muted"} by you · ${clock(e.from_s)} to ${clock(e.to_s)} · drag an edge to move it · right-click to change`;
+      const editTitle = (e) => tr("{0} by you · {1} to {2} · drag an edge to move · right-click to change", { "0": e.play ? tr("Played") : tr("Muted"), "1": clock(e.from_s), "2": clock(e.to_s) });
       const saveEdits = (next) => {
         mixEdits.set(stream, next);
         updateQuiet(stream);
@@ -4593,7 +4590,7 @@ function renderSession(session, processingError, suggestion) {
         const at = imported.offset_s - shiftOf(stream) + m.at_s * (imported.rate || 1);
         const note = markerNote(m);
         const tick = el("i", { class: `theirs${isAction(m) ? " action" : ""}`, style: `left:${(100 * at) / duration}%`,
-          title: `${markerLabel(m)} made in this recording · ${clock(at)}${note ? ` · ${note}` : ""} · click to go there` });
+          title: tr("{m} made in this recording · {at}{2} · click to go", { m: markerLabel(m), at: clock(at), "2": note ? ` · ${note}` : "" }) });
         tick.addEventListener("click", (e) => { e.stopPropagation(); player?.seek(at + shiftOf(stream)); });
         return tick;
       });
@@ -4601,7 +4598,7 @@ function renderSession(session, processingError, suggestion) {
         allMarkers.map((m) => {
           const note = markerNote(m);
           // The meeting's own marks stay put when a track's strip is moved.
-          const tick = el("i", { class: isAction(m) ? "action" : "", style: `left:${(100 * (m.at_s - shiftOf(stream))) / duration}%`, title: `${markerLabel(m)} · ${clock(m.at_s)}${note ? ` · ${note}` : ""} · click to change or delete` });
+          const tick = el("i", { class: isAction(m) ? "action" : "", style: `left:${(100 * (m.at_s - shiftOf(stream))) / duration}%`, title: tr("{m} · {1}{2} · click to change or delete", { m: markerLabel(m), "1": clock(m.at_s), "2": note ? ` · ${note}` : "" }) });
           tick.addEventListener("click", (e) => {
             e.stopPropagation();
             player?.seek(m.at_s);
@@ -4625,9 +4622,9 @@ function renderSession(session, processingError, suggestion) {
         const items = [`${name} at ${clock(own + shiftOf(stream))}`];
         if (q) {
           items.push(
-            ["Play from here", `Ends the mute here, for a word cut off at its start (muted ${clock(q[0])}–${clock(q[1])})`, () => add(own, q[1], true)],
-            ["Play up to here", "Starts the mute here instead, for a word cut off at its end", () => add(q[0], own, true)],
-            ["Play this muted stretch", `${clock(q[0])} to ${clock(q[1])}`, () => add(q[0], q[1], true)]);
+            [tr("Play from here"), tr("End the mute here, for a word cut at its start (muted {0}–{1})", { "0": clock(q[0]), "1": clock(q[1]) }), () => add(own, q[1], true)],
+            [tr("Play up to here"), tr("Start the mute here, for a word cut at its end"), () => add(q[0], own, true)],
+            [tr("Play this muted part"), `${clock(q[0])} to ${clock(q[1])}`, () => add(q[0], q[1], true)]);
         } else {
           // What's playing here: the block under the pointer, or the stretch between mutes.
           const r = block ?? [quiet.filter(([, b]) => b <= own).at(-1)?.[1] ?? 0, quiet.find(([a]) => a > own)?.[0] ?? duration];
@@ -4635,27 +4632,26 @@ function renderSession(session, processingError, suggestion) {
           const before = quiet.find(([, b]) => Math.abs(b - r[0]) < 0.06);
           if (block && before) {
             items.push(
-              ["Start playing 0.25 s sooner", "Unmutes just before this block, for a word cut off at its start", () => add(r[0] - 0.25, r[0] + 0.01, true)],
-              ["Start playing 0.5 s sooner", "", () => add(r[0] - 0.5, r[0] + 0.01, true)]);
+              [tr("Start 0.25 s sooner"), tr("Unmute just before this block, for a word cut at its start"), () => add(r[0] - 0.25, r[0] + 0.01, true)],
+              [tr("Start 0.5 s sooner"), "", () => add(r[0] - 0.5, r[0] + 0.01, true)]);
           }
           items.push(
-            ["Mute from here", `To the end of ${block ? "this block" : "this stretch"} (${clock(r[1])})`, () => add(own, r[1], false)],
-            ["Mute up to here", `From the start of ${block ? "this block" : "this stretch"} (${clock(r[0])})`, () => add(r[0], own, false)],
-            [block ? "Mute this block" : "Mute this stretch", `${clock(r[0])} to ${clock(r[1])}`, () => add(r[0], r[1], false)]);
+            [tr("Mute from here"), tr("To the end of {0} ({1})", { "0": block ? tr("this block") : tr("this stretch"), "1": clock(r[1]) }), () => add(own, r[1], false)],
+            [tr("Mute up to here"), tr("From the start of {0} ({1})", { "0": block ? tr("this block") : tr("this stretch"), "1": clock(r[0]) }), () => add(r[0], own, false)],
+            [block ? tr("Mute this block") : tr("Mute this part"), `${clock(r[0])} to ${clock(r[1])}`, () => add(r[0], r[1], false)]);
         }
         const mine = edits.find((x) => own >= x.from_s && own < x.to_s);
-        if (mine || edits.length) items.push("Your changes");
-        if (mine) items.push(["Undo this change", `${mine.play ? "Played" : "Muted"} by you, ${clock(mine.from_s)} to ${clock(mine.to_s)}`, () => save(edits.filter((x) => x !== mine))]);
-        if (edits.length > (mine ? 1 : 0)) items.push([`Undo all ${edits.length} changes on this track`, "Back to the transcript mix as it was", () => save([])]);
+        if (mine || edits.length) items.push(tr("Your changes"));
+        if (mine) items.push([tr("Undo this change"), tr("{0} by you, {1} to {2}", { "0": mine.play ? tr("Played") : tr("Muted"), "1": clock(mine.from_s), "2": clock(mine.to_s) }), () => save(edits.filter((x) => x !== mine))]);
+        if (edits.length > (mine ? 1 : 0)) items.push([tr("Undo all {n} changes on this track", { n: edits.length }), tr("Back to the original mix"), () => save([])]);
         contextMenu(e.clientX, e.clientY, items);
       });
       // The name opens the track's settings, where it can be placed or deleted too.
-      const details = imported ? `${name} · imported · ${placedText(imported, meta.created, meetingZone(meta))}` : trackDetails(name, meta.tracks?.[stream]);
-      const flags = [(meta.locked ?? []).includes(stream) ? "everything on it is them" : "", meta.track_offsets?.[stream] ? `moved ${signedClock(meta.track_offsets[stream])}` : ""].filter(Boolean);
+      const details = imported ? tr("{name} · imported · {1}", { name: name, "1": placedText(imported, meta.created, meetingZone(meta)) }) : trackDetails(name, meta.tracks?.[stream]);
+      const flags = [(meta.locked ?? []).includes(stream) ? tr("all of it is them") : "", meta.track_offsets?.[stream] ? `moved ${signedClock(meta.track_offsets[stream])}` : ""].filter(Boolean);
       const nameEl = el("span", { class: "name", role: "button", tabindex: "0", style: `color:${strong.get(stream) ?? "inherit"}`,
-        title: `${details}${flags.length ? `
-${flags.join(" · ")}` : ""}
-Click for who is on it, where it starts, or to delete it` }, name);
+        title: tr("{details}{1}\\nClick for who's on it, its start, or to delete it", { details: details, "1": flags.length ? `
+${flags.join(" · ")}` : "" }) }, name);
       const openSettings = (e) => { e.stopPropagation(); if (!meta.compacted) trackDialog(stream, name); };
       nameEl.addEventListener("click", openSettings);
       nameEl.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSettings(e); } });
@@ -4666,8 +4662,8 @@ Click for who is on it, where it starts, or to delete it` }, name);
     // zooms around the pointer (Shift or a sideways scroll moves along); two fingers pinch, one drags.
     if (trackView.id !== id) trackView = { id, zoom: 1, pan: 0 };
     const maxZoom = Math.max(1, duration / 4);
-    const fitButton = el("button", { class: "pill zoom-fit", type: "button", "aria-label": "Show the whole meeting",
-      title: "Show the whole meeting again (zoom with the mouse wheel; pinch on a touch screen)" }, svg("fit", 16));
+    const fitButton = el("button", { class: "pill zoom-fit", type: "button", "aria-label": tr("Whole meeting"),
+      title: tr("Show the whole meeting (zoom with the wheel or pinch)") }, svg("fit", 16));
     const barRect = () => lanes.querySelector(".bar").getBoundingClientRect();
     const setView = (zoom, pan) => {
       zoom = Math.min(maxZoom, Math.max(1, zoom));
@@ -4791,13 +4787,13 @@ Click for who is on it, where it starts, or to delete it` }, name);
         head.style.left = `${rect.left - lanesRect.left + rect.width * fx}px`;
       }
       timeLabel.textContent = `${clock(t)} / ${clock(duration)}`;
-      if (meta.created) timeLabel.title = `${dayClock(meta.created + t, meetingZone(meta))} ${zoneName(meta.created + t, meetingZone(meta))} by the time of day`;
+      if (meta.created) timeLabel.title = tr("{0} {1} by time of day", { "0": dayClock(meta.created + t, meetingZone(meta)), "1": zoneName(meta.created + t, meetingZone(meta)) });
       // Only when it changes: swapping the icon on every tick removes the element a click pressed
       // down on, and WebView2 then drops the click, so Pause wouldn't work while playing.
       if (playButton.dataset.playing !== String(playing)) {
         playButton.dataset.playing = String(playing);
         playButton.replaceChildren(svg(playing ? "pause" : "play", 18));
-        playButton.setAttribute("aria-label", playing ? "Pause" : "Play");
+        playButton.setAttribute("aria-label", playing ? tr("Pause") : tr("Play"));
       }
       let current = null;
       for (const { seg, line } of lineEls) {
@@ -4823,14 +4819,14 @@ Click for who is on it, where it starts, or to delete it` }, name);
     };
     tracks.classList.toggle("open", tracksOpenFor === id);
     // Tapping "Recording" or its length opens the tracks too, without playing.
-    const mini = el("button", { class: "tracks-mini", type: "button", title: "Show the tracks", "aria-label": "Show the tracks",
-      onclick: () => setTracksOpen(true) }, el("strong", {}, "Recording"), el("span", { class: "mono hint" }, clock(duration)));
-    const fold = el("button", { class: "icon-only tracks-fold", type: "button", title: "Hide the tracks", "aria-label": "Hide the tracks",
+    const mini = el("button", { class: "tracks-mini", type: "button", title: tr("Show tracks"), "aria-label": tr("Show tracks"),
+      onclick: () => setTracksOpen(true) }, el("strong", {}, tr("Recording")), el("span", { class: "mono hint" }, clock(duration)));
+    const fold = el("button", { class: "icon-only tracks-fold", type: "button", title: tr("Hide tracks"), "aria-label": tr("Hide tracks"),
       onclick: () => { player?.pause(); setTracksOpen(false); } }, svg("down", 16));
     player = makePlayer(session, duration, onTick);
     player.onFrame = applyMix;
     const rateText = (r) => `${r}×`;
-    const speedSelect = el("select", { class: "speed", title: "Playback speed (< slower, > faster)", "aria-label": "Playback speed" },
+    const speedSelect = el("select", { class: "speed", title: tr("Speed (< slower, > faster)"), "aria-label": tr("Speed") },
       PLAY_RATES.map((r) => el("option", { value: String(r), selected: r === playRate }, rateText(r))));
     speedSelect.addEventListener("change", () => { player?.setRate(Number(speedSelect.value)); speedSelect.classList.toggle("on", playRate !== 1); });
     speedSelect.classList.toggle("on", playRate !== 1);
@@ -4852,11 +4848,11 @@ Click for who is on it, where it starts, or to delete it` }, name);
       if (next != null) player?.seek(next);
     };
     tracks.append(lanes, el("div", { class: "transport" },
-      el("button", { class: "pill", "aria-label": "Previous clip or mark", title: "Start of the previous clip, bookmark or action item (←)", onclick: prevClip }, svg("skip-back", 16)),
+      el("button", { class: "pill", "aria-label": tr("Previous"), title: tr("Previous clip, bookmark or action item (←)"), onclick: prevClip }, svg("skip-back", 16)),
       playButton, mini,
-      el("button", { class: "pill", "aria-label": "Next clip or mark", title: "Start of the next clip, bookmark or action item (→)", onclick: nextClip }, svg("skip-forward", 16)),
+      el("button", { class: "pill", "aria-label": tr("Next"), title: tr("Next clip, bookmark or action item (→)"), onclick: nextClip }, svg("skip-forward", 16)),
       timeLabel, speedSelect, fitButton, el("span", { class: "grow" }), followButton, mixLabel,
-      meta.compacted ? null : el("button", { class: "pill with-icon", title: "Add another recording of this meeting, such as from a phone, as a track", onclick: () => showImport(tracks, id, meta.created, meetingZone(meta)), "aria-label": "Import a recording" }, svg("import", 14), el("span", { class: "wide-only" }, "Import")), fold));
+      meta.compacted ? null : el("button", { class: "pill with-icon", title: tr("Add another recording of this meeting, like from a phone, as a track"), onclick: () => showImport(tracks, id, meta.created, meetingZone(meta)), "aria-label": tr("Import recording") }, svg("import", 14), el("span", { class: "wide-only" }, tr("Import"))), fold));
     player.prevClip = prevClip;
     player.nextClip = nextClip;
     setView(trackView.zoom, trackView.pan);
@@ -4865,8 +4861,8 @@ Click for who is on it, where it starts, or to delete it` }, name);
   // At the end of the transcript, as at the end of a note: copies it all, and says how many words that is.
   const spoken = scriptLines.filter((l) => hasWords(l.text));
   if (spoken.length) {
-    const transcriptText = () => spoken.map((l) => `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? "Someone"}: ${l.text}`).join("\n");
-    page.append(el("div", { class: "note-end" }, copyIconButton(transcriptText, "Copy transcript"),
+    const transcriptText = () => spoken.map((l) => `${session.speakers.find((sp) => sp.key === l.speaker)?.name ?? tr("Someone")}: ${l.text}`).join("\n");
+    page.append(el("div", { class: "note-end" }, copyIconButton(transcriptText, tr("Copy transcript")),
       el("span", { class: "hint" }, wordsText(wordCount(spoken.map((l) => l.text).join(" "))))));
   }
   setLanguage([page], meetingLanguage());
@@ -4892,7 +4888,7 @@ function parseStart(text) {
   return m[1] ? -seconds : seconds;
 }
 
-const syncQuality = (c) => (c >= 1.5 ? "a clear match" : c >= 1.15 ? "a fair match" : "a weak match: check it");
+const syncQuality = (c) => (c >= 1.5 ? tr("a clear match") : c >= 1.15 ? tr("a fair match") : tr("a weak match: check it"));
 
 /// Decodes any audio the web view can play into 16 kHz mono 16-bit samples.
 async function decodeTo16k(file) {
@@ -4917,8 +4913,8 @@ async function decodeTo16k(file) {
 /// "14:30:05" for a time of day in Unix seconds: by the clock `zone` minutes ahead of UTC, or this computer's.
 function dayClock(unix, zone = null) {
   const opts = { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false };
-  if (zone == null) return new Date(unix * 1000).toLocaleTimeString([], opts);
-  return new Date((unix + zone * 60) * 1000).toLocaleTimeString([], { ...opts, timeZone: "UTC" });
+  if (zone == null) return new Date(unix * 1000).toLocaleTimeString(UI_LOCALE, opts);
+  return new Date((unix + zone * 60) * 1000).toLocaleTimeString(UI_LOCALE, { ...opts, timeZone: "UTC" });
 }
 
 /// This computer's time zone at a moment, as minutes ahead of UTC.
@@ -4929,9 +4925,9 @@ const meetingZone = (meta) => meta.utc_offset_min ?? localZone(meta.created || u
 
 /// "GMT+11", "GMT−3:30" or "GMT" for a time zone `zone` minutes ahead of UTC.
 function zoneLabel(zone) {
-  if (!zone) return "GMT";
+  if (!zone) return tr("GMT");
   const a = Math.abs(zone);
-  return `GMT${zone > 0 ? "+" : "−"}${Math.floor(a / 60)}${a % 60 ? `:${String(a % 60).padStart(2, "0")}` : ""}`;
+  return tr("GMT{0}{1}{2}", { "0": zone > 0 ? "+" : "−", "1": Math.floor(a / 60), "2": a % 60 ? `:${String(a % 60).padStart(2, "0")}` : "" });
 }
 
 /// The name of a time zone at a moment: this computer's own short name ("AEDT") when it's this computer's,
@@ -4954,7 +4950,7 @@ const ZONES = [...Array.from({ length: 27 }, (_, k) => (k - 12) * 60), -570, -21
 function zonePicker(zone, label) {
   const pick = el("select", { "aria-label": label },
     [...new Set([...ZONES, zone])].sort((a, b) => a - b).map((z) => el("option", { value: z, selected: z === zone },
-      `${zoneLabel(z)}${z === localZone() ? " (this computer)" : ""}`)));
+      `${zoneLabel(z)}${z === localZone() ? tr(" (this computer)") : ""}`)));
   return pick;
 }
 
@@ -4982,9 +4978,9 @@ function recordingStart(file, seconds) {
   const m = file.name.match(/(20\d\d)[-_.]?(\d\d)[-_.]?(\d\d)[ T_-]?(\d\d)[-_.:h]?(\d\d)[-_.:m]?(\d\d)/);
   if (m) {
     const wall = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])) / 1000;
-    if (Number.isFinite(wall)) return { wall, from: "the file's name" };
+    if (Number.isFinite(wall)) return { wall, from: tr("the file's name") };
   }
-  if (file.lastModified && seconds) return { at: file.lastModified / 1000 - seconds, from: "when the file was saved, less its length" };
+  if (file.lastModified && seconds) return { at: file.lastModified / 1000 - seconds, from: tr("file save time, less its length") };
   return null;
 }
 
@@ -5004,16 +5000,16 @@ function audioSeconds(file) {
 
 /// How an imported track was placed, for its title and menu.
 function placedText(imported, meetingStart, zone) {
-  const how = imported.placed_by === "sound" ? `matched by its sound (${syncQuality(imported.confidence ?? 0)})`
-    : imported.placed_by === "hand" ? "placed by hand" : "placed by the time of day";
+  const how = imported.placed_by === "sound" ? tr("matched by its sound ({0})", { "0": syncQuality(imported.confidence ?? 0) })
+    : imported.placed_by === "hand" ? tr("placed by hand") : tr("placed by time of day");
   const drift = imported.rate && imported.rate !== 1 ? ` · its clock ran ${Math.abs((imported.rate - 1) * 100).toFixed(2)} % ${imported.rate > 1 ? "slow" : "fast"}` : "";
-  return `Starts ${startedText(meetingStart + imported.offset_s, zone, imported.utc_offset_min)}, ${signedClock(imported.offset_s)} into the meeting · ${how}${drift}`;
+  return tr("Starts {0}, {1} into the meeting · {how}{drift}", { "0": startedText(meetingStart + imported.offset_s, zone, imported.utc_offset_min), "1": signedClock(imported.offset_s), how: how, drift: drift });
 }
 
 /// When a track started, by the meeting's clock, and by its own device's too when that was elsewhere:
 /// "21:32:24 AEDT (10:32:24 GMT by its clock)".
 function startedText(at, zone, own) {
-  const theirs = own != null && own !== zone ? ` (${dayClock(at, own)} ${zoneName(at, own)} by its clock)` : "";
+  const theirs = own != null && own !== zone ? tr(" ({0} {1} by its clock)", { "0": dayClock(at, own), "1": zoneName(at, own) }) : "";
   return `${dayClock(at, zone)} ${zoneName(at, zone)}${theirs}`;
 }
 
@@ -5022,27 +5018,27 @@ function startedText(at, zone, own) {
 function showImport(tracks, id, meetingStart, zone) {
   tracks.querySelector(".import-form")?.remove();
   // The device that made it may have been in another time zone; its clock's times are by that zone.
-  const zoneOf = zonePicker(zone, "Its clock's time zone");
+  const zoneOf = zonePicker(zone, tr("Its clock's time zone"));
   const ownZone = () => Number(zoneOf.value);
   let found = null;
-  const meetingAt = `The meeting started at ${dayClock(meetingStart, zone)} ${zoneName(meetingStart, zone)}.`;
-  const file = el("input", { type: "file", accept: "audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm", "aria-label": "Audio file" });
-  const name = el("input", { type: "text", placeholder: "Track name, such as Phone", maxlength: "60", "aria-label": "Track name" });
-  const how = el("select", { "aria-label": "How to place it" },
-    el("option", { value: "time" }, "By the time of day it started"),
-    el("option", { value: "sound" }, "By matching its sound anywhere"),
-    el("option", { value: "at" }, "At a point in the meeting"));
-  const when = el("input", { type: "text", class: "mono", size: "10", value: dayClock(meetingStart, zone), "aria-label": "Started at, time of day" });
+  const meetingAt = tr("The meeting started at {0} {1}.", { "0": dayClock(meetingStart, zone), "1": zoneName(meetingStart, zone) });
+  const file = el("input", { type: "file", accept: "audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm", "aria-label": tr("Audio file") });
+  const name = el("input", { type: "text", placeholder: tr("Track name, like Phone"), maxlength: "60", "aria-label": tr("Track name") });
+  const how = el("select", { "aria-label": tr("How to place it") },
+    el("option", { value: "time" }, tr("By start time of day")),
+    el("option", { value: "sound" }, tr("By matching sound anywhere")),
+    el("option", { value: "at" }, tr("At a point in the meeting")));
+  const when = el("input", { type: "text", class: "mono", size: "10", value: dayClock(meetingStart, zone), "aria-label": tr("Start time of day") });
   const whenFrom = el("small", { class: "hint" }, meetingAt);
   const refine = el("input", { type: "checkbox", checked: true });
-  const at = el("input", { type: "text", value: "0:00.0", class: "mono", size: "8", "aria-label": "Starts at" });
+  const at = el("input", { type: "text", value: "0:00.0", class: "mono", size: "8", "aria-label": tr("Starts at") });
   const status = el("div", { class: "hint", role: "status" });
   const timeRows = [
-    el("label", { class: "import-row" }, el("span", {}, "It started at"), when, zoneOf, whenFrom),
-    el("label", { class: "import-row check" }, refine, el("span", {}, "Then fine-tune it by matching its sound nearby",
-      el("small", { class: "hint" }, " Takes up a call's delay and clocks that run apart. Leave it off for two sides of a call that share no sound."))),
+    el("label", { class: "import-row" }, el("span", {}, tr("It started at")), when, zoneOf, whenFrom),
+    el("label", { class: "import-row check" }, refine, el("span", {}, tr("Then fine-tune by matching sound nearby"),
+      el("small", { class: "hint" }, tr(" Corrects call delay and drifting clocks. Leave off for two sides of a call with no shared sound.")))),
   ];
-  const atRow = el("label", { class: "import-row" }, el("span", {}, "It starts at"), at, el("small", { class: "hint" }, "minutes:seconds into the meeting; −0:05 if it started first"));
+  const atRow = el("label", { class: "import-row" }, el("span", {}, tr("It starts at")), at, el("small", { class: "hint" }, tr("min:s into the meeting; −0:05 if it started first")));
   const showRows = () => {
     timeRows.forEach((r) => { r.hidden = how.value !== "time"; });
     atRow.hidden = how.value !== "at";
@@ -5061,80 +5057,80 @@ function showImport(tracks, id, meetingStart, zone) {
     const at = found.at ?? found.wall - ownZone() * 60;
     when.value = dayClock(at, ownZone());
     const apart = Math.abs(at - meetingStart);
-    whenFrom.textContent = `From ${found.from}. ${meetingAt}${apart > 6 * 3600 ? " That's hours apart: check its time zone." : ""}`;
+    whenFrom.textContent = tr("From {from}. {meetingAt}{2}", { from: found.from, meetingAt: meetingAt, "2": apart > 6 * 3600 ? tr(" Hours apart: check its time zone.") : "" });
   };
   zoneOf.addEventListener("change", () => { if (found?.wall != null) showFound(); });
-  const go = el("button", { class: "primary pill" }, "Import and transcribe");
+  const go = el("button", { class: "primary pill" }, tr("Import and transcribe"));
   go.addEventListener("click", async () => {
     const chosen = file.files[0];
-    if (!chosen) return status.replaceChildren(el("span", { class: "danger" }, "Choose a recording first."));
+    if (!chosen) return status.replaceChildren(el("span", { class: "danger" }, tr("Choose a recording first.")));
     const headers = { "x-id": id, "x-label": encodeURIComponent(name.value.trim() || chosen.name), "x-place": how.value, "x-utc-offset": String(ownZone()) };
     if (how.value === "time") {
       const started = parseDayClock(when.value, meetingStart, ownZone());
-      if (started == null) return status.replaceChildren(el("span", { class: "danger" }, "Type the time it started as hours:minutes:seconds, such as 14:30:05."));
+      if (started == null) return status.replaceChildren(el("span", { class: "danger" }, tr("Type the start as hh:mm:ss, like 14:30:05.")));
       headers["x-started-at"] = String(started);
       headers["x-refine"] = refine.checked ? "1" : "0";
     } else if (how.value === "at") {
       const offset = parseStart(at.value);
-      if (offset == null) return status.replaceChildren(el("span", { class: "danger" }, "Type the start as minutes:seconds, such as 1:02.5, or −0:05 if it started first."));
+      if (offset == null) return status.replaceChildren(el("span", { class: "danger" }, tr("Type the start as min:s, like 1:02.5, or −0:05 if it started first.")));
       headers["x-offset"] = String(offset);
     }
     go.disabled = true;
     try {
-      status.replaceChildren(el("span", { class: "spinner" }), " Reading the recording…");
+      status.replaceChildren(el("span", { class: "spinner" }), tr(" Reading the recording…"));
       const pcm = await decodeTo16k(chosen);
-      status.replaceChildren(el("span", { class: "spinner" }), how.value === "at" || (how.value === "time" && !refine.checked) ? " Adding it…" : " Matching its sound to the other tracks…");
+      status.replaceChildren(el("span", { class: "spinner" }), how.value === "at" || (how.value === "time" && !refine.checked) ? tr(" Adding it…") : tr(" Matching sound to other tracks…"));
       const added = await invoke("import_track", pcm, { headers });
-      const missed = how.value === "time" && refine.checked && added.placed_by !== "sound" ? " Its sound didn't clearly match nearby, so it's placed by the time of day." : "";
-      status.replaceChildren(`${placedText(added, meetingStart, zone)}.${missed} Transcribing…`);
+      const missed = how.value === "time" && refine.checked && added.placed_by !== "sound" ? tr(" No clear sound match nearby, so it's placed by time of day.") : "";
+      status.replaceChildren(tr("{0}.{missed} Transcribing…", { "0": placedText(added, meetingStart, zone), missed: missed }));
       processAgain(id);
     } catch (e) {
       go.disabled = false;
-      status.replaceChildren(el("span", { class: "danger" }, `Couldn't import it: ${e?.message ?? e}`));
+      status.replaceChildren(el("span", { class: "danger" }, tr("Couldn't import: {0}", { "0": e?.message ?? e })));
     }
   });
   // Someone else's Superteem Voice session of the same meeting: every track of theirs that heard something,
   // placed by when their recording started (the same instant wherever they were), then by its sound.
-  const owner = el("input", { type: "text", placeholder: "Whose, such as Lin", maxlength: "40", "aria-label": "Whose recording" });
+  const owner = el("input", { type: "text", placeholder: tr("Whose, like Lin"), maxlength: "40", "aria-label": tr("Whose recording") });
   const sessionStatus = el("div", { class: "hint", role: "status" });
   const pickSession = (zip) => async () => {
     const picked = await window.__TAURI__.dialog.open(zip
-      ? { title: "Their zipped session", filters: [{ name: "Zipped session", extensions: ["zip"] }] }
-      : { directory: true, title: "Their session folder (session-…)" }).catch(() => null);
+      ? { title: tr("Their zipped session"), filters: [{ name: tr("Zipped session"), extensions: ["zip"] }] }
+      : { directory: true, title: tr("Their session folder (session-…)") }).catch(() => null);
     if (!picked) return;
     sessionButtons.forEach((b) => { b.disabled = true; });
-    sessionStatus.replaceChildren(el("span", { class: "spinner" }), " Reading their tracks and matching them to yours…");
+    sessionStatus.replaceChildren(el("span", { class: "spinner" }), tr(" Reading their tracks and matching to yours…"));
     try {
       const done = await invoke("import_session", { id, path: picked, owner: owner.value.trim() });
       const silent = done.silent ? ` ${done.silent} that heard nothing ${done.silent === 1 ? "was" : "were"} left out.` : "";
       const placed = done.matched ? placedText(done.added[0], meetingStart, zone)
-        : `Their recording started at ${startedText(done.started_at, zone, done.added[0]?.utc_offset_min)}, ${signedClock(done.started_at - meetingStart)} into the meeting · its sound didn't clearly match nearby, so it's placed by the time of day`;
-      sessionStatus.replaceChildren(`Added ${done.added.length} track${done.added.length === 1 ? "" : "s"}. ${placed}.${silent} Transcribing…`);
+        : tr("Their recording started at {0}, {1} into the meeting · no clear sound match, so placed by time of day", { "0": startedText(done.started_at, zone, done.added[0]?.utc_offset_min), "1": signedClock(done.started_at - meetingStart) });
+      sessionStatus.replaceChildren(`${trn(done.added.length, "Added {n} track.", "Added {n} tracks.")} ${placed}.${silent} ${tr("Transcribing…")}`);
       processAgain(id);
     } catch (e) {
       sessionButtons.forEach((b) => { b.disabled = false; });
-      sessionStatus.replaceChildren(el("span", { class: "danger" }, `Couldn't import it: ${e?.message ?? e}`));
+      sessionStatus.replaceChildren(el("span", { class: "danger" }, tr("Couldn't import: {0}", { "0": e?.message ?? e })));
     }
   };
   const sessionButtons = [
-    el("button", { class: "pill", type: "button", onclick: pickSession(false) }, "Choose their session folder…"),
-    el("button", { class: "pill", type: "button", onclick: pickSession(true) }, "Choose a .zip…"),
+    el("button", { class: "pill", type: "button", onclick: pickSession(false) }, tr("Choose session folder…")),
+    el("button", { class: "pill", type: "button", onclick: pickSession(true) }, tr("Choose a .zip…")),
   ];
   const fromSession = isDesktop() ? [
-    el("div", { class: "menu-label" }, "Someone else's Superteem Voice recording"),
-    el("label", { class: "import-row" }, el("span", {}, "Whose"), owner, el("small", { class: "hint" }, "Put in front of their track names")),
+    el("div", { class: "menu-label" }, tr("Another Superteem Voice recording")),
+    el("label", { class: "import-row" }, el("span", {}, tr("Whose")), owner, el("small", { class: "hint" }, tr("Prefix for their track names"))),
     el("div", { class: "import-row" }, ...sessionButtons),
     sessionStatus,
-    el("div", { class: "menu-label" }, "A recording from anything else"),
+    el("div", { class: "menu-label" }, tr("Any other recording")),
   ] : [];
   const form = el("div", { class: "import-form" },
-    el("div", { class: "import-head" }, el("strong", {}, "Import a recording"),
-      el("button", { class: "icon-only", "aria-label": "Close", onclick: () => form.remove() }, svg("close", 14))),
-    el("p", { class: "hint" }, "Another recording of this meeting becomes a track: a phone in the room, or the other side of a call recorded by the person on it. It's transcribed with the others, so the transcript has everyone."),
+    el("div", { class: "import-head" }, el("strong", {}, tr("Import recording")),
+      el("button", { class: "icon-only", "aria-label": tr("Close"), onclick: () => form.remove() }, svg("close", 14))),
+    el("p", { class: "hint" }, tr("Another recording of this meeting becomes a track: a phone in the room, or the far side of a call. It's transcribed with the rest, so the transcript has everyone.")),
     ...fromSession,
-    el("label", { class: "import-row" }, el("span", {}, "Recording"), file),
-    el("label", { class: "import-row" }, el("span", {}, "Name"), name),
-    el("label", { class: "import-row" }, el("span", {}, "Place it"), how),
+    el("label", { class: "import-row" }, el("span", {}, tr("Recording")), file),
+    el("label", { class: "import-row" }, el("span", {}, tr("Name")), name),
+    el("label", { class: "import-row" }, el("span", {}, tr("Place it")), how),
     ...timeRows, atRow,
     el("div", { class: "import-row" }, go), status);
   showRows();
@@ -5226,7 +5222,7 @@ const isFlat = (l) => !l.boost_db && !l.compress && !l.low_cut_hz && !l.high_cut
 /// The stops on the cut sliders: none first, then cutting more as it moves right.
 const LOW_CUTS = [0, 40, 60, 80, 100, 150, 200, 300, 400, 500];
 const HIGH_CUTS = [0, 7000, 6000, 5000, 4000, 3000, 2500, 2000, 1500, 1000];
-const hzText = (hz) => (!hz ? "Off" : hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`);
+const hzText = (hz) => (!hz ? tr("Off") : hz >= 1000 ? tr("{0} kHz", { "0": hz / 1000 }) : tr("{hz} Hz", { hz: hz }));
 const nearestStop = (stops, hz) => stops.reduce((best, x, k) => (Math.abs(x - hz) < Math.abs(stops[best] - hz) ? k : best), 0);
 
 function levelButton(id, stream, name, saved) {
@@ -5235,17 +5231,17 @@ function levelButton(id, stream, name, saved) {
   const draw = () => {
     const on = !isFlat(level);
     button.classList.toggle("on", on);
-    button.textContent = level.boost_db > 0 ? `+${level.boost_db % 1 ? level.boost_db.toFixed(1) : level.boost_db}` : "dB";
+    button.textContent = level.boost_db > 0 ? `+${level.boost_db % 1 ? level.boost_db.toFixed(1) : level.boost_db}` : tr("dB");
     if (level.compress || level.low_cut_hz || level.high_cut_hz) button.append(el("span", { class: "boost-c", "aria-hidden": "true" }));
     const parts = [
-      level.boost_db > 0 ? `lifted ${level.boost_db} dB` : "",
+      level.boost_db > 0 ? tr("lifted {boost_db} dB", { boost_db: level.boost_db }) : "",
       level.compress ? "compressed" : "",
-      level.low_cut_hz ? `bass cut below ${hzText(level.low_cut_hz)}` : "",
-      level.high_cut_hz ? `top cut above ${hzText(level.high_cut_hz)}` : "",
+      level.low_cut_hz ? tr("bass cut below {0}", { "0": hzText(level.low_cut_hz) }) : "",
+      level.high_cut_hz ? tr("top cut above {0}", { "0": hzText(level.high_cut_hz) }) : "",
     ].filter(Boolean);
-    const what = parts.length ? parts.join(", ").replace(/^./, (c) => c.toUpperCase()) : "As recorded";
-    button.title = `${what}. Click to change how ${name} sounds when it plays.`;
-    button.setAttribute("aria-label", `Volume of ${name}: ${what}`);
+    const what = parts.length ? parts.join(", ").replace(/^./, (c) => c.toUpperCase()) : tr("As recorded");
+    button.title = tr("{what}. Click to change how {name} sounds.", { what: what, name: name });
+    button.setAttribute("aria-label", tr("Volume of {name}: {what}", { name: name, what: what }));
   };
   draw();
   let saving = null;
@@ -5262,9 +5258,9 @@ function levelButton(id, stream, name, saved) {
     if (e.detail) button.blur();
     document.querySelector(".boost-pop")?.remove();
     const value = el("span", { class: "mono" });
-    const slider = el("input", { type: "range", min: "0", max: "24", step: "1", value: String(level.boost_db), "aria-label": `Lift ${name}, in decibels` });
+    const slider = el("input", { type: "range", min: "0", max: "24", step: "1", value: String(level.boost_db), "aria-label": tr("Lift {name} (dB)", { name: name }) });
     const compress = el("input", { type: "checkbox", checked: level.compress });
-    const showValue = () => value.textContent = `+${slider.value} dB`;
+    const showValue = () => value.textContent = tr("+{value} dB", { value: slider.value });
     showValue();
     slider.addEventListener("input", () => { level.boost_db = Number(slider.value); showValue(); apply(); });
     compress.addEventListener("change", () => { level.compress = compress.checked; apply(); });
@@ -5279,21 +5275,21 @@ function levelButton(id, stream, name, saved) {
       row.set = () => { range.value = String(nearestStop(stops, level[key])); show(); };
       return row;
     };
-    const lowRow = cutRow("Bass cut", LOW_CUTS, "low_cut_hz", "Cuts the bottom end: rumble, hum, traffic, a desk being knocked. Further right cuts more.");
-    const highRow = cutRow("Top cut", HIGH_CUTS, "high_cut_hz", "Cuts the top end: hiss and harshness. Further right cuts more, and voices get duller.");
-    const reset = el("button", { class: "pill", type: "button" }, "Reset");
+    const lowRow = cutRow(tr("Bass cut"), LOW_CUTS, "low_cut_hz", tr("Cuts rumble, hum, traffic and knocks. Further right cuts more."));
+    const highRow = cutRow(tr("Top cut"), HIGH_CUTS, "high_cut_hz", tr("Cuts hiss and harshness. Further right cuts more and dulls voices."));
+    const reset = el("button", { class: "pill", type: "button" }, tr("Reset"));
     reset.addEventListener("click", () => {
       level = { ...FLAT_LEVEL };
       slider.value = "0"; compress.checked = false; lowRow.set(); highRow.set();
       showValue(); apply();
     });
-    const pop = el("div", { class: "boost-pop", role: "dialog", "aria-label": `Volume of ${name}` },
+    const pop = el("div", { class: "boost-pop", role: "dialog", "aria-label": tr("Volume of {name}", { name: name }) },
       el("strong", {}, name),
-      el("label", { class: "boost-row" }, el("span", {}, "Lift"), slider, value),
-      el("label", { class: "field check" }, compress, el("span", {}, "Compress",
-        el("small", {}, "Brings quiet and loud parts closer together and holds back the peaks, so it can be lifted further without distorting."))),
+      el("label", { class: "boost-row" }, el("span", {}, tr("Lift")), slider, value),
+      el("label", { class: "field check" }, compress, el("span", {}, tr("Compress"),
+        el("small", {}, tr("Evens out quiet and loud parts and holds back peaks, so it can be lifted further without distorting.")))),
       lowRow, highRow,
-      el("div", { class: "boost-foot" }, el("span", { class: "hint" }, "Only what you hear; the transcript stays as it is."), reset));
+      el("div", { class: "boost-foot" }, el("span", { class: "hint" }, tr("Only what you hear; the transcript is unchanged.")), reset));
     pop.addEventListener("click", (ev) => ev.stopPropagation());
     pop.addEventListener("pointerdown", (ev) => ev.stopPropagation());
     document.body.append(pop);
@@ -5354,33 +5350,33 @@ listen("analysed", async (e) => {
   const fresh = await invoke("get_session", { id }).catch(() => null);
   if (!fresh || view.kind !== "session" || view.id !== id) return;
   renderSession(fresh, null);
-  if (error && error !== "Cancelled.") showError(main.querySelector(".page"), `Couldn't suggest a label: ${error}`);
+  if (error && error !== "Cancelled.") showError(main.querySelector(".page"), tr("Couldn't suggest a label: {error}", { error: error }));
 });
 
 /// The keyboard shortcuts, as shown on the Shortcuts page. Each is [keys, what it does].
 const SHORTCUTS = [
-  ["Anywhere", [
-    [["Ctrl", "N"], "New note"],
-    [["Ctrl", "M"], "Start a meeting"],
-    [["Alt", "V"], "Start or stop dictation (in a note: dictate there; elsewhere: in a new note)"],
-    [["Ctrl", "Space"], "Start or finish dictation in a note"],
-    [["Esc"], "Cancel dictation"],
+  [tr("Anywhere"), [
+    [[tr("Ctrl"), "N"], tr("New note")],
+    [[tr("Ctrl"), "M"], tr("Start meeting")],
+    [["Alt", "V"], tr("Start or stop dictation (in a note, or a new note)")],
+    [[tr("Ctrl"), "Space"], tr("Start or finish dictation in a note")],
+    [[tr("Esc")], tr("Cancel dictation")],
   ]],
-  ["Recording a meeting", [
-    [["B"], "Bookmark this moment, when not typing"],
-    [["A"], "Add an action item, when not typing"],
-    [["Alt", "B"], "Bookmark this moment, even while typing a note"],
-    [["Alt", "A"], "Add an action item, even while typing a note"],
-    [["Enter"], "In the note box: bookmark with the note"],
-    [["Ctrl", "Enter"], "In the note box: action item with the note"],
+  [tr("Recording a meeting"), [
+    [["B"], tr("Bookmark now, when not typing")],
+    [["A"], tr("Add action item, when not typing")],
+    [["Alt", "B"], tr("Bookmark now, even while typing")],
+    [["Alt", "A"], tr("Add action item, even while typing")],
+    [["Enter"], tr("In the note box: bookmark with note")],
+    [[tr("Ctrl"), "Enter"], tr("In the note box: action item with note")],
   ]],
-  ["Playing back a meeting, when not typing", [
-    [["Space"], "Play or pause"],
-    [["<", ">"], "Play slower or faster (0.25× to 5×)"],
-    [["←", "→"], "Previous or next clip, bookmark or action item"],
-    [["Alt", "←", "→"], "Back or forward 5 seconds"],
-    [["Shift", "←", "→"], "Back or forward 20 seconds"],
-    [["Ctrl", "←", "→"], "Back or forward 1 second"],
+  [tr("Playing a meeting, when not typing"), [
+    [["Space"], tr("Play or pause")],
+    [["<", ">"], tr("Slower or faster (0.25× to 5×)")],
+    [["←", "→"], tr("Previous or next clip, bookmark or action item")],
+    [["Alt", "←", "→"], tr("Back or forward 5 s")],
+    [["Shift", "←", "→"], tr("Back or forward 20 s")],
+    [[tr("Ctrl"), "←", "→"], tr("Back or forward 1 s")],
   ]],
 ];
 
@@ -5446,7 +5442,7 @@ function showShortcuts() {
   view = { kind: "shortcuts" };
   refreshItems();
   const keys = (combo) => el("span", { class: "keys" }, combo.flatMap((k, i) => [i ? el("span", { class: "plus" }, k === "→" ? "/" : "+") : null, el("kbd", {}, k)]));
-  main.replaceChildren(el("div", { class: "page shortcuts" }, el("h1", {}, "Keyboard shortcuts"),
+  main.replaceChildren(el("div", { class: "page shortcuts" }, el("h1", {}, tr("Shortcuts")),
     SHORTCUTS.flatMap(([group, rows]) => [el("h2", {}, group), el("div", { class: "group" },
       rows.map(([combo, what]) => el("div", { class: "row" }, el("span", { class: "label" }, what), keys(combo))))])));
 }
@@ -5455,14 +5451,14 @@ function showShortcuts() {
 function speakerMenu(sp, speakers, onPick) {
   const others = speakers.filter((o) => o.key !== sp.key);
   const prints = (window.currentPrints ?? []).filter((p) => p.id !== sp.print?.id);
-  const menu = el("select", { title: "More for this speaker", "aria-label": `More for ${sp.name}` },
+  const menu = el("select", { title: tr("More"), "aria-label": tr("More for {name}", { name: sp.name }) },
     el("option", { value: "" }, "⋯"),
-    others.length ? el("optgroup", { label: "Same person as" }, others.map((o) => el("option", { value: `merge:${o.key}` }, o.name))) : null,
-    prints.length ? el("optgroup", { label: "This is voice print" }, prints.map((p) => el("option", { value: `link:${p.id}` }, p.name))) : null,
-    el("optgroup", { label: "Voice print" },
-      sp.voiced_s >= 8 ? el("option", { value: "new-print" }, "Save as a new voice print…") : null,
-      sp.print ? el("option", { value: "unlink" }, `Not ${sp.print.name}`) : null,
-      sp.voiced_s < 8 ? el("option", { disabled: true }, "Too little clear speech for a new voice print") : null));
+    others.length ? el("optgroup", { label: tr("Same person as") }, others.map((o) => el("option", { value: `merge:${o.key}` }, o.name))) : null,
+    prints.length ? el("optgroup", { label: tr("This is voice print") }, prints.map((p) => el("option", { value: `link:${p.id}` }, p.name))) : null,
+    el("optgroup", { label: tr("Voice print") },
+      sp.voiced_s >= 8 ? el("option", { value: "new-print" }, tr("New voice print…")) : null,
+      sp.print ? el("option", { value: "unlink" }, tr("Not {name}", { name: sp.print.name })) : null,
+      sp.voiced_s < 8 ? el("option", { disabled: true }, tr("Too little clear speech for a voice print")) : null));
   menu.addEventListener("change", () => {
     const value = menu.value;
     menu.value = "";
@@ -5475,7 +5471,7 @@ function speakerMenu(sp, speakers, onPick) {
 /// An inline name box beside the dropdown, because the webview has no prompt dialog.
 function askName(anchor) {
   return new Promise((resolve) => {
-    const input = el("input", { placeholder: "Name", class: "chip" });
+    const input = el("input", { placeholder: tr("Name"), class: "chip" });
     anchor.after(input);
     input.focus();
     const done = (value) => { input.remove(); resolve(value); };
@@ -5489,13 +5485,13 @@ function askName(anchor) {
 
 // ---------- Voice prints ----------
 
-/// Written to cover most English sounds in about 30 seconds of reading.
+/// Written to cover most English sounds in about 30 seconds of reading, so the text stays in English.
 const BUILT_IN_SCRIPTS = [
-  { title: "Morning walk", text: "On a cool morning, Jo packed a thick brown jacket, two cheese sandwiches and a flask of hot tea. "
+  { title: tr("Morning walk"), text: "On a cool morning, Jo packed a thick brown jacket, two cheese sandwiches and a flask of hot tea. "
     + "The path wound up through the woods, past a quiet pond where three white geese were splashing. "
     + "By noon the view from the ridge stretched for miles: yellow fields, a red barn, and a village with a tall church. "
     + "\"Should we keep going?\" asked Max. \"Sure,\" Jo said, \"but let's measure how much water we have left first.\"" },
-  { title: "Work update", text: "Here is a quick update on the project. Last week we fixed the login problem, reviewed the budget "
+  { title: tr("Work update"), text: "Here is a quick update on the project. Last week we fixed the login problem, reviewed the budget "
     + "and agreed on a schedule with the supplier. This week the focus is testing: Zoe is checking the mobile version, "
     + "and Raj is measuring how fast the reports load. If anything blocks you, just ask. "
     + "Our next big date is the fourteenth of June, when the first customers join the pilot." },
@@ -5510,13 +5506,13 @@ async function showVoicePrints(error) {
   refreshItems();
   const prints = await invoke("list_voiceprints");
   const page = el("div", { class: "page" },
-    el("button", { class: "link", onclick: () => showVoices() }, "‹ Voices"),
-    el("h1", {}, "Voice prints"),
-    el("p", { class: "legend" }, "A voice print lets Voice recognise someone and name them in new meetings. "
-      + "It is kept only on this device, as a description of how the voice sounds; the recording made for it is deleted. "
-      + "Only make one with the person's agreement."));
+    el("button", { class: "link", onclick: () => showVoices() }, tr("‹ Voices")),
+    el("h1", {}, tr("Voice prints")),
+    el("p", { class: "legend" }, tr("A voice print lets Voice recognise and name someone in new meetings. ")
+      + tr("It's kept only on this device, as a description of the voice; its recording is deleted. ")
+      + tr("Only make one with the person's consent.")));
   if (error) page.append(el("div", { class: "error" }, String(error)));
-  if (!prints.length) page.append(el("div", { class: "empty" }, "No voice prints yet."));
+  if (!prints.length) page.append(el("div", { class: "empty" }, tr("No voice prints yet.")));
   // One person can have several prints, as they sound different on each microphone and through call apps.
   const people = [];
   for (const p of prints) {
@@ -5525,27 +5521,27 @@ async function showVoicePrints(error) {
   }
   for (const person of people) {
     const first = person.prints[0];
-    const name = el("input", { value: person.name, title: "Rename", "aria-label": "Name" });
+    const name = el("input", { value: person.name, title: tr("Rename"), "aria-label": tr("Name") });
     name.addEventListener("keydown", (e) => { if (e.key === "Enter") name.blur(); });
     name.addEventListener("change", async () => {
       try { await invoke("rename_voiceprint", { id: first.id, name: name.value }); showVoicePrints(); } catch (e) { showError(page, e); }
     });
     const others = people.filter((x) => x !== person);
-    const same = el("select", { class: "plain", "aria-label": `${person.name} is the same person as` },
-      el("option", { value: "" }, "Same person as…"), others.map((o) => el("option", { value: o.prints[0].id }, o.name)));
+    const same = el("select", { class: "plain", "aria-label": tr("{name} is the same person as", { name: person.name }) },
+      el("option", { value: "" }, tr("Same person as…")), others.map((o) => el("option", { value: o.prints[0].id }, o.name)));
     same.addEventListener("change", async () => {
       if (!same.value) return;
       try { await invoke("merge_voiceprint_people", { id: first.id, into: same.value }); showVoicePrints(); } catch (e) { showError(page, e); }
     });
     page.append(el("div", { class: "print-row person-row" }, name,
-      el("span", { class: "detail" }, person.prints.length > 1 ? `${person.prints.length} voice prints` : ""),
-      el("button", { onclick: () => showEnrol(null, first) }, "Add a voice print"),
+      el("span", { class: "detail" }, person.prints.length > 1 ? tr("{n} voice prints", { n: person.prints.length }) : ""),
+      el("button", { onclick: () => showEnrol(null, first) }, tr("Add a voice print")),
       others.length ? same : null));
     for (const p of person.prints) page.append(printRow(p, person.prints.length > 1));
   }
-  page.append(el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showEnrol(null) }, "New voice print")),
-    el("p", { class: "legend" }, "You can also make a voice print from a speaker in any meeting, from the ⋯ menu beside their name. "
-      + "Someone can have several, as they sound different on each microphone and through call apps; each is matched separately."));
+  page.append(el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showEnrol(null) }, tr("New voice print"))),
+    el("p", { class: "legend" }, tr("You can also make one from a speaker in any meeting, via ⋯ beside their name. ")
+      + tr("Someone can have several, as they sound different on each mic and call app; each is matched separately.")));
   main.replaceChildren(page);
 
   /// One voice print of a person: what it was recorded on and from what, with its own buttons.
@@ -5554,22 +5550,22 @@ async function showVoicePrints(error) {
     remove.addEventListener("click", async () => {
       if (!remove.dataset.armed) {
         remove.dataset.armed = "1";
-        remove.textContent = "Click again to delete";
+        remove.textContent = tr("Click again to delete");
         setTimeout(() => { delete remove.dataset.armed; remove.textContent = "Delete"; }, 4000);
         return;
       }
       try { await invoke("delete_voiceprint", { id: p.id }); showVoicePrints(); } catch (e) { showError(page, e); }
     });
-    const sources = [p.scripts ? `${p.scripts} script reading${p.scripts > 1 ? "s" : ""}` : null,
-      p.samples - p.scripts ? `${p.samples - p.scripts} meeting${p.samples - p.scripts > 1 ? "s" : ""}` : null].filter(Boolean);
-    const separate = shared ? el("button", { class: "link", title: "This voice print is someone else with the same name" }, "Not them") : null;
+    const sources = [p.scripts ? trn(p.scripts, "{n} script reading", "{n} script readings") : null,
+      p.samples - p.scripts ? trn(p.samples - p.scripts, "{n} meeting", "{n} meetings") : null].filter(Boolean);
+    const separate = shared ? el("button", { class: "link", title: tr("Someone else with the same name") }, tr("Not them")) : null;
     separate?.addEventListener("click", async () => {
       try { await invoke("separate_voiceprint", { id: p.id }); showVoicePrints(); } catch (e) { showError(page, e); }
     });
     return el("div", { class: "print-row print-sub" },
-      el("span", { class: "label" }, p.label || "Voice print"),
-      el("span", { class: "detail" }, `${Math.round(p.seconds)} s of speech from ${sources.join(" and ")}`),
-      el("button", { onclick: () => showEnrol(p) }, "Record more"), separate, remove);
+      el("span", { class: "label" }, p.label || tr("Voice print")),
+      el("span", { class: "detail" }, tr("{0} s of speech from {1}", { "0": Math.round(p.seconds), "1": trList(sources) })),
+      el("button", { onclick: () => showEnrol(p) }, tr("Record more")), separate, remove);
   }
 }
 
@@ -5581,35 +5577,35 @@ async function showEnrol(print, forPerson = null) {
   view = { kind: "prints" };
   const [{ devices, default: preferred }, fresh] = await Promise.all([invoke("list_devices"), invoke("get_prefs")]);
   prefs = fresh;
-  const page = el("div", { class: "page" }, el("h1", {}, print ? `Record more of ${print.name}` : forPerson ? `Another voice print for ${forPerson.name}` : "New voice print"));
-  const name = el("input", { type: "text", class: "plain", placeholder: "Their name", "aria-label": "Their name" });
-  if (!print && !forPerson) page.append(el("h2", {}, "Name"), name);
+  const page = el("div", { class: "page" }, el("h1", {}, print ? tr("Record more of {name}", { name: print.name }) : forPerson ? tr("Another voice print for {name}", { name: forPerson.name }) : tr("New voice print")));
+  const name = el("input", { type: "text", class: "plain", placeholder: tr("Their name"), "aria-label": tr("Their name") });
+  if (!print && !forPerson) page.append(el("h2", {}, tr("Name")), name);
 
-  page.append(el("h2", {}, "Microphone"));
-  const input = el("select", { class: "plain", "aria-label": "Microphone" }, devices.map((d) => el("option", { value: d,
+  page.append(el("h2", {}, tr("Microphone")));
+  const input = el("select", { class: "plain", "aria-label": tr("Microphone") }, devices.map((d) => el("option", { value: d,
     selected: d === (devices.includes(prefs.enrol_input) ? prefs.enrol_input : preferred) }, d)));
   const micInfo = el("span");
   const showNote = () => micInfo.replaceChildren(micNote(prefs.mics[input.value]) ?? "");
   input.addEventListener("change", showNote);
   showNote();
   page.append(el("div", { class: "field" }, input, micInfo),
-    el("div", { class: "legend" }, "Use the microphone they will usually wear, so they are recognised best in their meetings."));
+    el("div", { class: "legend" }, tr("Use the mic they usually wear, so they're recognised best.")));
 
-  page.append(el("h2", {}, "Script"));
+  page.append(el("h2", {}, tr("Script")));
   const scripts = [...BUILT_IN_SCRIPTS, ...prefs.scripts.map((s) => ({ ...s, custom: true }))];
-  const choice = el("select", { class: "plain", "aria-label": "Script" }, scripts.map((s, i) => el("option", { value: i }, s.title + (s.custom ? " (yours)" : ""))),
-    el("option", { value: "new" }, "Write your own…"));
+  const choice = el("select", { class: "plain", "aria-label": tr("Script") }, scripts.map((s, i) => el("option", { value: i }, s.title + (s.custom ? tr(" (yours)") : ""))),
+    el("option", { value: "new" }, tr("Write your own…")));
   const preview = el("div", { class: "script" });
   const editor = el("div");
   const showScript = () => {
     editor.replaceChildren();
     if (choice.value === "new") {
       preview.style.display = "none";
-      const title = el("input", { type: "text", placeholder: "Script name" });
-      const text = el("textarea", { class: "plain", placeholder: "Something they can read aloud for 30 seconds or more" });
-      const saveScript = el("button", { class: "primary" }, "Save script");
+      const title = el("input", { type: "text", placeholder: tr("Script name") });
+      const text = el("textarea", { class: "plain", placeholder: tr("Something to read aloud for 30 s or more") });
+      const saveScript = el("button", { class: "primary" }, tr("Save script"));
       saveScript.addEventListener("click", async () => {
-        if (!title.value.trim() || !text.value.trim()) return showError(editor, "Give the script a name and some text.");
+        if (!title.value.trim() || !text.value.trim()) return showError(editor, tr("Give the script a name and text."));
         await invoke("save_prefs", { scripts: [...prefs.scripts, { title: title.value.trim(), text: text.value.trim() }] });
         showEnrol(print, forPerson);
       });
@@ -5620,7 +5616,7 @@ async function showEnrol(print, forPerson = null) {
     preview.style.display = "";
     preview.textContent = s.text;
     if (s.custom) {
-      const drop = el("button", { class: "link danger" }, "Delete this script");
+      const drop = el("button", { class: "link danger" }, tr("Delete script"));
       drop.addEventListener("click", async () => {
         await invoke("save_prefs", { scripts: prefs.scripts.filter((x) => x.title !== s.title || x.text !== s.text) });
         showEnrol(print, forPerson);
@@ -5632,12 +5628,12 @@ async function showEnrol(print, forPerson = null) {
   page.append(choice, preview, editor);
   showScript();
 
-  page.append(el("h2", {}, "Consent"));
+  page.append(el("h2", {}, tr("Consent")));
   const consent = el("input", { type: "checkbox" });
-  page.append(el("label", { class: "field" }, consent, "This person agreed to have a voice print kept on this device"));
-  const start = el("button", { class: "primary pill" }, "Start reading");
+  page.append(el("label", { class: "field" }, consent, tr("This person agreed to a voice print on this device")));
+  const start = el("button", { class: "primary pill" }, tr("Start reading"));
   start.addEventListener("click", async () => {
-    if (choice.value === "new") return showError(page, "Save the script first.");
+    if (choice.value === "new") return showError(page, tr("Save the script first."));
     try {
       await invoke("start_enrolment", { device: input.value, name: name.value, print: print?.id ?? null, person: forPerson?.id ?? null, consent: consent.checked });
       enrolment = { print, name: print?.name ?? forPerson?.name ?? name.value.trim(), script: scripts[choice.value].text };
@@ -5646,7 +5642,7 @@ async function showEnrol(print, forPerson = null) {
       showError(page, e);
     }
   });
-  page.append(el("div", { class: "actions" }, start, el("button", { class: "pill", onclick: () => showVoicePrints() }, "Cancel")));
+  page.append(el("div", { class: "actions" }, start, el("button", { class: "pill", onclick: () => showVoicePrints() }, tr("Cancel"))));
   if (!devices.length) start.disabled = true;
   main.replaceChildren(page);
 }
@@ -5656,17 +5652,17 @@ function showEnrolRecording() {
   view = { kind: "prints" };
   const banner = el("div", { class: "recording-banner" });
   const meter = el("div", { style: "width:0%" });
-  const stop = el("button", { class: "primary pill" }, "Stop and save");
-  const cancel = el("button", { class: "pill" }, "Cancel");
-  const page = el("div", { class: "page" }, el("h1", {}, `Reading for ${enrolment.name}`),
-    el("p", { class: "legend" }, "Read at a normal pace and volume. About 30 seconds is ideal; at least 8 seconds of speech is needed."),
+  const stop = el("button", { class: "primary pill" }, tr("Stop and save"));
+  const cancel = el("button", { class: "pill" }, tr("Cancel"));
+  const page = el("div", { class: "page" }, el("h1", {}, tr("Reading for {name}", { name: enrolment.name })),
+    el("p", { class: "legend" }, tr("Read at a normal pace and volume. About 30 s is ideal; at least 8 s of speech is needed.")),
     banner, el("div", { class: "meter wide-meter" }, meter), el("div", { class: "script" }, enrolment.script),
     el("div", { class: "actions" }, stop, cancel));
   main.replaceChildren(page);
   const poll = async () => {
     const s = await invoke("recording_status");
     if (!s.recording) return;
-    banner.textContent = `● RECORDING  ${clock(s.elapsed_s)}`;
+    banner.textContent = tr("● RECORDING  {0}", { "0": clock(s.elapsed_s) });
     meter.style.width = `${Math.round((s.streams[0]?.level ?? 0) * 100)}%`;
   };
   poll();
@@ -5696,10 +5692,10 @@ let phraseTraining = null;
 
 /// How well a phrase stands apart from the person's other phrases and from the same sounds backwards.
 function phraseQuality(separation) {
-  if (separation == null) return "needs at least 2 takes";
+  if (separation == null) return tr("needs at least 2 takes");
   if (separation >= 1.6) return "clear";
   if (separation >= 1.3) return "fair";
-  return "easily confused: record it again, more clearly";
+  return tr("easily confused: record again, more clearly");
 }
 
 /// The voice print the phrases are trained for: the one chosen, or the first made, which is usually the
@@ -5720,24 +5716,24 @@ async function showKeyphrases(printId, message) {
   const [{ prints, print }, fresh] = await Promise.all([keyphrasePrint(printId), invoke("get_prefs")]);
   prefs = fresh;
   const page = el("div", { class: "page" },
-    el("button", { class: "link", onclick: () => showVoices() }, "‹ Voices"),
-    el("h1", {}, "Wake word and commands"),
-    el("p", { class: "legend" }, "Say each phrase a few times so Voice hears it the moment it's said, without waiting "
-      + "for speech to text. It learns how you say them, so it answers you rather than anyone in the room. Only a "
-      + "description of the sound is kept with your voice print; the recordings are deleted. Record again throws "
-      + "away every take kept for that phrase and starts it fresh."));
+    el("button", { class: "link", onclick: () => showVoices() }, tr("‹ Voices")),
+    el("h1", {}, tr("Wake word & commands")),
+    el("p", { class: "legend" }, tr("Say each phrase a few times so Voice hears it instantly, without waiting ")
+      + tr("for speech to text. It learns your voice, so it answers you, not others in the room. Only a ")
+      + tr("description of the sound is kept with your voice print; recordings are deleted. Record again discards ")
+      + tr("every take for that phrase and starts fresh.")));
   if (!print) {
-    page.append(el("div", { class: "notice" }, "Make your voice print first: the phrases are kept with it."),
-      el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showOnboarding(SETUP.voice) }, "Make my voice print")));
+    page.append(el("div", { class: "notice" }, tr("Make your voice print first: phrases are kept with it.")),
+      el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showOnboarding(SETUP.voice) }, tr("Make my voice print"))));
     main.replaceChildren(page);
     return;
   }
   if (message) page.append(el("div", { class: "notice", role: "status" }, message));
   if (prints.length > 1) {
-    const who = el("select", { class: "plain", "aria-label": "Whose phrases" },
+    const who = el("select", { class: "plain", "aria-label": tr("Whose phrases") },
       prints.map((p) => el("option", { value: p.id, selected: p.id === print.id }, p.name)));
     who.addEventListener("change", () => showKeyphrases(who.value));
-    page.append(el("div", { class: "field" }, "Phrases for", who));
+    page.append(el("div", { class: "field" }, tr("Phrases for"), who));
   }
   const kp = await invoke("list_keyphrases", { print: print.id });
   phrasesTrained = kp.any_trained;
@@ -5754,28 +5750,28 @@ async function showKeyphrases(printId, message) {
   const group = el("div", { class: "group" });
   for (const phrase of kp.phrases) {
     const status = phrase.takes
-      ? `${phrase.takes} take${phrase.takes > 1 ? "s" : ""} · ${phraseQuality(phrase.separation)}`
-      : "Not trained yet";
+      ? `${trn(phrase.takes, "{n} take", "{n} takes")} · ${phraseQuality(phrase.separation)}`
+      : tr("Not trained yet");
     const actions = phrase.takes
-      ? [el("button", { class: "pill", title: "Replaces all the takes kept now", onclick: () => record(phrase, true) }, "Record again"),
-        phrase.takes < 12 ? el("button", { class: "pill", onclick: () => record(phrase, false) }, "Add takes") : null,
+      ? [el("button", { class: "pill", title: tr("Replaces all current takes"), onclick: () => record(phrase, true) }, tr("Record again")),
+        phrase.takes < 12 ? el("button", { class: "pill", onclick: () => record(phrase, false) }, tr("Add takes")) : null,
         el("button", { class: "link danger", onclick: async () => {
           try { await invoke("clear_keyphrase", { print: print.id, phrase: phrase.id }); showKeyphrases(print.id); } catch (e) { showError(page, e); }
-        } }, "Clear")]
-      : [el("button", { class: "primary pill", onclick: () => record(phrase, true) }, "Train")];
+        } }, tr("Clear"))]
+      : [el("button", { class: "primary pill", onclick: () => record(phrase, true) }, tr("Train"))];
     group.append(el("div", { class: "row", id: `phrase-${phrase.id}` },
       el("span", { class: "label" }, `“${phrase.text}”`, el("small", {}, phrase.does), el("small", {}, status)),
       el("span", { class: "phrase-actions" }, actions)));
   }
-  page.append(el("h2", {}, "Phrases"), group);
-  if (!device) page.append(el("div", { class: "error" }, "Set up your default microphone first, from Settings."));
+  page.append(el("h2", {}, tr("Phrases")), group);
+  if (!device) page.append(el("div", { class: "error" }, tr("Set up your default mic first, in Settings.")));
 
   // Try it: press, then speak. Each phrase heard says which command it is, and listening stops after
   // 10 seconds with nothing heard.
   const TRY_S = 10;
-  const tryButton = el("button", { class: "primary pill", type: "button" }, "Try it");
+  const tryButton = el("button", { class: "primary pill", type: "button" }, tr("Try it"));
   const heard = el("div", { class: "wake-indicator", "aria-live": "polite" },
-    kp.any_trained ? "Press Try it, then say a phrase." : "Train a phrase above, then try it here.");
+    kp.any_trained ? tr("Press Try it, then say a phrase.") : tr("Train a phrase above, then try it here."));
   tryButton.disabled = !kp.any_trained;
   const results = el("ul", { class: "try-results" });
   let quiet = null;
@@ -5789,14 +5785,14 @@ async function showKeyphrases(printId, message) {
     if (!keyphrasePage?.trying) return;
     clearTimeout(quiet);
     keyphrasePage.trying = false;
-    tryButton.textContent = "Try it";
+    tryButton.textContent = tr("Try it");
     heard.classList.remove("on");
     if (text) heard.textContent = text;
     syncWake().catch(() => {});
   };
   const keepListening = () => {
     clearTimeout(quiet);
-    quiet = setTimeout(() => stopTrying(`Stopped listening: nothing was heard for ${TRY_S} seconds. Press Try it again.`), TRY_S * 1000);
+    quiet = setTimeout(() => stopTrying(tr("Stopped: nothing heard for {TRY_S} s. Press Try it again.", { TRY_S: TRY_S })), TRY_S * 1000);
   };
   const commandName = (id) => COMMANDS.find((c) => c.id === id)?.say;
   keyphrasePage = {
@@ -5806,17 +5802,17 @@ async function showKeyphrases(printId, message) {
     onHeard(h) {
       if (phraseTraining || !this.trying) return;
       keepListening();
-      const timing = `heard ${Math.round(h.delay_ms)} ms after you finished · score ${h.score.toFixed(2)}`;
+      const timing = tr("heard {0} ms after you finished · score {1}", { "0": Math.round(h.delay_ms), "1": h.score.toFixed(2) });
       if (h.unconfirmed) {
-        return show(h.words ? `Ignored: it sounded a little like “${h.text}”, but the words were “${h.words}”` : `Ignored: it sounded a little like “${h.text}”, but no words were heard`);
+        return show(h.words ? tr("Ignored: sounded a bit like “{text}”, but the words were “{words}”", { text: h.text, words: h.words }) : tr("Ignored: sounded a bit like “{text}”, but no words were heard", { text: h.text }));
       }
-      if (h.rejected) return show(`“${h.text}” didn't sound like ${h.who || "you"}, so it would be ignored · ${timing}`);
+      if (h.rejected) return show(tr("“{text}” didn't sound like {1}, so it's ignored · {timing}", { text: h.text, "1": h.who || "you", timing: timing }));
       if (h.phrase === "wake") {
         chime();
-        return show(`“Hey Superteem” · ${timing}. Now say a command.`);
+        return show(tr("“Hey Superteem” · {timing}. Now say a command.", { timing: timing }));
       }
-      const command = commandName(KEYPHRASE_COMMANDS[h.phrase]) ?? `the answer “${h.text}”`;
-      show(`Understood: ${command} · ${timing}`, `“${h.text}” → ${command}`);
+      const command = commandName(KEYPHRASE_COMMANDS[h.phrase]) ?? tr("the answer “{text}”", { text: h.text });
+      show(tr("Understood: {command} · {timing}", { command: command, timing: timing }), `“${h.text}” → ${command}`);
     },
     // Words from speech to text: a command after "Hey Superteem", or a phrase not trained yet.
     onWords(text) {
@@ -5825,12 +5821,12 @@ async function showKeyphrases(printId, message) {
       const wake = WAKE.exec(text);
       const rest = (wake ? text.slice(wake.index + wake[0].length) : text).trim();
       const [best] = rest ? interpret(rest) : [];
-      if (best?.score >= 1) return show(`Understood: ${best.say} · from the words “${text}”`, `“${text}” → ${best.say}`);
-      show(rest ? `Heard “${text}”, which isn't a command.` : `Heard “${text}”. Now say a command.`);
+      if (best?.score >= 1) return show(tr("Understood: {say} · from the words “{text}”", { say: best.say, text: text }), `“${text}” → ${best.say}`);
+      show(rest ? tr("Heard “{text}”: not a command.", { text: text }) : tr("Heard “{text}”. Now say a command.", { text: text }));
     },
   };
   tryButton.addEventListener("click", async () => {
-    if (keyphrasePage.trying) return stopTrying("Stopped listening.");
+    if (keyphrasePage.trying) return stopTrying(tr("Stopped listening."));
     keyphrasePage.trying = true;
     try {
       await syncWake();
@@ -5838,12 +5834,12 @@ async function showKeyphrases(printId, message) {
       keyphrasePage.trying = false;
       return showError(page, e);
     }
-    tryButton.textContent = "Stop";
-    show(`Listening… say a trained phrase, or “Hey Superteem” and a command. Stops after ${TRY_S} quiet seconds.`);
+    tryButton.textContent = tr("Stop");
+    show(tr("Listening… say a trained phrase, or “Hey Superteem” and a command. Stops after {TRY_S} s of quiet.", { TRY_S: TRY_S }));
     keepListening();
   });
 
-  const sensitivity = el("input", { type: "range", min: "0.7", max: "1.4", step: "0.05", value: kp.sensitivity, "aria-label": "Sensitivity" });
+  const sensitivity = el("input", { type: "range", min: "0.7", max: "1.4", step: "0.05", value: kp.sensitivity, "aria-label": tr("Sensitivity") });
   const saveSettings = async () => {
     try {
       await invoke("save_keyphrase_settings", { sensitivity: Number(sensitivity.value), verify: kp.verify });
@@ -5852,12 +5848,12 @@ async function showKeyphrases(printId, message) {
     }
   };
   sensitivity.addEventListener("change", saveSettings);
-  page.append(el("h2", {}, "Try it"), el("div", { class: "try-it" }, tryButton, heard), results,
+  page.append(el("h2", {}, tr("Try it")), el("div", { class: "try-it" }, tryButton, heard), results,
     el("div", { class: "group" },
-      el("div", { class: "row" }, el("span", { class: "label" }, "Sensitivity",
-        el("small", {}, "If phrases are missed, slide right or add takes. If it wakes when nobody said it, slide left.")),
-        el("span", { class: "slider" }, "Stricter", sensitivity, "Hears more")),
-      toggleRow("Only answer my voice", "Ignore a phrase when it doesn't also sound like the voice print it was trained by.", kp.verify, async (on) => {
+      el("div", { class: "row" }, el("span", { class: "label" }, tr("Sensitivity"),
+        el("small", {}, tr("If phrases are missed, slide right or add takes. If it wakes by mistake, slide left."))),
+        el("span", { class: "slider" }, tr("Stricter"), sensitivity, tr("Hears more"))),
+      toggleRow(tr("Only my voice"), tr("Ignore phrases that don't sound like the voice print that trained them."), kp.verify, async (on) => {
         kp.verify = on;
         await saveSettings();
       })));
@@ -5871,12 +5867,12 @@ function showPhraseTakes() {
   const { print, phrase } = phraseTraining;
   const banner = el("div", { class: "recording-banner" });
   const meter = el("div", { style: "width:0%" });
-  const stop = el("button", { class: "primary pill" }, "Done");
-  const cancel = el("button", { class: "pill" }, "Cancel");
-  const page = el("div", { class: "page" }, el("h1", {}, `Say “${phrase.text}”`),
-    el("p", { class: "legend" }, "Say it once for each line, with a pause of about a second between. Say it a little "
-      + "differently each time: that teaches Voice the ways you really say it."
-      + (phrase.after ? ` Say just “${phrase.text}”; it only counts after “${phrase.after}”.` : "")),
+  const stop = el("button", { class: "primary pill" }, tr("Done"));
+  const cancel = el("button", { class: "pill" }, tr("Cancel"));
+  const page = el("div", { class: "page" }, el("h1", {}, tr("Say “{text}”", { text: phrase.text })),
+    el("p", { class: "legend" }, tr("Say it once per line, with a pause of about a second between. Say it a little ")
+      + tr("differently each time, to teach Voice how you really say it.")
+      + (phrase.after ? tr(" Say just “{text}”; it counts only after “{after}”.", { text: phrase.text, after: phrase.after }) : "")),
     banner, el("div", { class: "meter wide-meter" }, meter),
     el("ol", { class: "takes" }, phrase.how.map((h) => el("li", {}, h))),
     el("div", { class: "actions" }, stop, cancel));
@@ -5884,7 +5880,7 @@ function showPhraseTakes() {
   const poll = async () => {
     const s = await invoke("recording_status");
     if (!s.recording) return;
-    banner.textContent = `● RECORDING  ${clock(s.elapsed_s)}`;
+    banner.textContent = tr("● RECORDING  {0}", { "0": clock(s.elapsed_s) });
     meter.style.width = `${Math.round((s.streams[0]?.level ?? 0) * 100)}%`;
   };
   poll();
@@ -5892,14 +5888,14 @@ function showPhraseTakes() {
   const finish = async (save) => {
     clearInterval(pollTimer);
     stop.disabled = cancel.disabled = true;
-    stop.textContent = save ? "Learning the takes…" : "Done";
+    stop.textContent = save ? tr("Learning the takes…") : tr("Done");
     try {
       const r = await invoke("stop_phrase_training", { save }).finally(() => (phraseTraining = null));
       if (!r) return showKeyphrases(print.id);
       const few = r.heard < phrase.how.length - 1
-        ? " That's fewer than expected: leave a clear pause between takes, or use Add takes." : "";
-      showKeyphrases(print.id, `Heard ${r.heard} take${r.heard === 1 ? "" : "s"} of “${phrase.text}”; ${r.takes} kept. `
-        + `It is ${phraseQuality(r.separation)}.${few}`);
+        ? tr(" Fewer than expected: pause clearly between takes, or use Add takes.") : "";
+      showKeyphrases(print.id, trn(r.heard, "Heard {n} take of “{phrase}”; {kept} kept. ", "Heard {n} takes of “{phrase}”; {kept} kept. ", { phrase: phrase.text, kept: r.takes })
+        + tr("It is {0}.{few}", { "0": phraseQuality(r.separation), few: few }));
     } catch (e) {
       showKeyphrases(print.id, String(e));
     }
@@ -5912,9 +5908,9 @@ function showPhraseTakes() {
 
 /// How a term's "When" reads in the list.
 function whenText(when) {
-  if (when?.kind === "near") return `Only near ${when.words.map((w) => `“${w}”`).join(", ")}`;
-  if (when?.kind === "suggest") return "Suggested, not written in";
-  return "Always";
+  if (when?.kind === "near") return tr("Only near {0}", { "0": when.words.map((w) => `“${w}”`).join(", ") });
+  if (when?.kind === "suggest") return tr("Suggested, not applied");
+  return tr("Always");
 }
 
 const splitList = (text) => text.split(",").map((s) => s.trim()).filter(Boolean);
@@ -5927,19 +5923,19 @@ async function showVocabulary(message) {
   refreshItems();
   const terms = await invoke("list_vocabulary").catch(() => []);
   const page = el("div", { class: "page" },
-    el("button", { class: "link", onclick: () => showTranscription() }, "‹ Transcription"),
-    el("h1", {}, "Vocabulary"),
-    el("p", { class: "legend" }, "Names, products and acronyms that speech to text writes as everyday words, such as “SIBR” "
-      + "written as “cyber”. Voice tells the speech model about these words before it listens, and corrects what it "
-      + "still gets wrong. In a meeting, each corrected word is underlined: click it to undo the change."));
+    el("button", { class: "link", onclick: () => showTranscription() }, tr("‹ Transcription")),
+    el("h1", {}, tr("Vocabulary")),
+    el("p", { class: "legend" }, tr("Names, products and acronyms that speech to text writes as everyday words, like “SIBR” ")
+      + tr("as “cyber”. Voice tells the speech model about them before it listens, and fixes what it ")
+      + tr("still gets wrong. In meetings, corrected words are underlined: click one to undo.")));
   if (message) page.append(el("p", { class: "vocab-notice", role: "status" }, message));
-  if (!terms.length) page.append(el("div", { class: "empty" }, "No words yet."));
+  if (!terms.length) page.append(el("div", { class: "empty" }, tr("No words yet.")));
   for (const t of terms) {
     const remove = el("button", { class: "link danger" }, "Delete");
     remove.addEventListener("click", async () => {
       if (!remove.dataset.armed) {
         remove.dataset.armed = "1";
-        remove.textContent = "Click again to delete";
+        remove.textContent = tr("Click again to delete");
         setTimeout(() => { delete remove.dataset.armed; remove.textContent = "Delete"; }, 4000);
         return;
       }
@@ -5948,28 +5944,28 @@ async function showVocabulary(message) {
     page.append(el("div", { class: "print-row vocab-row" },
       el("span", { class: "vocab-word" }, t.spelling),
       el("span", { class: "detail" }, [
-        t.sounds_like.length ? `Sounds like ${t.sounds_like.map((s) => `“${s}”`).join(", ")}` : "No sound-alikes yet",
-        t.letters ? "also said letter by letter" : null,
+        t.sounds_like.length ? tr("Sounds like {0}", { "0": t.sounds_like.map((s) => `“${s}”`).join(", ") }) : tr("No sound-alikes yet"),
+        t.letters ? tr("also said letter by letter") : null,
         whenText(t.when),
-        t.uses ? `used ${t.uses} time${t.uses === 1 ? "" : "s"}` : null,
+        t.uses ? trn(t.uses, "used {n} time", "used {n} times") : null,
       ].filter(Boolean).join(" · ")),
-      el("button", { onclick: () => showTermEditor(t) }, "Edit"), remove));
+      el("button", { onclick: () => showTermEditor(t) }, tr("Edit")), remove));
   }
   const fix = el("button", { class: "pill", hidden: true });
-  page.append(el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showTermEditor(null) }, "Add a word"), fix));
+  page.append(el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showTermEditor(null) }, tr("Add a word")), fix));
   main.replaceChildren(page);
   if (!terms.length) return;
   // Meetings made before a word was added still have the everyday word; offer to correct them.
   const count = await invoke("fix_past_transcripts", { dryRun: true, only: null }).catch(() => 0);
   if (!count || !page.isConnected) return;
   fix.hidden = false;
-  fix.textContent = `Correct ${count} word${count === 1 ? "" : "s"} in past meetings`;
-  fix.title = "Lines you edited by hand are left alone. Each change can be undone from the meeting.";
+  fix.textContent = trn(count, "Fix {n} word in past meetings", "Fix {n} words in past meetings");
+  fix.title = tr("Lines edited by hand are left alone. Each change can be undone in the meeting.");
   fix.addEventListener("click", async () => {
     fix.disabled = true;
     try {
       const done = await invoke("fix_past_transcripts", { dryRun: false, only: null });
-      showVocabulary(`Corrected ${done} word${done === 1 ? "" : "s"} in past meetings.`);
+      showVocabulary(trn(done, "Fixed {n} word in past meetings.", "Fixed {n} words in past meetings."));
     } catch (e) {
       fix.disabled = false;
       showError(page, e);
@@ -5988,21 +5984,21 @@ function showTermEditor(term, from) {
     if (testing) invoke("dictate_cancel").catch(() => {});
     from ? openSession(from.id) : showVocabulary();
   };
-  const spelling = el("input", { value: term?.spelling ?? "", placeholder: "SIBR", "aria-label": "Spelling", autocomplete: "off", spellcheck: "false" });
+  const spelling = el("input", { value: term?.spelling ?? "", placeholder: "SIBR", "aria-label": tr("Spelling"), autocomplete: "off", spellcheck: "false" });
   const sounds = el("input", { value: (term?.sounds_like ?? (from?.heard ? [from.heard] : [])).join(", "),
-    placeholder: "cyber, sigh ber", "aria-label": "Sounds like", autocomplete: "off" });
+    placeholder: tr("cyber, sigh ber"), "aria-label": tr("Sounds like"), autocomplete: "off" });
   const letters = el("input", { type: "checkbox", checked: !!term?.letters });
   const kind = term?.when?.kind ?? "always";
   const radio = (value, label, detail) => el("label", { class: "choice" },
     el("input", { type: "radio", name: "when", value, checked: kind === value }),
     el("span", {}, label, el("small", {}, detail)));
   const near = el("input", { value: term?.when?.kind === "near" ? term.when.words.join(", ") : "", placeholder: "platform, release, dashboard",
-    "aria-label": "Words it's said near", autocomplete: "off" });
+    "aria-label": tr("Words said near it"), autocomplete: "off" });
   const nearField = el("div", { class: "vocab-near" }, near);
 
   // The speech model is the judge of what it hears: the person says the word and sees how it comes out.
   const testResult = el("div", { class: "vocab-test-result", role: "status" });
-  const testLabel = el("span", {}, "Say it");
+  const testLabel = el("span", {}, tr("Say it"));
   const test = el("button", { class: "pill with-icon" }, svg("mic", 16), testLabel);
   test.addEventListener("click", async () => {
     if (!testing) {
@@ -6014,51 +6010,51 @@ function showTermEditor(term, from) {
       }
       testing = true;
       test.classList.add("primary");
-      testLabel.textContent = "Done";
-      testResult.replaceChildren("Say the word the way you normally would, then click Done.");
+      testLabel.textContent = tr("Done");
+      testResult.replaceChildren(tr("Say the word normally, then click Done."));
       return;
     }
     testing = false;
     test.disabled = true;
     test.classList.remove("primary");
-    testLabel.textContent = "Listening…";
+    testLabel.textContent = tr("Listening…");
     try {
       const heard = (await invoke("vocab_test_stop")).trim().replace(/[.!?,]+$/, "");
       if (!heard) {
-        testResult.replaceChildren("Nothing was heard. Try again, a little closer to the microphone.");
+        testResult.replaceChildren(tr("Nothing heard. Try again, closer to the mic."));
       } else {
         const have = splitList(sounds.value).map((s) => s.toLowerCase());
-        const add = el("button", { class: "link" }, "Add to Sounds like");
+        const add = el("button", { class: "link" }, tr("Add to Sounds like"));
         add.addEventListener("click", () => {
           sounds.value = [...splitList(sounds.value), heard].join(", ");
           add.remove();
         });
         const covered = have.includes(heard.toLowerCase()) || heard.toLowerCase() === spelling.value.trim().toLowerCase();
-        testResult.replaceChildren("The speech model wrote ", el("b", {}, `“${heard}”`), ". ", covered ? "That's covered already." : add);
+        testResult.replaceChildren(tr("The speech model wrote "), el("b", {}, `“${heard}”`), ". ", covered ? tr("Already covered.") : add);
       }
     } catch (e) {
       testResult.replaceChildren(el("span", { class: "danger" }, String(e)));
     }
     test.disabled = false;
-    testLabel.textContent = "Say it again";
+    testLabel.textContent = tr("Say it again");
   });
 
-  const save = el("button", { class: "primary pill" }, "Save");
+  const save = el("button", { class: "primary pill" }, tr("Save"));
   const page = el("div", { class: "page vocab-editor" },
-    el("button", { class: "link", onclick: back }, from ? "‹ Back to the meeting" : "‹ Vocabulary"),
-    el("h1", {}, term ? `Edit “${term.spelling}”` : "Add a word"),
-    el("label", { class: "vocab-field" }, el("span", {}, "Spelling", el("small", {}, "Exactly how it should be written.")), spelling),
-    el("label", { class: "vocab-field" }, el("span", {}, "Sounds like",
-      el("small", {}, "The everyday words it's mistaken for, separated by commas.")), sounds),
-    el("div", { class: "vocab-field" }, el("span", {}, "Not sure?", el("small", {}, "Say the word and see what the speech model writes.")),
+    el("button", { class: "link", onclick: back }, from ? tr("‹ Back to meeting") : tr("‹ Vocabulary")),
+    el("h1", {}, term ? tr("Edit “{spelling}”", { spelling: term.spelling }) : tr("Add a word")),
+    el("label", { class: "vocab-field" }, el("span", {}, tr("Spelling"), el("small", {}, tr("Exactly as it should be written."))), spelling),
+    el("label", { class: "vocab-field" }, el("span", {}, tr("Sounds like"),
+      el("small", {}, tr("Everyday words it's mistaken for, comma-separated."))), sounds),
+    el("div", { class: "vocab-field" }, el("span", {}, tr("Not sure?"), el("small", {}, tr("Say it and see what the speech model writes."))),
       el("div", { class: "vocab-test" }, test, testResult)),
-    el("label", { class: "field" }, letters, el("span", {}, "Also said letter by letter, as “S I B R”")),
-    el("fieldset", { class: "vocab-when" }, el("legend", {}, "When should it replace the everyday word?"),
-      radio("always", "Always", "Every time the everyday word is heard."),
-      radio("near", "Only when talking about…", "When one of these words is said close by, so other uses of the everyday word are left alone."),
+    el("label", { class: "field" }, letters, el("span", {}, tr("Also said letter by letter, as “S I B R”"))),
+    el("fieldset", { class: "vocab-when" }, el("legend", {}, tr("When should it replace the everyday word?")),
+      radio("always", tr("Always"), tr("Every time it's heard.")),
+      radio("near", tr("Only when talking about…"), tr("When one of these words is said nearby, so other uses are left alone.")),
       nearField,
-      radio("suggest", "Just suggest", "Underline it in meetings so you can accept it with a click. Dictation is left as heard.")),
-    el("div", { class: "actions" }, save, el("button", { class: "pill", onclick: back }, "Cancel")));
+      radio("suggest", tr("Just suggest"), tr("Underlined in meetings to accept with a click. Dictation is left as heard."))),
+    el("div", { class: "actions" }, save, el("button", { class: "pill", onclick: back }, tr("Cancel"))));
   const syncNear = () => { nearField.hidden = page.querySelector("input[name=when]:checked")?.value !== "near"; };
   page.querySelectorAll("input[name=when]").forEach((r) => r.addEventListener("change", syncNear));
   syncNear();
@@ -6074,7 +6070,7 @@ function showTermEditor(term, from) {
         await invoke("fix_past_transcripts", { dryRun: false, only: from.id });
         openSession(from.id);
       } else {
-        showVocabulary(`Saved “${saved.spelling}”.`);
+        showVocabulary(tr("Saved “{spelling}”.", { spelling: saved.spelling }));
       }
     } catch (e) {
       save.disabled = false;
@@ -6096,8 +6092,8 @@ function lineWords(seg) {
   fixes.forEach((f, index) => {
     if (f.at < i || f.at + f.words > words.length) return;
     if (f.at > i) out.push(words.slice(i, f.at).join(" ") + " ");
-    const title = f.applied ? `Written as “${f.fixed}” from your vocabulary; heard “${f.raw}”. Click to change it back.`
-      : `Did they say “${f.fixed}”? Click to use your vocabulary's spelling.`;
+    const title = f.applied ? tr("Written as “{fixed}” from your vocabulary; heard “{raw}”. Click to revert.", { fixed: f.fixed, raw: f.raw })
+      : tr("Did they say “{fixed}”? Click to use your spelling.", { fixed: f.fixed });
     out.push(el("span", { class: `vfix ${f.applied ? "applied" : "suggested"}`, "data-fix": String(index), title },
       words.slice(f.at, f.at + f.words).join(" ")));
     i = f.at + f.words;
@@ -6111,9 +6107,9 @@ function lineWords(seg) {
 function fixMenu(anchor, fix, run) {
   document.querySelector(".fix-menu")?.remove();
   const menu = el("div", { class: "fix-menu", role: "dialog" },
-    el("span", {}, ...(fix.applied ? ["Heard “", el("b", {}, fix.raw), "”"] : ["Did they say “", el("b", {}, fix.fixed), "”?"])),
+    el("span", {}, ...(fix.applied ? [tr("Heard “"), el("b", {}, fix.raw), "”"] : [tr("Did they say “"), el("b", {}, fix.fixed), "”?"])),
     el("button", { class: "pill", onmousedown: (e) => e.preventDefault(), onclick: () => { menu.remove(); run(); } },
-      fix.applied ? `Change back to “${fix.raw}”` : `Use “${fix.fixed}”`));
+      fix.applied ? tr("Change back to “{raw}”", { raw: fix.raw }) : tr("Use “{fixed}”", { fixed: fix.fixed })));
   const r = anchor.getBoundingClientRect();
   menu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 288))}px`;
   menu.style.top = `${r.bottom + 6}px`;
@@ -6135,8 +6131,8 @@ function toggleRow(label, detail, checked, onChange) {
 /// How many of the first voice print's phrases are trained, for the settings row.
 function trainedText(prints) {
   const first = [...prints].sort((a, b) => a.created - b.created)[0];
-  if (!first) return "Needs a voice print";
-  return first.phrases ? `${first.phrases} of ${first.phrases_of} trained` : "Not trained: slower to answer";
+  if (!first) return tr("Needs a voice print");
+  return first.phrases ? `${first.phrases} of ${first.phrases_of} trained` : tr("Not trained: slower");
 }
 
 /// A row that opens a page. Its label and value share a line while they fit; when they don't, the value
@@ -6171,20 +6167,20 @@ async function showSettings() {
     invoke("list_vocabulary").catch(() => [])]);
   const archivedCount = (await invoke("list_notes", { query: "" }).catch(() => [])).filter((n) => n.archived).length;
   prefs = fresh;
-  const page = el("div", { class: "page" }, el("h1", {}, "Settings"));
+  const page = el("div", { class: "page" }, el("h1", {}, tr("Settings")));
   // Each section is made here, then added in the order the page shows them.
 
   // About: the version, and checking for a newer one. Once a newer one is known, the button gets it instead.
-  const version = el("span", { class: "value" }, update ? `Version ${update.current}` : "");
-  if (!update) invoke("app_version").then((v) => (version.textContent = `Version ${v}`)).catch(() => {});
+  const version = el("span", { class: "value" }, update ? tr("Version {current}", { current: update.current }) : "");
+  if (!update) invoke("app_version").then((v) => (version.textContent = tr("Version {v}", { v: v }))).catch(() => {});
   const checkResult = el("small", { role: "status" });
-  const checkButton = el("button", { class: "pill" }, "Check for updates");
-  const getButton = el("button", { class: "primary pill", hidden: true }, platform === "android" ? "Download" : "Update now");
+  const checkButton = el("button", { class: "pill" }, tr("Check for updates"));
+  const getButton = el("button", { class: "primary pill", hidden: true }, platform === "android" ? tr("Download") : tr("Update now"));
   // What's new sits centred under the download button, as Details does under the check button.
-  const whatsNew = el("button", { class: "link details", type: "button", hidden: true, onclick: () => invoke("open_link", { url: update.notes }).catch(() => {}) }, "What's new");
+  const whatsNew = el("button", { class: "link details", type: "button", hidden: true, onclick: () => invoke("open_link", { url: update.notes }).catch(() => {}) }, tr("What's new"));
   const updateStack = el("div", { class: "check-stack" }, getButton, whatsNew);
   // Details sits centred under the check button and opens a dialog saying what a check sends. It hides with the button.
-  const details = el("button", { class: "link details", type: "button", "aria-haspopup": "dialog" }, "Details");
+  const details = el("button", { class: "link details", type: "button", "aria-haspopup": "dialog" }, tr("Details"));
   details.addEventListener("click", () => showCheckDetails(details));
   const detailsWrap = el("div", { class: "details-wrap" }, details);
   const checkStack = el("div", { class: "check-stack" }, checkButton, detailsWrap);
@@ -6194,43 +6190,43 @@ async function showSettings() {
     detailsWrap.hidden = newer;
     updateStack.hidden = !newer;
     getButton.hidden = whatsNew.hidden = !newer;
-    if (newer) checkResult.textContent = `Version ${update.latest} is available.`;
+    if (newer) checkResult.textContent = tr("Version {latest} is available.", { latest: update.latest });
   };
   showNewer();
   checkButton.addEventListener("click", async () => {
     checkButton.disabled = true;
-    checkResult.textContent = "Checking…";
+    checkResult.textContent = tr("Checking…");
     const found = await checkForUpdate(true);
     checkButton.disabled = false;
-    checkResult.textContent = !found ? "Couldn't check. Check this device is online."
-      : found.newer ? "" : `This is the latest version.`;
+    checkResult.textContent = !found ? tr("Couldn't check. Is this device online?")
+      : found.newer ? "" : tr("You're up to date.", {  });
     showNewer();
     if (found?.newer) speak(`Version ${found.latest} is available.`);
   });
   // The download's progress shows in the sidebar's update bar, so a version put off with "Later" shows there again.
   getButton.addEventListener("click", () => {
-    if (recording || dictation) return void (checkResult.textContent = "Finish the recording first, then update.");
+    if (recording || dictation) return void (checkResult.textContent = tr("Finish recording first, then update."));
     remember("update-later", "");
     getButton.disabled = true;
-    checkResult.textContent = platform === "android" ? "Opening the download in your browser…" : "Downloading… The progress shows in the sidebar.";
+    checkResult.textContent = platform === "android" ? tr("Opening the download in your browser…") : tr("Downloading… Progress shows in the sidebar.");
     installUpdate().finally(() => { getButton.disabled = false; });
   });
-  const about = [el("h2", {}, "About"), el("div", { class: "group" },
+  const about = [el("h2", {}, tr("About")), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, "Voice by Superteem", version, checkResult),
       checkStack, updateStack))];
 
   // Optimise: offered with a callout while it would change something; the pages it leads to always.
   const callout = await optimiseCallout().catch(() => null);
-  const optimise = [el("h2", {}, "Optimise"), callout, el("div", { class: "group" },
-    linkRow(`Optimise for this ${isPhone() ? "phone" : "computer"}`, "Your languages, then the best models and voices for them here", () => showOptimise(OPTIMISE_FROM.settings)),
-    linkRow("Local AI", `What runs on this ${isPhone() ? "phone" : "computer"}`, () => showAiSettings()))];
+  const optimise = [el("h2", {}, tr("Optimise")), callout, el("div", { class: "group" },
+    linkRow(tr("Optimise for this {0}", { "0": deviceWord() }), tr("Your languages, then the best models and voices for them"), () => showOptimise(OPTIMISE_FROM.settings)),
+    linkRow(tr("Local AI"), tr("What runs on this {0}", { "0": deviceWord() }), () => showAiSettings()))];
 
-  const languages = [el("h2", {}, "Languages"), el("div", { class: "group" },
-    linkRow("Languages", await languagesSummary(), () => showLanguages(), { drop: true }))];
+  const languages = [el("h2", {}, tr("Languages")), el("div", { class: "group" },
+    linkRow(tr("Languages"), await languagesSummary(), () => showLanguages(), { drop: true }))];
 
   // Nothing here applies on a phone yet, so the section isn't shown there.
-  const listening = isPhone() ? [] : [el("h2", {}, "Listening"), el("div", { class: "group windows-only" },
-    toggleRow("“Hey Superteem”", "Listen for the wake word while the app is open. Nothing is recorded until you ask.", prefs.wake,
+  const listening = isPhone() ? [] : [el("h2", {}, tr("Listening")), el("div", { class: "group windows-only" },
+    toggleRow(tr("“Hey Superteem”"), tr("Listen for the wake word while the app is open. Nothing is recorded until you ask."), prefs.wake,
       async (on, box) => {
         try {
           await setWake(on);
@@ -6239,66 +6235,71 @@ async function showSettings() {
           showError(page, e);
         }
       }),
-    toggleRow("Speak replies aloud", "So the app can be used without looking at the screen.", !prefs.quiet, async (on) => {
+    toggleRow(tr("Speak replies"), tr("Use the app without looking at the screen."), !prefs.quiet, async (on) => {
       prefs.quiet = !on;
       await invoke("save_prefs", { quiet: !on });
     }),
-    toggleRow("Keep dictation audio", "Keep the recording of each note dictation for 1 week. When off, the audio is deleted once the words are written.", prefs.keep_audio, async (on) => {
+    toggleRow(tr("Keep dictation audio"), tr("Keep each dictation's audio for 1 week. When off, it's deleted once the words are written."), prefs.keep_audio, async (on) => {
       prefs.keep_audio = on;
       await invoke("save_prefs", { keepAudio: on });
     }))];
   // Android's permissions, straight after About as everything else needs them.
-  const phone = platform === "android" ? [el("h2", {}, "This phone"), el("div", { class: "group" },
-    linkRow("App permissions", "Microphone, Bluetooth, notifications", () => showPermissions(), { drop: true }))] : [];
+  const phone = platform === "android" ? [el("h2", {}, tr("This phone")), el("div", { class: "group" },
+    linkRow(tr("App permissions"), tr("Microphone, Bluetooth, notifications"), () => showPermissions(), { drop: true }))] : [];
 
-  const notesSection = [el("h2", {}, "Notes"), el("div", { class: "group" },
-    toggleRow("Start dictating straight away", "A new note starts listening as it opens. When off, press Dictate to begin.", !prefs.dictate_manually, async (on) => {
+  const notesSection = [el("h2", {}, tr("Notes")), el("div", { class: "group" },
+    toggleRow(tr("Dictate right away"), tr("New notes start listening as they open. When off, press Dictate."), !prefs.dictate_manually, async (on) => {
       prefs.dictate_manually = !on;
       await invoke("save_prefs", { dictateManually: !on });
     }))];
 
   // The vault: what's protected, and the ways back in.
   await refreshVault();
-  const vaultSection = vault ? [el("h2", {}, "Vault"), el("div", { class: "group" },
-    linkRow("Vault", vaultSummary(), () => showVaultSettings(), { drop: true }))] : [];
+  const vaultSection = vault ? [el("h2", {}, tr("Vault")), el("div", { class: "group" },
+    linkRow(tr("Vault"), vaultSummary(), () => showVaultSettings(), { drop: true }))] : [];
 
   // Archived: how many notes are archived, and the way to them.
-  const archivedSection = [el("h2", {}, "Archived"), el("div", { class: "group" },
-    linkRow("Archive", archivedCount ? `${archivedCount} archived note${archivedCount === 1 ? "" : "s"}` : "Nothing archived", () => showArchive(), { drop: true }))];
+  const archivedSection = [el("h2", {}, tr("Archived")), el("div", { class: "group" },
+    linkRow(tr("Archive"), archivedCount ? trn(archivedCount, "{n} archived note", "{n} archived notes") : tr("Nothing archived"), () => showArchive(), { drop: true }))];
 
-  const meetings = [el("h2", {}, "Meetings"), el("div", { class: "group" },
-    el("div", { class: "row" }, el("span", { class: "label" }, "Consent question",
-      el("small", {}, "Voice always confirms everyone agreed before a meeting is recorded.")), el("span", { class: "value" }, "Always asked")),
-    el("div", { class: "row" }, el("span", { class: "label" }, "Tracks used last time"),
-      el("span", { class: "value" }, [...prefs.inputs, prefs.pins ? "Voice Pins" : null].filter(Boolean).join(", ") || "Default microphone")))];
+  const meetings = [el("h2", {}, tr("Meetings")), el("div", { class: "group" },
+    el("div", { class: "row" }, el("span", { class: "label" }, tr("Consent"),
+      el("small", {}, tr("Voice always confirms everyone agreed before recording a meeting."))), el("span", { class: "value" }, tr("Always asked"))),
+    el("div", { class: "row" }, el("span", { class: "label" }, tr("Last tracks used")),
+      el("span", { class: "value" }, [...prefs.inputs, prefs.pins ? tr("Voice Pins") : null].filter(Boolean).join(", ") || tr("Default microphone"))))];
 
   // Speech to text: its models, vocabulary and download settings, on their own page.
   const speech = await invoke("speech_models").catch(() => []);
   const inUse = speech.filter((m) => m.ready && m.used_for.length).map((m) => m.name);
-  const transcriptionRow = linkRow("Transcription", ready
-    ? [inUse.join(" and ") || "Speech model ready", terms.length ? `${terms.length} vocabulary word${terms.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")
-    : "The speech model needs downloading", () => showTranscription(), { drop: true });
+  const transcriptionRow = linkRow(tr("Transcription"), ready
+    ? [trList(inUse) || tr("Speech model ready"), terms.length ? trn(terms.length, "{n} vocabulary word", "{n} vocabulary words") : ""].filter(Boolean).join(" · ")
+    : tr("Speech model needs downloading"), () => showTranscription(), { drop: true });
   if (!ready) transcriptionRow.classList.add("needs-attention");
-  const transcription = [el("h2", {}, "Transcription"), el("div", { class: "group" }, transcriptionRow)];
+  const transcription = [el("h2", {}, tr("Transcription")), el("div", { class: "group" }, transcriptionRow)];
 
-  const analysis = [el("h2", {}, "Analysis"), el("div", { class: "group" },
-    linkRow("Model and when it runs", "The language model that makes analyses", () => showAnalysisSettings()),
-    linkRow("Analysis templates", "Summary, standup, interview, SOAP and your own", () => showTemplates()))];
+  const analysis = [el("h2", {}, tr("Analysis")), el("div", { class: "group" },
+    linkRow(tr("Model & when it runs"), tr("The model that makes analyses"), () => showAnalysisSettings()),
+    linkRow(tr("Templates"), tr("Summary, standup, interview, SOAP and yours"), () => showTemplates()))];
 
-  const voices = [el("h2", {}, "Voices"), el("div", { class: "group" },
-    linkRow("Voices", `${await readingAloudSummary()} · ${prints.length ? `${prints.length} voice print${prints.length === 1 ? "" : "s"}` : "No voice prints yet"}`, () => showVoices(), { drop: true }))];
+  const voices = [el("h2", {}, tr("Voices")), el("div", { class: "group" },
+    linkRow(tr("Voices"), `${await readingAloudSummary()} · ${prints.length ? trn(prints.length, "{n} voice print", "{n} voice prints") : tr("No voice prints yet")}`, () => showVoices(), { drop: true }))];
 
-  const theme = el("div", { class: "theme", role: "group", "aria-label": "Theme" });
+  const theme = el("div", { class: "theme", role: "group", "aria-label": tr("Theme") });
   const current = document.documentElement.dataset.theme ?? "system";
-  for (const [value, label] of [["system", "System"], ["light", "Light"], ["dark", "Dark"]]) {
+  for (const [value, label] of [["system", tr("System")], ["light", tr("Light")], ["dark", tr("Dark")]]) {
     theme.append(el("button", { class: current === value ? "on" : "", "aria-pressed": String(current === value),
       onclick: () => { pickTheme(value); showSettings(); } }, label));
   }
-  const appearance = [el("h2", {}, "Appearance"), el("div", { class: "group" }, el("div", { class: "row" }, el("span", { class: "label" }, "Theme"), theme))];
+  // The app's own words; each language is named in itself, so it can be found from any of them.
+  const uiLang = el("select", { "aria-label": tr("App language"), onchange: () => pickUiLang(uiLang.value) },
+    UI_LANGS.map(([code, name]) => el("option", { value: code, selected: code === UI_LANG }, name)));
+  const appearance = [el("h2", {}, tr("Appearance")), el("div", { class: "group" },
+    el("div", { class: "row" }, el("span", { class: "label" }, tr("App language")), uiLang),
+    el("div", { class: "row" }, el("span", { class: "label" }, tr("Theme")), theme))];
 
-  const storage = [el("h2", {}, "Storage"), el("div", { class: "group" },
-    el("div", { class: "row" }, el("span", { class: "label" }, "Recordings and notes", el("small", {}, "Kept on this device only.")),
-      isDesktop() ? el("button", { class: "pill", onclick: () => invoke("open_folder", { id: null }) }, "Open folder") : null))];
+  const storage = [el("h2", {}, tr("Storage")), el("div", { class: "group" },
+    el("div", { class: "row" }, el("span", { class: "label" }, tr("Recordings and notes"), el("small", {}, tr("Kept on this device only."))),
+      isDesktop() ? el("button", { class: "pill", onclick: () => invoke("open_folder", { id: null }) }, tr("Open folder")) : null))];
 
   for (const section of [about, phone, optimise, languages, listening, notesSection, vaultSection, archivedSection, meetings, transcription, analysis, voices, appearance, storage]) {
     page.append(...section.filter(Boolean));
@@ -6310,7 +6311,7 @@ async function showSettings() {
 /// still showing when it finishes.
 function modelDownloadButton(done) {
   const holder = el("span");
-  const button = el("button", { class: "primary pill" }, "Download (142 MB)");
+  const button = el("button", { class: "primary pill" }, tr("Download (142 MB)"));
   const wait = async () => {
     button.disabled = true;
     button.replaceChildren(el("span", { class: "spinner" }), el("span", { "data-model-progress": "" }, downloadText()));
@@ -6319,7 +6320,7 @@ function modelDownloadButton(done) {
       if (holder.isConnected) done();
     } catch (e) {
       button.disabled = false;
-      button.textContent = "Try the download again";
+      button.textContent = tr("Retry download");
       showError(holder, e);
     }
   };
@@ -6339,9 +6340,9 @@ async function setWake(on) {
 function showListening() {
   const on = prefs.wake;
   document.getElementById("listen-chip").classList.toggle("on", on);
-  document.getElementById("listen-label").textContent = on ? "Listening" : "Voice off";
+  document.getElementById("listen-label").textContent = on ? tr("Listening") : tr("Voice off");
   // The button is only an icon, so its tooltip says the state.
-  document.getElementById("listen-chip").title = on ? "Listening for “Hey Superteem”. Click to talk." : "Voice off. Click to talk.";
+  document.getElementById("listen-chip").title = on ? tr("Listening for “Hey Superteem”. Click to talk.") : tr("Voice off. Click to talk.");
 }
 
 // ---------- First run ----------
@@ -6370,40 +6371,40 @@ const SETUP = { welcome: 0, voice: 1, model: 2, hello: 3, done: 4, permissions: 
 
 /// What the person agrees to by pressing "Agree and get started". Kept short on purpose.
 const TERMS = [
-  ["Your voice stays on this device",
-    "Voice by Superteem turns speech into text on this device. Your recordings, transcripts, notes and voice print (a "
-    + "numeric description of how your voice sounds, not a recording of it) are stored only here and are never sent "
-    + "to us or anyone else. Checking for an update sends Superteem the app version, the operating system and its "
-    + "version, the models in use, the configured languages, and whether the check was automatic, requested, or the "
-    + "start of an install. That check does not include recordings, transcripts, notes or the voice print."],
-  ["You're in control",
-    "Delete voice prints, notes and recordings in the app at any time. Uninstalling removes the app; your files stay "
-    + "in the Superteem Voice folder until you delete it."],
-  ["Open source, no warranty",
-    "Voice is free software under the GNU General Public License v3. You may use, study, change and share it "
-    + "under that licence. It is provided as is, without warranty of any kind."],
-  ["Use it lawfully",
-    "You are responsible for how you use Voice. Get consent before recording anyone, follow the recording, "
-    + "privacy and surveillance laws where you are, and don't use it for anything illegal. We can't prevent misuse "
-    + "and aren't responsible for it."],
-  ["Our liability",
-    "To the extent the law allows, Superteem and its authors aren't liable for any loss or damage from using it, "
-    + "including missing or wrong transcripts. Nothing here limits rights you have under the Australian Consumer Law "
-    + "or other laws that can't be excluded."],
-  ["Governing law",
-    "These terms are governed by the laws of Victoria, Australia. If they change, Voice will ask you again."],
+  [tr("Your voice stays on this device"),
+    tr("Voice by Superteem turns speech into text on this device. Your recordings, transcripts, notes and voice print (a ")
+    + tr("numeric description of how your voice sounds, not a recording of it) are stored only here and are never sent ")
+    + tr("to us or anyone else. Checking for an update sends Superteem the app version, the operating system and its ")
+    + tr("version, the models in use, the configured languages, and whether the check was automatic, requested, or the ")
+    + tr("start of an install. That check does not include recordings, transcripts, notes or the voice print.")],
+  [tr("You're in control"),
+    tr("Delete voice prints, notes and recordings in the app at any time. Uninstalling removes the app; your files stay ")
+    + tr("in the Superteem Voice folder until you delete it.")],
+  [tr("Open source, no warranty"),
+    tr("Voice is free software under the GNU General Public License v3. You may use, study, change and share it ")
+    + tr("under that licence. It is provided as is, without warranty of any kind.")],
+  [tr("Use it lawfully"),
+    tr("You are responsible for how you use Voice. Get consent before recording anyone, follow the recording, ")
+    + tr("privacy and surveillance laws where you are, and don't use it for anything illegal. We can't prevent misuse ")
+    + tr("and aren't responsible for it.")],
+  [tr("Our liability"),
+    tr("To the extent the law allows, Superteem and its authors aren't liable for any loss or damage from using it, ")
+    + tr("including missing or wrong transcripts. Nothing here limits rights you have under the Australian Consumer Law ")
+    + tr("or other laws that can't be excluded.")],
+  [tr("Governing law"),
+    tr("These terms are governed by the laws of Victoria, Australia. If they change, Voice will ask you again.")],
 ];
 
 // What a check for an update sends. A dialog rather than a hover tip, so it opens by tap on a phone too.
 // Closes with Close, Escape, or a tap outside it.
 function showCheckDetails(opener) {
-  const dialog = el("dialog", { class: "check-details", "aria-label": "Telemetry" },
+  const dialog = el("dialog", { class: "check-details", "aria-label": tr("Telemetry") },
     el("div", { class: "body" },
-      el("h2", {}, "Telemetry"),
-      el("p", {}, "Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted. "
-        + "Voice by Superteem is built to help you secure your data on your devices and give you a better alternative to AI cloud providers that store everything about you for their own benefit. ",
-        el("button", { class: "link inline", onclick: () => { dialog.close(); showTerms(); } }, "Read our privacy policy"), "."),
-      el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => dialog.close() }, "Close"))));
+      el("h2", {}, tr("Telemetry")),
+      el("p", {}, tr("Checking for an update sends telemetry data (app version, operating system, model names, and languages used) to voice.superteem.com to help provide you with the correct download. No information about you or your data is transmitted. ")
+        + tr("Voice by Superteem is built to help you secure your data on your devices and give you a better alternative to AI cloud providers that store everything about you for their own benefit. "),
+        el("button", { class: "link inline", onclick: () => { dialog.close(); showTerms(); } }, tr("Privacy policy")), "."),
+      el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => dialog.close() }, tr("Close")))));
   dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
   dialog.addEventListener("close", () => { dialog.remove(); opener?.focus(); });
   document.body.append(dialog);
@@ -6411,10 +6412,10 @@ function showCheckDetails(opener) {
 }
 
 function showTerms() {
-  const dialog = el("dialog", { class: "terms", "aria-label": "Terms of use and privacy" },
-    el("h2", {}, "Terms of use and privacy"),
+  const dialog = el("dialog", { class: "terms", "aria-label": tr("Terms & privacy") },
+    el("h2", {}, tr("Terms & privacy")),
     ...TERMS.map(([heading, text]) => el("div", {}, el("h3", {}, heading), el("p", {}, text))),
-    el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => dialog.close() }, "Close")));
+    el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => dialog.close() }, tr("Close"))));
   dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();
@@ -6448,7 +6449,7 @@ function downloadModel() {
 }
 
 function downloadText() {
-  return modelProgress ? `Downloading… ${Math.round(modelProgress * 100)}%` : "Downloading…";
+  return modelProgress ? tr("Downloading… {0}%", { "0": Math.round(modelProgress * 100) }) : tr("Downloading…");
 }
 
 /// The thin bar of steps at the top of setup. "The speech model" shares a step with saying hello, as it
@@ -6460,15 +6461,15 @@ function setupSteps(step) {
     : { [SETUP.voice]: 0, [SETUP.model]: 1, [SETUP.hello]: 1, [SETUP.done]: 2 };
   const count = platform === "android" ? 4 : 3;
   const at = order[step] ?? 0;
-  return el("div", { class: "steps", "aria-label": `Step ${at + 1} of ${count}` },
+  return el("div", { class: "steps", "aria-label": tr("Step {0} of {count}", { "0": at + 1, count: count }) },
     Array.from({ length: count }, (_, i) => el("span", { class: i < at ? "done" : i === at ? "now" : "" })));
 }
 
 /// What each kind of Android access is for. The microphone is the one the app can't work without.
 const PERMISSIONS = {
-  microphone: ["Microphone", "Needed to record meetings, notes and your voice print.", true],
-  nearby: ["Nearby devices", "For a Bluetooth headset microphone and Superteem Voice Pins.", false],
-  notifications: ["Notifications", "Shows that recording is on while you use other apps, with a tap back to Voice.", false],
+  microphone: [tr("Microphone"), tr("Needed to record meetings, notes and your voice print."), true],
+  nearby: [tr("Nearby devices"), tr("For Bluetooth headsets and Voice Pins."), false],
+  notifications: [tr("Notifications"), tr("Shows recording is on while you use other apps, with a tap back to Voice."), false],
 };
 
 /// A live list of the app's Android permissions, each with its state and the way to allow it. Checked again
@@ -6477,8 +6478,8 @@ const PERMISSIONS = {
 function permissionsPanel(changed) {
   const holder = el("div", { class: "group permissions" });
   const tips = el("div", { class: "legend permission-tips" },
-    "If the microphone is allowed but recordings are silent, open Quick Settings (swipe down from the top) and check ",
-    el("b", {}, "Microphone access"), " is on, and that no call or voice assistant is using the microphone.");
+    tr("If the mic is allowed but recordings are silent, open Quick Settings (swipe down) and check "),
+    el("b", {}, tr("Microphone access")), tr(" is on, and no call or voice assistant is using the mic."));
   let timer = null;
   const refresh = async () => {
     if (!holder.isConnected && timer) {
@@ -6489,16 +6490,16 @@ function permissionsPanel(changed) {
     const { permissions = [] } = await invoke("app_permissions").catch(() => ({}));
     holder.replaceChildren(...permissions.filter((p) => PERMISSIONS[p.id]).map((p) => {
       const [name, why, required] = PERMISSIONS[p.id];
-      const state = el("span", { class: p.allowed ? "permission-state ok" : "permission-state" }, p.allowed ? "Allowed" : required ? "Needed" : "Not allowed");
+      const state = el("span", { class: p.allowed ? "permission-state ok" : "permission-state" }, p.allowed ? tr("Allowed") : required ? tr("Needed") : tr("Not allowed"));
       const action = p.allowed ? ""
         : p.blocked
-          ? el("button", { class: "pill", onclick: () => invoke("open_app_settings").catch(() => {}) }, "Open Android settings")
+          ? el("button", { class: "pill", onclick: () => invoke("open_app_settings").catch(() => {}) }, tr("Open Android settings"))
           : el("button", { class: required ? "primary pill" : "pill", onclick: async () => {
             await invoke("request_app_permissions", { ids: [p.id] }).catch(() => {});
             setTimeout(refresh, 800);
-          } }, "Allow");
+          } }, tr("Allow"));
       return el("div", { class: "row" }, el("span", { class: "label" }, name, el("small", {}, why),
-        p.blocked && !p.allowed ? el("small", {}, "Android won't ask again: allow it under Permissions in the app's settings.") : ""),
+        p.blocked && !p.allowed ? el("small", {}, tr("Android won't ask again: allow it in the app's settings, under Permissions.")) : ""),
         el("span", { class: "permission-action" }, state, action));
     }));
     changed?.(permissions.find((p) => p.id === "microphone")?.allowed ?? true);
@@ -6519,33 +6520,33 @@ async function showTranscription(message) {
   const [models, terms, info, ready] = await Promise.all([invoke("speech_models").catch(() => []), invoke("list_vocabulary").catch(() => []),
     languageData(true).catch(() => null), invoke("model_ready").catch(() => false)]);
   const page = el("div", { class: "page" },
-    el("button", { class: "link back-link", onclick: () => showSettings() }, "‹ Settings"),
-    el("h1", {}, "Transcription"),
-    el("p", { class: "hint" }, "Speech is turned into text on this device by a Whisper model, for dictation, voice commands and meeting transcripts. Nothing is sent anywhere."));
+    el("button", { class: "link back-link", onclick: () => showSettings() }, tr("‹ Settings")),
+    el("h1", {}, tr("Transcription")),
+    el("p", { class: "hint" }, tr("A Whisper model turns speech into text on this device, for dictation, commands and meetings. Nothing is sent anywhere.")));
   if (message) page.append(el("div", { class: "notice" }, message));
-  if (!ready) page.append(el("div", { class: "notice" }, el("strong", {}, "A speech model is needed. "), "Download one below to dictate and transcribe."));
+  if (!ready) page.append(el("div", { class: "notice" }, el("strong", {}, tr("A speech model is needed. ")), tr("Download one below to dictate and transcribe.")));
 
   // The models: what each is for, which of the person's languages it transcribes, and getting or removing it.
   const list = el("div", { class: "group" });
   for (const m of models) {
-    const status = el("small", {}, m.about, m.used_for.length ? ` Transcribes ${m.used_for.map(languageName).join(" and ")} now.` : "");
+    const status = el("small", {}, m.about, m.used_for.length ? tr(" Transcribes {0} now.", { "0": trList(m.used_for.map(languageName)) }) : "");
     const row = el("div", { class: "row" }, el("span", { class: "label" }, m.name,
-      m.used_for.length && m.ready ? el("span", { class: "badge ok" }, "In use") : null,
-      m.suggested && !m.ready ? el("span", { class: "badge" }, "Suits this device") : null, status));
+      m.used_for.length && m.ready ? el("span", { class: "badge ok" }, tr("In use")) : null,
+      m.suggested && !m.ready ? el("span", { class: "badge" }, tr("Suits this device")) : null, status));
     if (m.ready) {
       row.append(el("span", { class: "value" }, sizeText(m.size)));
       // The English model stays: it's what dictation and commands fall back on.
       if (m.multilingual) {
         row.append(el("button", { class: "link", onclick: async () => {
-          try { await invoke("delete_speech_model", { id: m.id }); showTranscription(`${m.name} was deleted.`); } catch (e) { showError(page, e); }
+          try { await invoke("delete_speech_model", { id: m.id }); showTranscription(tr("{name} was deleted.", { name: m.name })); } catch (e) { showError(page, e); }
         } }, "Delete"));
       }
     } else {
-      const get = el("button", { class: m.suggested || (!ready && !m.multilingual) ? "primary pill" : "pill" }, `Download (${sizeText(m.size)})`);
+      const get = el("button", { class: m.suggested || (!ready && !m.multilingual) ? "primary pill" : "pill" }, tr("Download ({0})", { "0": sizeText(m.size) }));
       get.addEventListener("click", async () => {
         get.disabled = true;
-        const off = await listen("speech-model-download", (e) => { if (e.payload.id === m.id) status.textContent = `Downloading… ${Math.round(e.payload.fraction * 100)}%`; });
-        try { await invoke("download_speech_model", { id: m.id }); showTranscription(`${m.name} is ready.`); } catch (e) { get.disabled = false; status.textContent = String(e); } finally { off(); }
+        const off = await listen("speech-model-download", (e) => { if (e.payload.id === m.id) status.textContent = tr("Downloading… {0}%", { "0": Math.round(e.payload.fraction * 100) }); });
+        try { await invoke("download_speech_model", { id: m.id }); showTranscription(tr("{name} is ready.", { name: m.name })); } catch (e) { get.disabled = false; status.textContent = String(e); } finally { off(); }
       });
       row.append(get);
     }
@@ -6553,19 +6554,19 @@ async function showTranscription(message) {
   }
   const multi = models.filter((m) => m.multilingual && m.ready);
   if (multi.length > 1) {
-    const pick = el("select", { "aria-label": "Speech model for other languages" }, el("option", { value: "" }, "The best one downloaded"),
+    const pick = el("select", { "aria-label": tr("Model for other languages") }, el("option", { value: "" }, tr("Best downloaded")),
       multi.map((m) => el("option", { value: m.id, selected: info?.speech_model === m.id }, m.name)));
     pick.addEventListener("change", async () => {
       try { await invoke("save_language_settings", { speechModel: pick.value }); showTranscription(); } catch (e) { showError(page, e); }
     });
-    list.append(el("div", { class: "row" }, el("span", { class: "label" }, "For languages other than English", el("small", {}, "Which multilingual model transcribes them")), pick));
+    list.append(el("div", { class: "row" }, el("span", { class: "label" }, tr("Other languages"), el("small", {}, tr("Which multilingual model transcribes them"))), pick));
   }
-  page.append(el("h2", {}, "Speech models"), list,
-    el("p", { class: "hint" }, "English uses the English model, unless the large one is chosen and a graphics processor runs it. Other languages need a multilingual model, offered when you first choose such a language. "
-      + "Spoken commands such as “Hey Superteem” and “bookmark that” are English for now."));
+  page.append(el("h2", {}, tr("Speech models")), list,
+    el("p", { class: "hint" }, tr("English uses the English model, unless the large one runs on a GPU. Other languages need a multilingual model, offered when you choose one. ")
+      + tr("Spoken commands like “Hey Superteem” and “bookmark that” are English for now.")));
 
-  page.append(el("h2", {}, "Vocabulary"), el("div", { class: "group" },
-    linkRow("Vocabulary", terms.length ? `${terms.length} word${terms.length === 1 ? "" : "s"}` : "Spell names and acronyms your way", () => showVocabulary(), { drop: true })));
+  page.append(el("h2", {}, tr("Vocabulary")), el("div", { class: "group" },
+    linkRow(tr("Vocabulary"), terms.length ? trn(terms.length, "{n} word", "{n} words") : tr("Spell names and acronyms your way"), () => showVocabulary(), { drop: true })));
   page.append(await modelHelp(() => showTranscription()));
   main.replaceChildren(page);
 }
@@ -6579,16 +6580,16 @@ async function showVoices() {
   refreshItems();
   const [prints, reading] = await Promise.all([invoke("list_voiceprints").catch(() => []), readingAloudSummary()]);
   const page = el("div", { class: "page" },
-    el("button", { class: "link back-link", onclick: () => showSettings() }, "‹ Settings"),
-    el("h1", {}, "Voices"),
-    el("p", { class: "hint" }, "How the app reads aloud to you, and how it recognises your voice for commands and the people in your meetings."));
-  page.append(el("h2", {}, "Reading aloud"), el("div", { class: "group" },
-    linkRow("Voice and speed", reading, () => showReadingSettings())));
-  page.append(el("h2", {}, "Recognising voices"), el("div", { class: "group" },
-    linkRow("Voice prints", prints.length ? `${prints.length} saved` : "None yet", () => showVoicePrints()),
-    linkRow("Default microphone and voice print", prefs.enrol_input ?? "Not set up", () => showOnboarding(SETUP.voice)),
-    el("div", { class: "windows-only" }, linkRow("Devices", "Test, hide and add microphones and Voice Pins", () => showDevices())),
-    el("div", { class: "windows-only" }, linkRow("Wake word and commands", trainedText(prints), () => showKeyphrases()))));
+    el("button", { class: "link back-link", onclick: () => showSettings() }, tr("‹ Settings")),
+    el("h1", {}, tr("Voices")),
+    el("p", { class: "hint" }, tr("How the app reads aloud, and how it recognises your voice and the people in your meetings.")));
+  page.append(el("h2", {}, tr("Reading aloud")), el("div", { class: "group" },
+    linkRow(tr("Voice & speed"), reading, () => showReadingSettings())));
+  page.append(el("h2", {}, tr("Recognising voices")), el("div", { class: "group" },
+    linkRow(tr("Voice prints"), prints.length ? `${prints.length} saved` : tr("None yet"), () => showVoicePrints()),
+    linkRow(tr("Default mic & voice print"), prefs.enrol_input ?? tr("Not set up"), () => showOnboarding(SETUP.voice)),
+    el("div", { class: "windows-only" }, linkRow(tr("Devices"), tr("Test, hide and add mics and Voice Pins"), () => showDevices())),
+    el("div", { class: "windows-only" }, linkRow(tr("Wake word & commands"), trainedText(prints), () => showKeyphrases()))));
   main.replaceChildren(page);
 }
 
@@ -6598,9 +6599,9 @@ function showPermissions() {
   showPage();
   view = { kind: "permissions" };
   main.replaceChildren(el("div", { class: "page" },
-    el("button", { class: "link back-link", onclick: () => showSettings() }, "‹ Settings"),
-    el("h1", {}, "App permissions"),
-    el("p", {}, "What Voice may use on this phone. Everything stays on the phone."),
+    el("button", { class: "link back-link", onclick: () => showSettings() }, tr("‹ Settings")),
+    el("h1", {}, tr("App permissions")),
+    el("p", {}, tr("What Voice may use on this phone. Everything stays on it.")),
     permissionsPanel()));
 }
 
@@ -6633,11 +6634,11 @@ async function showOnboarding(step = SETUP.welcome) {
   };
   // Run again from Settings, setup can be left at any point; the first time, a step can be skipped.
   const skipTo = (to) => rerun
-    ? el("button", { class: "skip-link", onclick: () => { cancelOnboardReading(); showSettings(); } }, "Back to Settings")
-    : el("button", { class: "skip-link", onclick: () => { cancelOnboardReading(); showOnboarding(to); } }, "Skip this step", svg("chevron", 14));
+    ? el("button", { class: "skip-link", onclick: () => { cancelOnboardReading(); showSettings(); } }, tr("Back to Settings"))
+    : el("button", { class: "skip-link", onclick: () => { cancelOnboardReading(); showOnboarding(to); } }, tr("Skip"), svg("chevron", 14));
 
   if (step === SETUP.welcome) {
-    const agree = el("button", { class: "primary pill big" }, rerun ? "Agree" : "Agree and get started");
+    const agree = el("button", { class: "primary pill big" }, rerun ? tr("Agree") : tr("Agree and start"));
     agree.addEventListener("click", async () => {
       agree.disabled = true;
       await invoke("save_prefs", { acceptTerms: true }).catch(() => {});
@@ -6650,19 +6651,19 @@ async function showOnboarding(step = SETUP.welcome) {
         el("span", { class: "welcome-logo", role: "img", "aria-label": "Superteem" },
           el("img", { class: "logo-light-mode", src: "logo-light-mode.png", alt: "" }),
           el("img", { class: "logo-dark-mode", src: "logo-dark-mode.png", alt: "" }))),
-      el("p", { class: "lead" }, "Voice notes, meetings and commands, transcribed on your own device. No cloud."),
-      rerun ? el("p", {}, "There are now terms of use. Agree to them to carry on.") : "",
-      el("p", { class: "legend" }, "By continuing you agree to the ",
-        el("button", { class: "link inline", onclick: showTerms }, "terms of use and privacy"), "."),
+      el("p", { class: "lead" }, tr("Voice notes, meetings and commands, transcribed on your device. No cloud.")),
+      rerun ? el("p", {}, tr("There are new terms of use. Agree to carry on.")) : "",
+      el("p", { class: "legend" }, tr("By continuing you agree to the "),
+        el("button", { class: "link inline", onclick: showTerms }, tr("terms of use and privacy")), "."),
       el("div", { class: "actions" }, agree));
   } else if (step === SETUP.permissions) {
     // Android asks before an app may use the microphone; without it nothing records, silently.
-    const next = el("button", { class: "primary pill" }, "Continue");
+    const next = el("button", { class: "primary pill" }, tr("Continue"));
     next.addEventListener("click", () => showOnboarding(SETUP.voice));
-    page.append(setupHeading("Permissions", skipTo(SETUP.voice)),
-      el("p", {}, "Allow Voice to use the microphone so it can record. The others are optional."),
+    page.append(setupHeading(tr("Permissions"), skipTo(SETUP.voice)),
+      el("p", {}, tr("Allow the microphone so Voice can record. The rest are optional.")),
       permissionsPanel((microphone) => {
-        next.textContent = microphone ? "Continue" : "Continue without the microphone";
+        next.textContent = microphone ? tr("Continue") : tr("Continue without the microphone");
         next.className = microphone ? "primary pill" : "pill";
       }),
       el("div", { class: "actions" }, next));
@@ -6670,15 +6671,15 @@ async function showOnboarding(step = SETUP.welcome) {
     // The model downloads while the voice print is made, so it's usually ready by the next page.
     if (!ready && !modelDownload) downloadModel().catch(() => {});
     const next = () => showOnboarding(SETUP.model);
-    page.append(setupHeading("Your microphone and voice print", skipTo(SETUP.model)),
-      el("p", { class: "setup-intro" }, "Pick the microphone you'll usually use, then read a short passage aloud so the app knows your voice."));
+    page.append(setupHeading(tr("Your mic and voice print"), skipTo(SETUP.model)),
+      el("p", { class: "setup-intro" }, tr("Pick your usual mic, then read a short passage so the app knows your voice.")));
     const body = el("div");
     page.append(body);
     main.replaceChildren(page);
     return voiceSetup(body, next);
   } else if (step === SETUP.model) {
-    page.append(setupHeading("The speech model", skipTo(afterModel)),
-      el("p", {}, "Everything you say is turned into text on this device, never sent anywhere. That needs a one-time download."),
+    page.append(setupHeading(tr("The speech model"), skipTo(afterModel)),
+      el("p", {}, tr("Everything you say becomes text on this device, never sent anywhere. That needs a one-time download.")),
       modelError && !modelDownload ? el("div", { class: "error", role: "alert" }, String(modelError)) : "",
       el("div", { class: "actions" }, modelDownloadButton(() => {
         speak("The speech model is ready.");
@@ -6692,11 +6693,11 @@ async function showOnboarding(step = SETUP.welcome) {
     page.classList.add("welcome", "all-set");
     page.append(
       el("div", { class: "celebrate", role: "status" }, el("span", { class: "badge" }, svg("check", 44))),
-      el("h1", {}, "You're all set"),
-      el("div", { class: "actions" }, el("button", { class: "primary pill big", onclick: finish }, "Start")),
+      el("h1", {}, tr("You're all set")),
+      el("div", { class: "actions" }, el("button", { class: "primary pill big", onclick: finish }, tr("Start"))),
       // Optional: the same as Settings › Local AI.
-      el("p", { class: "legend" }, el("button", { class: "link inline", onclick: async () => { await finish(); showOptimise(); } }, "Optimise Voice for this device first"),
-        " · picks the best speech and analysis models and voices for your languages"));
+      el("p", { class: "legend" }, el("button", { class: "link inline", onclick: async () => { await finish(); showOptimise(); } }, tr("Optimise Voice for this device first")),
+        tr(" · picks the best models and voices for your languages")));
   }
   main.replaceChildren(page);
 }
@@ -6706,7 +6707,7 @@ async function modelHelp(changed) {
   const info = await invoke("model_info").catch(() => null);
   if (!info) return "";
   const proxy = el("input", { type: "text", class: "plain", placeholder: "http://proxy.example.com:8080", value: prefs.proxy ?? "",
-    "aria-label": "Download proxy", spellcheck: "false" });
+    "aria-label": tr("Download proxy"), spellcheck: "false" });
   const saved = el("span", { class: "legend" });
   proxy.addEventListener("change", async () => {
     try {
@@ -6718,30 +6719,30 @@ async function modelHelp(changed) {
     }
   });
   const using = info.proxy && info.proxy_source !== "Settings"
-    ? `Now using ${info.proxy}, from ${info.proxy_source === "Windows" ? "Windows' proxy settings" : "the HTTPS_PROXY setting"}.`
-    : info.proxy ? "" : "No proxy is set, so it downloads directly.";
-  const copy = el("button", { class: "pill" }, "Copy download link");
+    ? tr("Now using {proxy}, from {1}.", { proxy: info.proxy, "1": info.proxy_source === "Windows" ? tr("Windows' proxy settings") : tr("the HTTPS_PROXY setting") })
+    : info.proxy ? "" : tr("No proxy set: downloads go direct.");
+  const copy = el("button", { class: "pill" }, tr("Copy download link"));
   copy.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(info.url);
-      copy.textContent = "Link copied";
+      copy.textContent = tr("Link copied");
     } catch {
       copy.textContent = info.url;
     }
   });
   return el("div", { class: "model-help" },
-    el("h2", {}, "Download proxy"),
+    el("h2", {}, tr("Download proxy")),
     el("div", { class: "field" }, proxy, saved),
     el("div", { class: "legend" }, platform === "windows"
-      ? "Only needed if your network uses a proxy that Windows doesn't already know about. "
-      : "Only needed if your network makes apps go through a proxy. ",
-    "user:password@ can go before the address. ", using),
+      ? tr("Only if your network uses a proxy Windows doesn't know. ")
+      : tr("Only if your network requires a proxy. "),
+    tr("user:password@ can go before the address. "), using),
     // Android keeps the app's folder private, so the model can't be put there by hand.
-    isDesktop() ? el("h2", {}, "Adding the model yourself") : "",
-    isDesktop() ? el("div", { class: "legend" }, "Download ", el("code", {}, info.file), " in a browser and put it in ",
+    isDesktop() ? el("h2", {}, tr("Add the model yourself")) : "",
+    isDesktop() ? el("div", { class: "legend" }, tr("Download "), el("code", {}, info.file), tr(" in a browser and put it in "),
       el("code", { class: "path" }, info.folder), ". Voice picks it up straight away.") : "",
     isDesktop() ? el("div", { class: "actions" },
-      el("button", { class: "pill", onclick: () => invoke("open_models_folder").catch((e) => showError(copy.parentElement, e)) }, "Open the model folder"),
+      el("button", { class: "pill", onclick: () => invoke("open_models_folder").catch((e) => showError(copy.parentElement, e)) }, tr("Open model folder")),
       copy) : "");
 }
 
@@ -6760,10 +6761,10 @@ async function sayHello(page, next, skip, rerun) {
   const device = prefs.enrol_input;
   const steps = page.querySelector(".steps") ?? "";
   if (!print || !device) {
-    page.replaceChildren(steps, setupHeading("Say hello", skip),
-      el("p", {}, "Superteem listens for “Hey Superteem” while the app is open. Make your voice print first, so it learns how you say it."),
+    page.replaceChildren(steps, setupHeading(tr("Say hello"), skip),
+      el("p", {}, tr("Superteem listens for “Hey Superteem” while the app is open. Make your voice print first so it learns how you say it.")),
       el("div", { class: "actions" },
-        el("button", { class: "primary pill", onclick: () => showOnboarding(SETUP.voice) }, "Make my voice print")));
+        el("button", { class: "primary pill", onclick: () => showOnboarding(SETUP.voice) }, tr("Make my voice print"))));
     return;
   }
   const wake = (await invoke("list_keyphrases", { print: print.id }).catch(() => ({ phrases: [] }))).phrases.find((p) => p.id === "wake");
@@ -6776,7 +6777,7 @@ async function sayHello(page, next, skip, rerun) {
   const help = el("div");
   const actions = el("div", { class: "actions hello-actions" });
   const lead = el("p", {});
-  page.replaceChildren(steps, setupHeading("Say hello", skip), lead, mic, ticks, state, help, actions);
+  page.replaceChildren(steps, setupHeading(tr("Say hello"), skip), lead, mic, ticks, state, help, actions);
 
   const fill = (good) => {
     circles.forEach((c, i) => {
@@ -6801,10 +6802,10 @@ async function sayHello(page, next, skip, rerun) {
   const finished = (message) => {
     stop();
     fill(PRACTICE_GOAL);
-    lead.textContent = "Superteem knows how you say “Hey Superteem”. Turn listening on to use it now, or later in Settings. "
-      + "Nothing is recorded until you ask.";
+    lead.textContent = tr("Superteem knows how you say “Hey Superteem”. Turn listening on now, or later in Settings. ")
+      + tr("Nothing is recorded until you ask.");
     state.textContent = message ?? "";
-    const listening = toggleRow("Listen for “Hey Superteem”", "While the app is open.", prefs.wake, async (on, box) => {
+    const listening = toggleRow(tr("Listen for “Hey Superteem”"), tr("While the app is open."), prefs.wake, async (on, box) => {
       try {
         await setWake(on);
       } catch (e) {
@@ -6813,23 +6814,23 @@ async function sayHello(page, next, skip, rerun) {
       }
     });
     help.replaceChildren(el("div", { class: "group hello-listen" }, listening));
-    actions.replaceChildren(el("button", { class: "primary pill", onclick: next }, "Continue"),
-      el("button", { class: "pill", onclick: practise }, "Practise again"));
+    actions.replaceChildren(el("button", { class: "primary pill", onclick: next }, tr("Continue")),
+      el("button", { class: "pill", onclick: practise }, tr("Practise again")));
   };
 
   async function practise() {
     let good = 0;
     let misses = 0;
     fill(0);
-    lead.textContent = `Say “Hey Superteem” as you normally would, then pause. Each time it's heard clearly a circle is ticked. ${PRACTICE_GOAL} ticks and it knows your voice.`;
-    state.textContent = "Listening… say “Hey Superteem”";
+    lead.textContent = tr("Say “Hey Superteem” normally, then pause. Each clear one ticks a circle. {PRACTICE_GOAL} ticks and it knows your voice.", { PRACTICE_GOAL: PRACTICE_GOAL });
+    state.textContent = tr("Listening… say “Hey Superteem”");
     help.replaceChildren();
-    actions.replaceChildren(el("button", { class: "pill", onclick: () => { stop(); next(); } }, "Skip this for now"));
+    actions.replaceChildren(el("button", { class: "pill", onclick: () => { stop(); next(); } }, tr("Skip for now")));
     try {
       await invoke("start_wake_practice");
     } catch (e) {
       state.textContent = "";
-      help.replaceChildren(el("div", { class: "notice", role: "alert" }, `The microphone couldn't listen: ${e}. You can skip this for now and set it up later in Settings.`));
+      help.replaceChildren(el("div", { class: "notice", role: "alert" }, tr("The mic couldn't listen: {e}. Skip for now and set it up later in Settings.", { e: e })));
       return;
     }
     setupPractising = true;
@@ -6840,37 +6841,37 @@ async function sayHello(page, next, skip, rerun) {
       circles.forEach((c) => c.classList.remove("checking"));
       if (p.checking) {
         circles[Math.min(p.good, PRACTICE_GOAL - 1)].classList.add("checking");
-        state.textContent = "Heard you. Checking…";
+        state.textContent = tr("Heard you. Checking…");
         return;
       }
       if (p.ok) {
         good = p.good;
         fill(Math.min(good, PRACTICE_GOAL));
-        state.textContent = good >= PRACTICE_GOAL ? "That's five." : `Got it: ${good} of ${PRACTICE_GOAL}. Say it again.`;
+        state.textContent = good >= PRACTICE_GOAL ? tr("That's five.") : tr("Got it: {good} of {PRACTICE_GOAL}. Say it again.", { good: good, PRACTICE_GOAL: PRACTICE_GOAL });
         if (good < PRACTICE_GOAL) return;
         practiceHandler = null;
         setupPractising = false;
         mic.classList.replace("on", "off");
-        state.replaceChildren(el("span", { class: "spinner" }), "Learning your voice…");
+        state.replaceChildren(el("span", { class: "spinner" }), tr("Learning your voice…"));
         try {
           await invoke("stop_wake_practice", { print: print.id });
           await refreshPhrasesTrained();
           speak("Got it. I know how you say it now.");
-          finished("All five heard.");
+          finished(tr("All five heard."));
         } catch (e) {
-          state.textContent = `That didn't save: ${e}`;
-          actions.replaceChildren(el("button", { class: "primary pill", onclick: practise }, "Try again"),
-            el("button", { class: "pill", onclick: next }, "Skip this for now"));
+          state.textContent = tr("Not saved: {e}", { e: e });
+          actions.replaceChildren(el("button", { class: "primary pill", onclick: practise }, tr("Try again")),
+            el("button", { class: "pill", onclick: next }, tr("Skip for now")));
         }
         return;
       }
       misses += 1;
-      state.textContent = p.reason || "That didn't count. Say “Hey Superteem”, then pause.";
+      state.textContent = p.reason || tr("That didn't count. Say “Hey Superteem”, then pause.");
       if (misses >= PRACTICE_STRUGGLE && !help.firstChild) {
         help.replaceChildren(el("div", { class: "notice hello-struggle" },
-          el("p", {}, "Having trouble? Check you're close to the microphone and the room is quiet. Or skip this for now: "
-            + "you can practise later in Settings, under Wake word and commands."),
-          el("button", { class: "primary pill", onclick: () => { stop(); next(); } }, "Skip this for now")));
+          el("p", {}, tr("Having trouble? Get close to the mic in a quiet room. Or skip for now: ")
+            + tr("you can practise later in Settings › Wake word & commands.")),
+          el("button", { class: "primary pill", onclick: () => { stop(); next(); } }, tr("Skip for now"))));
       }
     };
   }
@@ -6890,26 +6891,26 @@ async function voiceSetup(holder, next, problem) {
   document.querySelector(".setup-intro")?.removeAttribute("hidden");
   const prints = holder.dataset.name ? [] : await invoke("list_voiceprints").catch(() => []);
   const known = [...prints].sort((a, b) => a.created - b.created)[0]?.name;
-  const name = el("input", { type: "text", class: "plain", placeholder: "Your name", "aria-label": "Your name", value: holder.dataset.name ?? known ?? "" });
-  const mic = el("select", { class: "plain", "aria-label": "Microphone" }, devices.map((d) => el("option", { value: d,
+  const name = el("input", { type: "text", class: "plain", placeholder: tr("Your name"), "aria-label": tr("Your name"), value: holder.dataset.name ?? known ?? "" });
+  const mic = el("select", { class: "plain", "aria-label": tr("Microphone") }, devices.map((d) => el("option", { value: d,
     selected: d === (holder.dataset.mic ?? (devices.includes(prefs.enrol_input) ? prefs.enrol_input : preferred)) }, d)));
   const micInfo = el("span");
   const showNote = () => micInfo.replaceChildren(micNote(prefs.mics[mic.value]) ?? "");
   mic.addEventListener("change", showNote);
   showNote();
-  const start = el("button", { class: "primary pill" }, "Check microphone and start");
+  const start = el("button", { class: "primary pill" }, tr("Check mic and start"));
   // replaceChildren writes null as the text "null", so missing parts are left out.
   holder.replaceChildren(...[
     problem ? el("div", { class: "notice", role: "alert" }, problem) : null,
-    el("h2", {}, "Your name"), name,
-    el("div", { class: "legend" }, "Shown beside what you say in meeting transcripts."),
-    el("h2", {}, "Microphone"), el("div", { class: "field" }, mic, micInfo),
-    devices.length ? null : el("div", { class: "error" }, "No microphones found. Connect one and come back to this step."),
-    el("div", { class: "legend" }, "Your voice print is kept on this device: only a description of how your voice sounds. The recording is deleted."),
+    el("h2", {}, tr("Your name")), name,
+    el("div", { class: "legend" }, tr("Shown beside your words in transcripts.")),
+    el("h2", {}, tr("Microphone")), el("div", { class: "field" }, mic, micInfo),
+    devices.length ? null : el("div", { class: "error" }, tr("No microphones found. Connect one and return to this step.")),
+    el("div", { class: "legend" }, tr("Your voice print stays on this device: only a description of your voice. The recording is deleted.")),
     el("div", { class: "actions" }, start)].filter(Boolean));
   start.disabled = !devices.length;
   start.addEventListener("click", async () => {
-    if (!name.value.trim()) return showError(holder, "Type your name, so meetings can show it.");
+    if (!name.value.trim()) return showError(holder, tr("Type your name for meetings."));
     holder.dataset.name = name.value.trim();
     holder.dataset.mic = mic.value;
     try {
@@ -6923,14 +6924,14 @@ async function voiceSetup(holder, next, problem) {
 }
 
 function voiceReading(holder, next, device) {
-  const status = el("div", { class: "hint", "aria-live": "polite" }, `Say something, so we can hear ${device}.`);
+  const status = el("div", { class: "hint", "aria-live": "polite" }, tr("Say something so we can hear {device}.", { device: device }));
   const meter = el("div", { style: "width:0%" });
   const progressBar = el("div", { style: "width:0%" });
   const script = el("div", { class: "script", hidden: true }, BUILT_IN_SCRIPTS[1].text);
-  const reading = el("div", { hidden: true }, el("div", { class: "legend" }, "Speech so far"), el("div", { class: "meter wide-meter" }, progressBar));
-  const done = el("button", { class: "primary pill", disabled: true }, "Done");
-  const other = el("button", { class: "pill" }, "Use a different microphone");
-  const heading = el("h2", {}, "Checking the microphone");
+  const reading = el("div", { hidden: true }, el("div", { class: "legend" }, tr("Speech so far")), el("div", { class: "meter wide-meter" }, progressBar));
+  const done = el("button", { class: "primary pill", disabled: true }, tr("Done"));
+  const other = el("button", { class: "pill" }, tr("Use another mic"));
+  const heading = el("h2", {}, tr("Checking the mic"));
   holder.replaceChildren(heading, status,
     el("div", { class: "meter wide-meter", "aria-hidden": "true" }, meter), script, reading, el("div", { class: "actions" }, done, other));
 
@@ -6949,13 +6950,13 @@ function voiceReading(holder, next, device) {
     voiceSetup(holder, next);
   });
   done.addEventListener("click", async () => {
-    status.replaceChildren(el("span", { class: "spinner" }), "Making your voice print…");
+    status.replaceChildren(el("span", { class: "spinner" }), tr("Making your voice print…"));
     try {
       await stopReading(true);
       speak("Got it. I'll know your voice now.");
       next();
     } catch (e) {
-      voiceSetup(holder, next, `The voice print wasn't saved: ${e}`);
+      voiceSetup(holder, next, tr("Voice print not saved: {e}", { e: e }));
     }
   });
 
@@ -6965,12 +6966,12 @@ function voiceReading(holder, next, device) {
     if (!s?.recording || !stream || !onboardEnrolling) return;
     if (stream.state === "failed" || stream.state === "no headset") {
       await stopReading(false).catch(() => {});
-      return voiceSetup(holder, next, `${device} could not be used: ${stream.detail || "it did not start"}. Try another microphone.`);
+      return voiceSetup(holder, next, tr("{device} couldn't be used: {1}. Try another mic.", { device: device, "1": stream.detail || tr("it did not start") }));
     }
     // Android switched to another microphone: this page checks the one chosen, so it says so instead.
     if (stream.notice_id > 0) {
       await stopReading(false).catch(() => {});
-      return voiceSetup(holder, next, `${device} isn't working: ${stream.notice}. Connect it, or pick another microphone.`);
+      return voiceSetup(holder, next, tr("{device} isn't working: {notice}. Connect it, or pick another mic.", { device: device, notice: stream.notice }));
     }
     // Android is handing the app silence: the room isn't quiet, the microphone is switched off for it.
     if (stream.state === "silenced") {
@@ -6986,27 +6987,29 @@ function voiceReading(holder, next, device) {
       if (loud) quietSince = Date.now();
       if (heardFrames >= 3) {
         checked = true;
-        heading.textContent = "Making your voice print";
-        status.textContent = "Microphone working. Now read this aloud at your normal pace:";
+        heading.textContent = tr("Making your voice print");
+        status.textContent = tr("Mic working. Now read this aloud at your normal pace:");
         // The passage needs the room, so the page's introduction steps aside.
         document.querySelector(".setup-intro")?.setAttribute("hidden", "");
         script.hidden = false;
         reading.hidden = false;
       } else if (Date.now() - quietSince > 6000) {
-        status.replaceChildren(el("span", { class: "danger" }, `We can't hear anything from ${device}. Check it's plugged in and not muted, or use a different microphone.`));
+        status.replaceChildren(el("span", { class: "danger" }, tr("Can't hear {device}. Check it's plugged in and unmuted, or use another mic.", { device: device })));
       }
       return;
     }
     if (loud) speech += 0.2;
     progressBar.style.width = `${Math.min(100, (100 * speech) / VOICE_TARGET_S)}%`;
     done.disabled = speech < VOICE_MIN_S;
-    if (speech >= VOICE_TARGET_S) status.textContent = "That's plenty. Press Done.";
+    if (speech >= VOICE_TARGET_S) status.textContent = tr("That's plenty. Press Done.");
   };
   clearInterval(pollTimer);
   pollTimer = setInterval(poll, 200);
 }
 
 // ---------- The voice agent ----------
+// What it says aloud stays in English, as the commands it understands are English; its buttons and labels
+// are translated like the rest of the app.
 
 const agentEl = document.getElementById("agent");
 const agentLog = document.getElementById("agent-log");
@@ -7236,24 +7239,24 @@ function agentCommands() {
 
 function refreshAgentControls() {
   if (recording) {
-    setAgentState(`Recording · ${clock(nowInRecording())}`);
-    agentButtons(["Bookmark", () => run("bookmark that")], ["Action item", () => run("action item")], ["Stop recording", () => run("stop recording"), true]);
+    setAgentState(tr("Recording · {0}", { "0": clock(nowInRecording()) }));
+    agentButtons([tr("Bookmark"), () => run("bookmark that")], [tr("Action item"), () => run("action item")], [tr("Stop recording"), () => run("stop recording"), true]);
   }
   if (agent.mode === "confirm" || agent.mode === "offer" || agent.mode === "topic") {
     const pending = commandById(agent.pending);
-    setAgentState("Waiting for your answer: yes or no");
-    agentButtons(["No", () => run("no")], [pending ? `Yes: “${pending.say}”` : "Yes", () => run("yes"), true]);
+    setAgentState(tr("Waiting for yes or no"));
+    agentButtons([tr("No"), () => run("no")], [pending ? tr("Yes: “{say}”", { say: pending.say }) : tr("Yes"), () => run("yes"), true]);
   } else if (agent.mode === "choose") {
-    setAgentState("Say a number, or pick one");
+    setAgentState(tr("Say or pick a number"));
     agentButtons(...agent.choices.map((id, n) => [`${n + 1}. ${commandById(id).say}`, () => run(String(n + 1)), n === 0]));
   } else if (recording) {
     // Meeting controls, set above.
   } else {
-    setAgentState("Listening");
-    agentButtons(["Close", () => closeAgent(true)]);
+    setAgentState(tr("Listening"));
+    agentButtons([tr("Close"), () => closeAgent(true)]);
   }
   const links = agentCommands().flatMap((c, i) => [i ? " · " : "", el("a", { href: "#", "data-say": c }, `“${c}”`)]);
-  document.getElementById("agent-say").replaceChildren("Say or click: ", ...links);
+  document.getElementById("agent-say").replaceChildren(tr("Say or click: "), ...links);
 }
 
 document.getElementById("agent-close").addEventListener("click", () => closeAgent(true));
@@ -7327,8 +7330,8 @@ function onKeyphrase(h) {
     chime();
     // No greeting: speaking would talk over the command that usually follows straight away.
     if (!agent.open) openAgent(false);
-    heardLine("Hey Superteem");
-    setAgentState("Listening for a command…");
+    heardLine(tr("Hey Superteem"));
+    setAgentState(tr("Listening for a command…"));
     stepBackIfQuiet();
     return;
   }
@@ -7725,30 +7728,30 @@ function showUpdateBar(message) {
   const show = !!update?.newer && remembered("update-later") !== update.latest;
   updateBar.hidden = !show;
   if (!show) return;
-  const get = el("button", { class: "primary pill", onclick: () => installUpdate() }, platform === "android" ? "Download" : "Update now");
+  const get = el("button", { class: "primary pill", onclick: () => installUpdate() }, platform === "android" ? tr("Download") : tr("Update now"));
   updateBar.replaceChildren(
-    el("span", { class: "label" }, `Version ${update.latest} is available`, message ? el("small", {}, message) : null),
+    el("span", { class: "label" }, tr("Version {latest} is available", { latest: update.latest }), message ? el("small", {}, message) : null),
     get,
-    el("button", { class: "link", onclick: () => invoke("open_link", { url: update.notes }).catch(() => {}) }, "What's new"),
-    el("button", { class: "link", onclick: () => { remember("update-later", update.latest); showUpdateBar(); } }, "Later"));
+    el("button", { class: "link", onclick: () => invoke("open_link", { url: update.notes }).catch(() => {}) }, tr("What's new")),
+    el("button", { class: "link", onclick: () => { remember("update-later", update.latest); showUpdateBar(); } }, tr("Later")));
   return get;
 }
 
 /// Gets the newer version: on Windows the installer runs and the app closes, then opens again once it's
 /// installed; on Android the download opens in the browser.
 async function installUpdate() {
-  if (recording || dictation) return showUpdateBar("Finish the recording first, then update.");
-  const button = showUpdateBar(platform === "android" ? "Opening the download in your browser…" : "Downloading…");
+  if (recording || dictation) return showUpdateBar(tr("Finish recording first, then update."));
+  const button = showUpdateBar(platform === "android" ? tr("Opening the download in your browser…") : tr("Downloading…"));
   if (button) button.disabled = true;
   const progress = await listen("update-progress", (e) => {
     const label = updateBar.querySelector("small");
-    if (label) label.textContent = `Downloading… ${Math.round(e.payload * 100)}%`;
+    if (label) label.textContent = tr("Downloading… {0}%", { "0": Math.round(e.payload * 100) });
   });
   try {
     await invoke("install_update");
-    showUpdateBar(platform === "android" ? "When the download finishes, open it to install."
-      : platform === "macos" ? "Drag Voice by Superteem into Applications in the window that opened, then open it again."
-      : "Installing. The app opens again when it's done.");
+    showUpdateBar(platform === "android" ? tr("When it's downloaded, open it to install.")
+      : platform === "macos" ? tr("Drag Voice by Superteem into Applications in the window that opened, then reopen it.")
+      : tr("Installing. The app reopens when done."));
   } catch (e) {
     showUpdateBar(String(e));
   } finally {
@@ -7767,6 +7770,11 @@ async function installUpdate() {
     prefs = await invoke("get_prefs");
     // The theme saved on this device wins over the browser storage, which the webview may clear.
     if (prefs.theme) applyTheme(prefs.theme);
+    // So does the language, which the words were made in as the scripts loaded: drawn again in the saved one.
+    if (prefs.ui_lang && prefs.ui_lang !== UI_LANG && UI_LANGS.some(([code]) => code === prefs.ui_lang)) {
+      localStorage.setItem("uiLang", prefs.ui_lang);
+      if (localStorage.getItem("uiLang") === prefs.ui_lang) return location.reload();
+    }
   } catch {}
   if (prefs.wake && !isPhone()) {
     await invoke("set_wake", { on: true }).catch(() => { prefs.wake = false; });
@@ -7787,6 +7795,11 @@ async function installUpdate() {
     showOnboarding(SETUP.welcome);
   } else {
     showHome();
+    // Back to Settings after its language was changed.
+    try {
+      if (sessionStorage.getItem("reopen") === "settings") showSettings();
+      sessionStorage.removeItem("reopen");
+    } catch {}
     // On a phone the list is home.
     if (matchMedia("(max-width: 720px)").matches) document.body.classList.add("show-list");
   }

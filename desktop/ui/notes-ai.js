@@ -29,11 +29,11 @@ const addToDraft = (id, words) => {
   if (noteChatNow?.id() === id) noteChatNow.showDraft();
 };
 
-const CHAT_IDEAS = ["Summarise this note", "Fix spelling and grammar", "Make it shorter", "Turn it into bullet points"];
+const CHAT_IDEAS = [tr("Summarise this note"), tr("Fix spelling and grammar"), tr("Make it shorter"), tr("Turn it into bullet points")];
 
 listen("analysing", (e) => {
   if (e.payload.template !== "chat" || e.payload.id !== note?.id) return;
-  noteChatStep = { id: e.payload.id, text: "Thinking…" };
+  noteChatStep = { id: e.payload.id, text: tr("Thinking…") };
   noteChatNow?.draw();
 });
 listen("chat-partial", (e) => {
@@ -71,22 +71,22 @@ narrowChat.addEventListener("change", () => {
 /// there's an answer not seen yet, or one being written. `status` is the note's "Saved" line.
 function noteChat(status) {
   const dot = el("span", { class: "chat-dot", hidden: true });
-  const opener = el("button", { class: "icon-only chat-opener", type: "button", title: "Open the chat: ask about this note, or have it rewritten", "aria-label": "Open the chat" },
+  const opener = el("button", { class: "icon-only chat-opener", type: "button", title: tr("Chat: ask about this note, or rewrite it"), "aria-label": tr("Open chat") },
     svg("chat", 18), dot);
   const rail = el("div", { class: "chat-rail" }, opener);
   // The whole bar opens it, not just its button.
   rail.addEventListener("click", () => setOpen(true));
   const log = el("div", { class: "chat-log", role: "log", "aria-live": "polite" });
-  const input = el("textarea", { class: "chat-input", rows: "1", placeholder: "Ask about this note", "aria-label": "Message" });
-  const send = el("button", { class: "primary icon-only chat-send", type: "submit", title: "Send (Enter)", "aria-label": "Send" }, svg("send", 16));
+  const input = el("textarea", { class: "chat-input", rows: "1", placeholder: tr("Ask about this note"), "aria-label": tr("Message") });
+  const send = el("button", { class: "primary icon-only chat-send", type: "submit", title: tr("Send (Enter)"), "aria-label": tr("Send") }, svg("send", 16));
   const form = el("form", { class: "chat-form" }, input, voiceButton(input, { keep: (words) => mine.id && addToDraft(mine.id, words) }), send);
-  const close = el("button", { class: "icon-only chat-collapse", type: "button", title: "Collapse the chat (Esc)", "aria-label": "Collapse the chat" }, svg("chevron", 16));
+  const close = el("button", { class: "icon-only chat-collapse", type: "button", title: tr("Collapse chat (Esc)"), "aria-label": tr("Collapse chat") }, svg("chevron", 16));
   // On a phone, or in a narrow window, the chat covers the note: this goes back to it.
-  const back = el("button", { class: "pill with-icon chat-back", type: "button", title: "Back to the note", "aria-label": "Back to the note" }, svg("chevron", 16), "Note");
-  const edge = el("div", { class: "chat-splitter", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the chat", tabindex: "0",
-    title: "Drag to resize. Double-click to reset." });
-  const panel = el("aside", { class: "note-chat", "aria-label": "Chat about this note", hidden: true }, edge,
-    el("div", { class: "chat-head" }, back, el("strong", {}, "Chat"), el("span", { class: "hint" }, "On this device"), el("span", { class: "grow" }), close),
+  const back = el("button", { class: "pill with-icon chat-back", type: "button", title: tr("Back to note"), "aria-label": tr("Back to note") }, svg("chevron", 16), tr("Note"));
+  const edge = el("div", { class: "chat-splitter", role: "separator", "aria-orientation": "vertical", "aria-label": tr("Resize chat"), tabindex: "0",
+    title: tr("Drag to resize. Double-click to reset.") });
+  const panel = el("aside", { class: "note-chat", "aria-label": tr("Chat about this note"), hidden: true }, edge,
+    el("div", { class: "chat-head" }, back, el("strong", {}, tr("Chat")), el("span", { class: "hint" }, tr("On this device")), el("span", { class: "grow" }), close),
     log, form);
   const side = el("div", { class: "chat-side" }, rail, panel);
 
@@ -146,7 +146,7 @@ function noteChat(status) {
     const unread = !!mine.id && chat.messages.slice(seen()).some((m) => m.role !== "user");
     dot.hidden = !unread && !chat.running;
     dot.classList.toggle("busy", !!chat.running && !unread);
-    opener.setAttribute("aria-label", unread ? "Open the chat: there's a new answer" : chat.running ? "Open the chat: an answer is being written" : "Open the chat");
+    opener.setAttribute("aria-label", unread ? tr("Open chat: new answer") : chat.running ? tr("Open chat: answer in progress") : tr("Open chat"));
     rail.classList.toggle("unread", unread);
   };
 
@@ -162,7 +162,7 @@ function noteChat(status) {
         // Asked before this page was opened (the person went elsewhere and came back): what's been written so far.
         if (data.partial) noteChatPartial = { id: mine.id, ...data.partial };
         // Started before this page opened, with nothing written yet: the model may be loading or thinking.
-        if (data.ahead == null && noteChatStep?.id !== mine.id) noteChatStep = { id: mine.id, text: "Working on it…" };
+        if (data.ahead == null && noteChatStep?.id !== mine.id) noteChatStep = { id: mine.id, text: tr("Working on it…") };
         // A rewrite lands in the editor only if the note is as it was when the answer was asked for. Asked
         // before this page opened, the note was saved on the way out, so that's the text now.
         if (chat.sent == null) chat.sent = mine.editorText();
@@ -235,26 +235,26 @@ function noteChat(status) {
     const actions = el("div", { class: "chat-actions" });
     const box = el("div", { class: "chat-msg theirs" }, formatted(m.text), actions);
     if (m.left_out) {
-      box.append(el("div", { class: "hint", title: "The note and the latest messages are always read; the oldest messages are left out when there isn't room for them." },
-        `The ${m.left_out === 1 ? "oldest message" : `${m.left_out} oldest messages`} didn't fit, so this answer didn't see ${m.left_out === 1 ? "it" : "them"}.`));
+      box.append(el("div", { class: "hint", title: tr("The note and latest messages are always read; the oldest are left out when there's no room.") },
+        `The ${m.left_out === 1 ? "oldest message" : tr("{left_out} oldest messages", { left_out: m.left_out })} didn't fit, so this answer didn't see ${m.left_out === 1 ? "it" : "them"}.`));
     }
     if (m.version) {
       box.classList.add("rewrote");
-      box.prepend(el("div", { class: "chat-made with-icon" }, svg("history", 14), `Rewrote the note · Version ${m.version}`));
+      box.prepend(el("div", { class: "chat-made with-icon" }, svg("history", 14), tr("Rewrote the note · Version {version}", { version: m.version })));
       const notice = chat.notices.get(m.version);
       if (notice) box.append(el("div", { class: "hint" }, notice));
       // Only while this rewrite is still the note: not once undone, replaced, or kept aside for the person's own text.
-      if (m.version === chat.current && !chat.running) actions.append(el("button", { class: "link", type: "button", onclick: () => undoRewrite(m.version, status) }, "Undo"));
-      actions.append(el("button", { class: "link", type: "button", onclick: () => showNoteVersions(status, m.version) }, "See versions"));
+      if (m.version === chat.current && !chat.running) actions.append(el("button", { class: "link", type: "button", onclick: () => undoRewrite(m.version, status) }, tr("Undo")));
+      actions.append(el("button", { class: "link", type: "button", onclick: () => showNoteVersions(status, m.version) }, tr("See versions")));
     } else {
-      const copy = el("button", { class: "link", type: "button" }, "Copy");
+      const copy = el("button", { class: "link", type: "button" }, tr("Copy"));
       copy.addEventListener("click", async () => {
         await navigator.clipboard.writeText(m.text).catch(() => {});
-        copy.textContent = "Copied";
-        setTimeout(() => { copy.textContent = "Copy"; }, 1500);
+        copy.textContent = tr("Copied");
+        setTimeout(() => { copy.textContent = tr("Copy"); }, 1500);
       });
-      const add = el("button", { class: "link", type: "button", title: "Put this at the end of the note" }, "Add to note");
-      add.addEventListener("click", () => { if (note === mine) { mine.addText(m.text); add.textContent = "Added"; add.disabled = true; } });
+      const add = el("button", { class: "link", type: "button", title: tr("Add to the end of the note") }, tr("Add to note"));
+      add.addEventListener("click", () => { if (note === mine) { mine.addText(m.text); add.textContent = tr("Added"); add.disabled = true; } });
       actions.append(copy, add);
     }
     return box;
@@ -298,30 +298,30 @@ function noteChat(status) {
     const rows = [];
     if (!chat.ready) {
       rows.push(el("div", { class: "chat-empty" },
-        el("p", {}, `Chat runs on the same on-device model as analysis templates. Nothing leaves this ${isPhone() ? "phone" : "computer"}.`),
+        el("p", {}, tr("Chat uses the same on-device model as analyses. Nothing leaves this {0}.", { "0": deviceWord() })),
         el("button", { class: "primary pill", type: "button", onclick: async () => {
           const id = await mine.save().catch(() => null);
           analysisOrigin = id ? { kind: "note", id } : null;
           showAnalysisSettings(null, true);
-        } }, "Set up the model")));
+        } }, tr("Set up the model"))));
     } else if (!chat.messages.length && chat.loaded) {
       rows.push(el("div", { class: "chat-empty" },
-        el("p", {}, "Ask anything about this note, or ask for it to be rewritten."),
-        el("p", { class: "hint" }, "A rewrite becomes a new version of the note, so the one you have now is never lost."),
+        el("p", {}, tr("Ask anything about this note, or have it rewritten.")),
+        el("p", { class: "hint" }, tr("A rewrite is a new version, so the current one is never lost.")),
         el("div", { class: "chat-ideas" }, CHAT_IDEAS.map((idea) => el("button", { class: "pill", type: "button", onclick: () => ask(idea) }, idea)))));
     }
     chat.messages.forEach((m) => rows.push(bubble(m)));
     if (chat.running) {
-      const stop = el("button", { class: "link", type: "button", onclick: () => invoke("cancel_analysis", { kind: "note", id: mine.id, template: "chat" }).then(() => setTimeout(load, 300)) }, "Stop");
+      const stop = el("button", { class: "link", type: "button", onclick: () => invoke("cancel_analysis", { kind: "note", id: mine.id, template: "chat" }).then(() => setTimeout(load, 300)) }, tr("Stop"));
       const partial = noteChatPartial?.id === mine.id ? noteChatPartial : null;
-      const ahead = chat.ahead ? `Waiting for ${chat.ahead === 1 ? "one other job" : `${chat.ahead} other jobs`} to finish first…` : null;
+      const ahead = chat.ahead ? tr("Waiting for {0} first…", { "0": chat.ahead === 1 ? tr("one other job") : tr("{ahead} other jobs", { ahead: chat.ahead }) }) : null;
       if (partial?.kind === "reply") {
         rows.push(el("div", { class: "chat-msg theirs writing" }, formatted(partial.text), el("div", { class: "chat-actions" }, stop)));
       } else {
         const step = partial?.kind === "rewriting"
-          ? `Rewriting the note… ${partial.words} word${partial.words === 1 ? "" : "s"} so far`
-          : recording ? "Waiting until the recording stops…"
-          : ahead ?? (noteChatStep?.id === mine.id ? noteChatStep.text : "Getting the model ready…");
+          ? trn(partial.words, "Rewriting… {n} word", "Rewriting… {n} words")
+          : recording ? tr("Waiting for the recording to stop…")
+          : ahead ?? (noteChatStep?.id === mine.id ? noteChatStep.text : tr("Preparing the model…"));
         rows.push(el("div", { class: "chat-msg theirs pending" }, el("span", { class: "spinner" }), step, stop));
       }
     }
@@ -409,7 +409,7 @@ async function undoRewrite(version, status) {
 
 // ---------- Versions
 
-const versionWho = (v) => (v.by === "ai" ? "Rewritten by the assistant" : v.by === "restore" ? v.label || "An earlier version brought back" : "Your writing");
+const versionWho = (v) => (v.by === "ai" ? tr("Rewritten by the assistant") : v.by === "restore" ? v.label || tr("An earlier version restored") : tr("Your writing"));
 const searchWords = (query) => query.toLowerCase().split(/\s+/).filter(Boolean);
 
 /// Text with each search word marked.
@@ -476,35 +476,35 @@ async function showNoteVersions(status, focus) {
   let shown = all;
   let changes = localStorage.getItem("version-changes") === "1";
 
-  const search = el("input", { type: "search", placeholder: "Search versions", "aria-label": "Search versions", autocomplete: "off" });
-  const list = el("div", { class: "version-list", role: "listbox", "aria-label": "Versions", tabindex: "0" });
+  const search = el("input", { type: "search", placeholder: tr("Search versions"), "aria-label": tr("Search versions"), autocomplete: "off" });
+  const list = el("div", { class: "version-list", role: "listbox", "aria-label": tr("Versions"), tabindex: "0" });
   const count = el("div", { class: "hint version-count" });
   const pane = el("div", { class: "version-view" });
-  const older = el("button", { class: "pill", type: "button", title: "The version before this one (↓)" }, "‹ Older");
-  const newer = el("button", { class: "pill", type: "button", title: "The version after this one (↑)" }, "Newer ›");
+  const older = el("button", { class: "pill", type: "button", title: tr("Previous version (↓)") }, tr("‹ Older"));
+  const newer = el("button", { class: "pill", type: "button", title: tr("Next version (↑)") }, tr("Newer ›"));
   const where = el("span", { class: "hint" });
   const use = el("button", { class: "primary pill", type: "button" });
   const showChanges = el("input", { type: "checkbox", checked: changes });
-  const dialog = el("dialog", { class: "versions", "aria-label": "Versions of this note" },
-    el("div", { class: "versions-head" }, el("h2", {}, "Versions"),
-      el("span", { class: "hint" }, all.length > 1 ? "Each rewrite and each return to the note is kept. Pick one to read it." : "This is the only version so far. A new one is kept each time the assistant rewrites the note, and when you come back to edit it."),
+  const dialog = el("dialog", { class: "versions", "aria-label": tr("Versions of this note") },
+    el("div", { class: "versions-head" }, el("h2", {}, tr("Versions")),
+      el("span", { class: "hint" }, all.length > 1 ? tr("Each rewrite and return to the note is kept. Pick one to read.") : tr("The only version so far. One is kept each time the assistant rewrites the note, and when you return to edit it.")),
       el("span", { class: "grow" }),
-      el("button", { class: "icon-only", type: "button", title: "Close", "aria-label": "Close", onclick: () => dialog.close() }, svg("close", 18))),
+      el("button", { class: "icon-only", type: "button", title: tr("Close"), "aria-label": tr("Close"), onclick: () => dialog.close() }, svg("close", 18))),
     el("div", { class: "versions-body" },
       el("div", { class: "versions-side" }, el("label", { class: "search" }, svg("search", 16), search), count, list),
       el("div", { class: "versions-main" }, pane,
         el("div", { class: "versions-foot" }, older, newer, where,
-          el("label", { class: "version-changes", title: "Mark what this version added and took out, compared with the one before it" }, showChanges, "Show changes"),
+          el("label", { class: "version-changes", title: tr("Mark what changed since the previous version") }, showChanges, tr("Show changes")),
           el("span", { class: "grow" }), use))));
 
   const draw = () => {
     const words = searchWords(search.value);
-    shown = all.filter((v) => { const hay = `${v.title}\n${v.body}\n${v.label}\n${versionWho(v)}\nversion ${v.n}`.toLowerCase(); return words.every((w) => hay.includes(w)); });
+    shown = all.filter((v) => { const hay = `${v.title}\n${v.body}\n${v.label}\n${versionWho(v)}\nversion ${v.n}\n${tr("Version {n}", { n: v.n })}`.toLowerCase(); return words.every((w) => hay.includes(w)); });
     if (!shown.some((v) => v.n === picked)) picked = shown[0]?.n ?? null;
-    count.textContent = words.length ? `${shown.length} of ${all.length} version${all.length === 1 ? "" : "s"}` : "";
+    count.textContent = words.length ? trn(all.length, "{shown} of {n} version", "{shown} of {n} versions", { shown: shown.length }) : "";
     list.replaceChildren(...shown.map((v) => {
       const row = el("button", { class: `version-row ${v.by}`, type: "button", role: "option", "aria-selected": String(v.n === picked), tabindex: "-1" },
-        el("span", { class: "version-top" }, el("strong", {}, `Version ${v.n}`), v.n === current ? el("span", { class: "badge now" }, "Current") : null,
+        el("span", { class: "version-top" }, el("strong", {}, tr("Version {n}", { n: v.n })), v.n === current ? el("span", { class: "badge now" }, tr("Current")) : null,
           el("span", { class: "grow" }), el("span", { class: "hint", title: dateText(v.at) }, agoText(v.at))),
         el("span", { class: "version-by" }, v.by === "ai" ? svg("sparkle", 13) : null, versionWho(v)),
         v.by === "ai" && v.label ? el("span", { class: "version-asked" }, "“", ...marked(v.label, words), "”") : null,
@@ -512,7 +512,7 @@ async function showNoteVersions(status, focus) {
       row.addEventListener("click", () => { picked = v.n; draw(); });
       return row;
     }));
-    if (!shown.length) list.append(el("p", { class: "hint version-none" }, "No version has those words."));
+    if (!shown.length) list.append(el("p", { class: "hint version-none" }, tr("No version has those words.")));
     list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
 
     const v = all.find((x) => x.n === picked);
@@ -521,8 +521,8 @@ async function showNoteVersions(status, focus) {
     newer.disabled = at <= 0;
     where.textContent = at < 0 ? "" : `${shown.length - at} of ${shown.length}`;
     use.disabled = !v || v.n === current;
-    use.textContent = !v ? "Make this the note" : v.n === current ? "This is the note now" : `Make version ${v.n} the note`;
-    use.title = v && v.n !== current ? "It becomes a new version, and the note as it is now stays in this list." : "";
+    use.textContent = !v ? tr("Use this version") : v.n === current ? tr("This is the note now") : tr("Use version {n}", { n: v.n });
+    use.title = v && v.n !== current ? tr("It becomes a new version; the current note stays in this list.") : "";
     if (!v) return pane.replaceChildren();
     const before = all[all.findIndex((x) => x.n === v.n) + 1];
     let text = marked(v.body, words);
@@ -530,13 +530,13 @@ async function showNoteVersions(status, focus) {
     if (changes && before) {
       const diff = wordDiff(before.body, v.body);
       if (diff) text = diff.map(([kind, t]) => (kind === "same" ? marked(t, words) : el(kind === "added" ? "ins" : "del", {}, ...marked(t, words)))).flat();
-      else remark = "This version is too long to compare.";
-    } else if (changes) remark = "This is the first version kept, so there is nothing to compare it with.";
+      else remark = tr("Too long to compare.");
+    } else if (changes) remark = tr("The first version kept: nothing to compare with.");
     pane.replaceChildren(
-      el("div", { class: "version-meta" }, `Version ${v.n} · ${versionWho(v)} · ${dateText(v.at)} · ${wordCount(v.body)} word${wordCount(v.body) === 1 ? "" : "s"}`,
-        changes && before ? ` · compared with version ${before.n}` : ""),
+      el("div", { class: "version-meta" }, `${tr("Version {n}", { n: v.n })} · ${versionWho(v)} · ${dateText(v.at)} · ${trn(wordCount(v.body), "{n} word", "{n} words")}`,
+        changes && before ? tr(" · compared with version {n}", { n: before.n }) : ""),
       remark ? el("div", { class: "hint" }, remark) : "",
-      el("div", { class: "version-title" }, ...marked(v.title || "Untitled note", words)),
+      el("div", { class: "version-title" }, ...marked(v.title || tr("Untitled note"), words)),
       el("div", { class: "version-text" }, ...text));
     pane.scrollTop = 0;
   };

@@ -1209,6 +1209,7 @@ fn get_prefs() -> prefs::Prefs {
 #[tauri::command]
 fn save_prefs(
     theme: Option<String>,
+    ui_lang: Option<String>,
     scripts: Option<Vec<prefs::Script>>,
     wake: Option<bool>,
     quiet: Option<bool>,
@@ -1222,6 +1223,9 @@ fn save_prefs(
     proxy: Option<String>,
 ) -> Result<(), String> {
     prefs::update(|p| {
+        if let Some(lang) = ui_lang {
+            p.ui_lang = lang;
+        }
         if let Some(manual) = dictate_manually {
             p.dictate_manually = manual;
         }

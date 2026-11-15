@@ -21,29 +21,29 @@
     </div>
     <label class="search">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
-      <input id="search" type="search" placeholder="Search notes and meetings" autocomplete="off" aria-label="Search notes and meetings">
+      <input id="search" type="search" placeholder="Search" autocomplete="off" aria-label="Search">
     </label>
     <nav id="items" class="items" aria-label="Notes and meetings"></nav>
-    <button id="new-fab" class="new-fab" title="New" aria-label="New note, meeting, call or event">
+    <button id="new-fab" class="new-fab" title="New" aria-label="New">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
     </button>
     <div id="update-bar" class="update-bar" role="status" hidden></div>
     <div class="sidebar-foot">
       <button id="open-settings" class="link">Settings</button>
-      <button id="open-shortcuts" class="link shortcuts-link windows-only" title="Keyboard shortcuts">
+      <button id="open-shortcuts" class="link shortcuts-link windows-only" title="Shortcuts">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"></rect><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"></path></svg>Shortcuts
       </button>
     </div>
   </aside>
   <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" tabindex="0" title="Drag to resize. Double-click to reset."></div>
   <main id="main-wrap">
-    <button id="back" class="link back">‹ Back to Feed</button>
+    <button id="back" class="link back">‹ Back</button>
     <div id="main"></div>
   </main>
 
   <section id="agent" class="agent" hidden aria-live="polite" aria-label="Talk to Superteem">
     <div class="top">
-      <span>Voice mode · screen optional · replies are spoken</span>
+      <span>Voice mode · replies are spoken</span>
       <button id="agent-close" class="pill">Close</button>
     </div>
     <div id="agent-log" class="log"></div>
@@ -58,6 +58,8 @@
       <div id="agent-say" class="say"></div>
     </div>
   </section>
+  <script src="strings.js"></script>
+  <script src="i18n.js"></script>
   <script src="vendor/note-editor.js"></script>
   <script src="commands.js"></script>
   <script src="vault.js"></script>

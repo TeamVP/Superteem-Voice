@@ -25,7 +25,7 @@ const jobKey = (j) => `${j.kind}/${j.id}/${j.template}`;
 listen("analysis-queue", () => refreshAnalyses());
 listen("analysing", (e) => {
   if (e.payload.template === "chat" || e.payload.template.startsWith("label:")) return; // A note's chat and an action item's label show their own progress.
-  const step = e.payload.step === "Analysing" || !e.payload.step ? "Reading" : e.payload.step;
+  const step = e.payload.step === "Analysing" || !e.payload.step ? tr("Reading") : e.payload.step;
   analysisProgress.set(jobKey(e.payload), e.payload.parts > 1 ? `${step}: part ${e.payload.part} of ${e.payload.parts}…` : `${step}…`);
   refreshAnalyses();
   if (typeof refreshTranslation === "function") refreshTranslation(e.payload);
@@ -47,7 +47,7 @@ function analysisStack(kind, id, ctx) {
   // keep their place as the cards are redrawn, so one being read or corrected isn't disturbed.
   const cards = el("div", { class: "analysis-cards" });
   const bar = el("div", { class: "analysis-add-holder" });
-  const holder = el("section", { class: "analyses", "aria-label": "Analyses and translations" }, cards, ctx.translations ?? null, bar);
+  const holder = el("section", { class: "analyses", "aria-label": tr("Analyses & translations") }, cards, ctx.translations ?? null, bar);
   analysisPage = { kind, id, holder, cards, bar, ctx, errors: new Map() };
   analysisOrigin = null;
   refreshAnalyses();
@@ -95,8 +95,8 @@ function renderAnalyses(page, data) {
     cards.push(el("div", { class: "analysis-card failed" }, el("div", { class: "analysis-head" }, el("strong", {}, name)),
       el("p", { class: "danger" }, String(error)),
       el("div", { class: "analysis-actions" },
-        el("button", { class: "link", onclick: () => { page.errors.delete(template); runAnalysis(page, template); } }, "Try again"),
-        el("button", { class: "link", onclick: () => { page.errors.delete(template); refreshAnalyses(); } }, "Dismiss"))));
+        el("button", { class: "link", onclick: () => { page.errors.delete(template); runAnalysis(page, template); } }, tr("Try again")),
+        el("button", { class: "link", onclick: () => { page.errors.delete(template); refreshAnalyses(); } }, tr("Dismiss")))));
   }
   page.cards.replaceChildren(...cards);
   page.bar.replaceChildren(addAnalysis(page, data));
@@ -115,25 +115,25 @@ function addAnalysis(page, data) {
   const bar = el("div", { class: "analysis-add" });
   // On a phone it says "Analysis", so it shares the line with Versions and Translate.
   const label = el("span", { class: "with-icon" }, svg("sparkle", 16),
-    el("span", {}, "Analysis", el("span", { class: "wide-only" }, " templates")));
+    el("span", {}, tr("Analysis"), el("span", { class: "wide-only" }, " templates")));
   const from = () => { analysisOrigin = { kind: page.kind, id: page.id }; };
   if (!data.ready) {
     // Translating needs the analysis model too, so both lead to setting it up.
     const setUp = () => { from(); showAnalysisSettings(null, true); };
     bar.append(...(page.ctx.lead ?? []), el("button", { class: "link add-analysis", onclick: setUp }, label), el("span", { class: "grow" }), ...(page.ctx.links ?? []),
-      page.ctx.translations ? el("button", { class: "link add-analysis", onclick: setUp }, el("span", { class: "with-icon" }, svg("globe", 16), "Translate")) : null);
+      page.ctx.translations ? el("button", { class: "link add-analysis", onclick: setUp }, el("span", { class: "with-icon" }, svg("globe", 16), tr("Translate"))) : null);
     return bar;
   }
   // data.templates holds only those for this kind of page; a starred one for the other kind is shown, unusable.
   const starred = data.starred.map((id) => data.templates.find((t) => t.id === id) ?? data.elsewhere?.find((t) => t.id === id)).filter(Boolean);
   const others = data.templates.filter((t) => !data.starred.includes(t.id));
   const choice = (t) => {
-    if (!t.applies_to.includes(page.kind)) return [t.name, `For ${t.applies_to[0]}s only`, () => {}, true];
-    return [t.name, busy(t.id) ? "Running" : used.has(t.id) ? "Make it again" : t.description, () => runAnalysis(page, t.id), busy(t.id)];
+    if (!t.applies_to.includes(page.kind)) return [t.name, tr("Only for: {0}", { "0": t.applies_to[0] }), () => {}, true];
+    return [t.name, busy(t.id) ? tr("Running") : used.has(t.id) ? tr("Redo") : t.description, () => runAnalysis(page, t.id), busy(t.id)];
   };
   const choices = [...starred.map(choice)];
-  if (others.length) choices.push(starred.length ? "More templates" : "Templates", ...others.map(choice));
-  choices.push(["Star or edit templates…", null, () => { from(); showTemplates(); }]);
+  if (others.length) choices.push(starred.length ? tr("More templates") : tr("Templates"), ...others.map(choice));
+  choices.push([tr("Edit templates…"), null, () => { from(); showTemplates(); }]);
   bar.append(...(page.ctx.lead ?? []), menuButton(label, choices, "link add-analysis"), el("span", { class: "grow" }), ...(page.ctx.links ?? []), translateMenu(page.kind, page.id));
   return bar;
 }
@@ -175,12 +175,12 @@ function pendingCard(page, t, running) {
   const progress = analysisProgress.get(jobKey({ kind: page.kind, id: page.id, template: key }));
   return el("div", { class: "analysis-card pending" },
     el("div", { class: "analysis-head" }, el("span", { class: "spinner" }), el("strong", {}, t.name),
-      el("span", { class: "hint" }, running ? progress ?? "Loading the model…" : waitingText()),
+      el("span", { class: "hint" }, running ? progress ?? tr("Loading model…") : waitingText()),
       el("span", { class: "grow" }),
-      el("button", { class: "link", onclick: () => invoke("cancel_analysis", { kind: page.kind, id: page.id, template: key }) }, "Cancel")));
+      el("button", { class: "link", onclick: () => invoke("cancel_analysis", { kind: page.kind, id: page.id, template: key }) }, tr("Cancel"))));
 }
 
-const waitingText = () => (recording ? "Waiting until the recording stops" : "Waiting its turn");
+const waitingText = () => (recording ? tr("Waits for recording to stop") : tr("Queued"));
 
 /// One line summing up a collapsed card: its opening sentence, then how many of each list.
 function analysisDigest(def, result) {
@@ -195,7 +195,7 @@ function analysisDigest(def, result) {
     const items = (result[f.key] ?? []).filter((i) => !i._removed);
     if (!items.length) continue;
     const done = items.filter((i) => i._done).length;
-    parts.push(`${items.length} ${fieldLabel(f).toLowerCase()}${done ? ` · ${done} done` : ""}`);
+    parts.push(`${items.length} ${fieldLabel(f).toLowerCase()}${done ? tr(" · {done} done", { done: done }) : ""}`);
   }
   return parts.join(" · ");
 }
@@ -220,16 +220,16 @@ function analysisCard(page, e, data, running, waiting) {
     refreshAnalyses();
   };
   const remove = () => invoke("remove_analysis", { kind: page.kind, id: page.id, template }).then(refreshAnalyses).catch((err) => showError(card, err));
-  const toggle = el("button", { class: "icon-only chevron", "aria-expanded": String(!e.collapsed), title: e.collapsed ? "Show all" : "Collapse",
+  const toggle = el("button", { class: "icon-only chevron", "aria-expanded": String(!e.collapsed), title: e.collapsed ? tr("Show all") : tr("Collapse"),
     onclick: () => edit({ op: "collapse", collapsed: !e.collapsed }) }, svg(e.collapsed ? "chevron" : "down", 16));
   const progress = analysisProgress.get(jobKey({ kind: page.kind, id: page.id, template }));
   const badges = [];
-  if (running) badges.push(el("span", { class: "badge busy" }, el("span", { class: "spinner" }), progress ?? "Making again…"));
+  if (running) badges.push(el("span", { class: "badge busy" }, el("span", { class: "spinner" }), progress ?? tr("Redoing…")));
   else if (waiting) badges.push(el("span", { class: "badge busy" }, waitingText()));
-  else if (e.stale) badges.push(el("span", { class: "badge stale", title: "The transcript was edited after this was made" }, "Transcript changed"));
-  else if (e.template_changed) badges.push(el("span", { class: "badge stale", title: "The template was edited after this was made" }, "Template changed"));
+  else if (e.stale) badges.push(el("span", { class: "badge stale", title: tr("Transcript edited since") }, tr("Transcript changed")));
+  else if (e.template_changed) badges.push(el("span", { class: "badge stale", title: tr("Template edited since") }, tr("Template changed")));
   const error = page.errors.get(template);
-  const regenerate = el("button", { class: "icon-only", title: running || waiting ? "Cancel" : "Make again", "aria-label": running || waiting ? "Cancel" : "Make again",
+  const regenerate = el("button", { class: "icon-only", title: running || waiting ? tr("Cancel") : tr("Redo"), "aria-label": running || waiting ? tr("Cancel") : tr("Redo"),
     disabled: !data.ready && !(running || waiting),
     onclick: () => (running || waiting ? invoke("cancel_analysis", { kind: page.kind, id: page.id, template }) : runAnalysis(page, template)) },
     svg(running || waiting ? "close" : "refresh", 16));
@@ -237,29 +237,29 @@ function analysisCard(page, e, data, running, waiting) {
   // Into the person's other languages, made from the entry it was translated from.
   const written = e.language || "en";
   const into = (languageInfo?.chosen ?? []).filter((c) => c !== written && !(e.via === "translated" && c === "en"));
-  const translations = into.map((c) => [`Translate into ${languageName(c)}`, data.entries.some((x) => x.key === `${e.template.id}@${c}`) ? "Make it again" : null,
+  const translations = into.map((c) => [tr("Translate into {c}", { c: languageName(c) }), data.entries.some((x) => x.key === `${e.template.id}@${c}`) ? tr("Redo") : null,
     () => runAnalysis(page, `${e.template.id}@${c}`), !data.ready]);
   const more = menuButton(svg("more", 16), [
-    ["Copy as text", null, () => writeClipboard(analysisCopyText(card).text)],
+    [tr("Copy as text"), null, () => writeClipboard(analysisCopyText(card).text)],
     ...translations,
-    ["Move up", null, () => invoke("move_analysis", { kind: page.kind, id: page.id, template, by: -1 }).then(refreshAnalyses), index === 0],
-    ["Move down", null, () => invoke("move_analysis", { kind: page.kind, id: page.id, template, by: 1 }).then(refreshAnalyses), index === data.entries.length - 1],
-    ["Remove", "Edits and ticks here are lost", remove],
+    [tr("Move up"), null, () => invoke("move_analysis", { kind: page.kind, id: page.id, template, by: -1 }).then(refreshAnalyses), index === 0],
+    [tr("Move down"), null, () => invoke("move_analysis", { kind: page.kind, id: page.id, template, by: 1 }).then(refreshAnalyses), index === data.entries.length - 1],
+    [tr("Remove"), tr("Edits here will be lost"), remove],
   ]);
-  more.querySelector("button").setAttribute("aria-label", "More");
-  const copy = def ? copyIconButton(() => analysisCopyText(card), "Copy analysis") : null;
+  more.querySelector("button").setAttribute("aria-label", tr("More"));
+  const copy = def ? copyIconButton(() => analysisCopyText(card), tr("Copy analysis")) : null;
   const head = el("div", { class: "analysis-head" }, toggle,
     el("button", { class: "analysis-name", onclick: () => edit({ op: "collapse", collapsed: !e.collapsed }) }, e.template.name,
-      e.language ? el("span", { class: "badge language", title: e.via === "translated" ? "Machine-translated" : "Written in this language" }, languageName(e.language)) : null),
+      e.language ? el("span", { class: "badge language", title: e.via === "translated" ? tr("Machine-translated") : tr("Written in this language") }, languageName(e.language)) : null),
     e.collapsed && def ? el("span", { class: "digest" }, analysisDigest(def, e.result)) : null,
     // Minimised, it can still be read aloud; making it again waits until it's open.
-    ...badges, el("span", { class: "grow" }), copy, def ? readAloudButton(() => analysisSpeech(card), "Read this aloud", { lang: () => e.language || (e.via ? "en" : page.ctx.lang?.()) }) : null,
+    ...badges, el("span", { class: "grow" }), copy, def ? readAloudButton(() => analysisSpeech(card), tr("Read aloud"), { lang: () => e.language || (e.via ? "en" : page.ctx.lang?.()) }) : null,
     e.collapsed && !(running || waiting) ? null : regenerate, more);
   card.append(head);
-  if (error) card.append(el("p", { class: "danger analysis-error" }, `Couldn't make it again: ${error}`));
+  if (error) card.append(el("p", { class: "danger analysis-error" }, tr("Couldn't redo: {error}", { error: error })));
   if (!def) {
     if (e.collapsed) return card;
-    card.append(el("p", { class: "hint" }, "Its template is no longer available, so it can only be removed."));
+    card.append(el("p", { class: "hint" }, tr("Its template is gone, so it can only be removed.")));
     return card;
   }
   // Drawn when minimised too, hidden, so it can be read aloud.
@@ -278,7 +278,7 @@ function analysisCard(page, e, data, running, waiting) {
   });
   const marks = (e.result.bookmarks ?? []).filter((b) => !b._removed);
   if (marks.length) {
-    body.append(el("div", { class: "analysis-section" }, el("h3", {}, "Bookmarks"),
+    body.append(el("div", { class: "analysis-section" }, el("h3", {}, tr("Bookmarks")),
       el("ul", { class: "analysis-points" }, marks.map((b) => {
         const index = e.result.bookmarks.indexOf(b);
         return el("li", { class: b._check ? "check" : "" },
@@ -291,14 +291,14 @@ function analysisCard(page, e, data, running, waiting) {
     card.append(body);
     return card;
   }
-  const made = e.engine.kind === "local" ? "this device" : e.engine.host ?? "a server";
-  const how = e.via === "translated" ? ` · Machine-translated into ${languageName(e.language)}` : e.via === "translation" ? " · Made via English translation" : "";
+  const made = e.engine.kind === "local" ? tr("this device") : e.engine.host ?? "a server";
+  const how = e.via === "translated" ? tr(" · Machine-translated into {0}", { "0": languageName(e.language) }) : e.via === "translation" ? tr(" · Made via English translation") : "";
   const footer = el("div", { class: "analysis-foot" },
-    `Made on ${made} with ${e.engine.model}${how} · ${dateText(e.created)} · Check it against the ${page.kind === "note" ? "note" : "transcript"}.`);
+    tr("Made on {made} with {model}{how} · {3} · Check it against the {4}.", { made: made, model: e.engine.model, how: how, "3": dateText(e.created), "4": page.kind === "note" ? "note" : "transcript" }));
   if (e.warnings?.length) {
     const list = el("ul", { class: "analysis-warnings", hidden: true }, e.warnings.map((w) => el("li", {}, w)));
     footer.append(" ", el("button", { class: "link inline", onclick: () => { list.hidden = !list.hidden; } },
-      `${e.warnings.length} change${e.warnings.length === 1 ? "" : "s"} from checking`), list);
+      trn(e.warnings.length, "{n} fix from checking", "{n} fixes from checking")), list);
   }
   card.append(body, footer);
   return card;
@@ -335,18 +335,18 @@ function scalarEditor(f, value, save) {
 }
 
 function stringList(f, values, edit) {
-  if (!values.length) return el("p", { class: "hint" }, "None.");
+  if (!values.length) return el("p", { class: "hint" }, tr("None."));
   return el("ul", { class: "analysis-points" }, values.map((v, i) => el("li", {},
     editable(v, (text) => { const next = [...values]; next[i] = text; if (!text) next.splice(i, 1); edit({ op: "set", field: f.key, value: next }); }))));
 }
 
 function whenChip(when, save) {
   const text = when ? (when.kind === "trigger" ? `when ${when.text}` : when.text) : "";
-  const chip = el("button", { class: `when-chip${when ? "" : " empty"}`, type: "button", title: "When: a deadline, or what starts it" }, text || "+ when");
+  const chip = el("button", { class: `when-chip${when ? "" : " empty"}`, type: "button", title: tr("When: a deadline or trigger") }, text || tr("+ when"));
   chip.addEventListener("click", () => {
-    const kind = el("select", {}, el("option", { value: "deadline", selected: when?.kind !== "trigger" }, "By"),
-      el("option", { value: "trigger", selected: when?.kind === "trigger" }, "When"));
-    const input = el("input", { type: "text", value: when?.text ?? "", placeholder: "Friday, next sprint, legal confirms…", maxlength: "80" });
+    const kind = el("select", {}, el("option", { value: "deadline", selected: when?.kind !== "trigger" }, tr("By")),
+      el("option", { value: "trigger", selected: when?.kind === "trigger" }, tr("When")));
+    const input = el("input", { type: "text", value: when?.text ?? "", placeholder: tr("Friday, next sprint, legal confirms…"), maxlength: "80" });
     const form = el("span", { class: "when-edit" }, kind, input);
     const done = () => {
       const value = input.value.trim();
@@ -367,7 +367,7 @@ function whenChip(when, save) {
 
 /// The owner chip: speakers here, then voice prints, then someone else by name, or nobody.
 function whoChip(who, page, save) {
-  const chip = el("button", { class: `who-chip${who === "Unassigned" ? " unassigned" : ""}`, type: "button", title: "Who does it" }, who || "Unassigned");
+  const chip = el("button", { class: `who-chip${who === "Unassigned" ? " unassigned" : ""}`, type: "button", title: tr("Who") }, !who || who === "Unassigned" ? tr("Unassigned") : who === "Me" ? tr("Me") : who);
   chip.addEventListener("click", async (event) => {
     event.stopPropagation();
     const prints = await invoke("list_voiceprints").catch(() => []);
@@ -377,15 +377,15 @@ function whoChip(who, page, save) {
     const close = () => { menu.remove(); document.removeEventListener("click", outside, true); };
     const outside = (e) => { if (!menu.contains(e.target)) close(); };
     const option = (label, run) => el("button", { type: "button", role: "menuitem", onclick: run }, label);
-    if (names.length) menu.append(el("div", { class: "menu-label" }, page.kind === "note" ? "You" : "In this meeting"), ...names.map((n) => option(n, () => pick(n, null))));
+    if (names.length) menu.append(el("div", { class: "menu-label" }, page.kind === "note" ? tr("You") : tr("In this meeting")), ...names.map((n) => option(n, () => pick(n, null))));
     const others = prints.filter((p) => !names.includes(p.name));
-    if (others.length) menu.append(el("div", { class: "menu-label" }, "Voice prints"), ...others.map((p) => option(p.name, () => pick(p.name, p.id))));
-    const input = el("input", { type: "text", placeholder: "Someone else…", maxlength: "40" });
+    if (others.length) menu.append(el("div", { class: "menu-label" }, tr("Voice prints")), ...others.map((p) => option(p.name, () => pick(p.name, p.id))));
+    const input = el("input", { type: "text", placeholder: tr("Someone else…"), maxlength: "40" });
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && input.value.trim()) { e.preventDefault(); pick(input.value.trim(), null); }
       if (e.key === "Escape") close();
     });
-    menu.append(el("div", { class: "menu-label" }, "Someone else"), input, option("Unassigned", () => pick("Unassigned", null)));
+    menu.append(el("div", { class: "menu-label" }, tr("Someone else")), input, option(tr("Unassigned"), () => pick("Unassigned", null)));
     chip.parentElement.append(menu);
     document.addEventListener("click", outside, true);
     menu.querySelector("button, input")?.focus();
@@ -405,7 +405,7 @@ function objectList(f, items, chips, edit, page) {
   for (const { item, index } of visible) {
     const row = el("li", { class: `${item._check ? "check" : ""}${item._done ? " done" : ""}` });
     if (f.render === "checklist") {
-      const box = el("input", { type: "checkbox", checked: !!item._done, "aria-label": "Done" });
+      const box = el("input", { type: "checkbox", checked: !!item._done, "aria-label": tr("Done") });
       box.addEventListener("change", () => edit({ op: "done", field: f.key, index, done: box.checked }));
       row.append(box);
     }
@@ -424,16 +424,16 @@ function objectList(f, items, chips, edit, page) {
       } else row.append(el("span", { class: "field-tag" }, scalarEditor(o, item[o.key], (v) => set(index, o.key, v))));
     }
     if (refs) row.append(chips(item[refs.key] ?? []));
-    if (item._check) row.append(el("span", { class: "badge stale", title: "This doesn't share any words with the lines it cites. Check it." }, "check"));
+    if (item._check) row.append(el("span", { class: "badge stale", title: tr("Shares no words with the lines it cites. Check it.") }, "check"));
     row.append(el("button", { class: "icon-only row-delete", title: "Delete", "aria-label": "Delete", onclick: () => edit({ op: "remove", field: f.key, index }) }, svg("close", 14)));
     list.append(row);
   }
-  const wrap = el("div", {}, visible.length ? list : el("p", { class: "hint" }, "None."));
+  const wrap = el("div", {}, visible.length ? list : el("p", { class: "hint" }, tr("None.")));
   if (f.render === "checklist" && primary) {
     const blank = {};
     for (const s of sub) blank[s.key] = s.type === "refs" ? [] : s.type === "person" || s.type === "speaker" ? (page.kind === "note" ? "Me" : "Unassigned") : s.type === "text" ? "" : null;
-    blank[primary.key] = "New task";
-    wrap.append(el("button", { class: "link add-row", onclick: () => edit({ op: "add", field: f.key, item: blank }) }, "+ Add task"));
+    blank[primary.key] = tr("New task");
+    wrap.append(el("button", { class: "link add-row", onclick: () => edit({ op: "add", field: f.key, item: blank }) }, tr("+ Add task")));
   }
   return wrap;
 }
@@ -445,10 +445,10 @@ function sourceChips(evidence, sources, ctx) {
   for (const anchor of evidence ?? []) {
     const source = sources?.[anchor];
     if (!source) {
-      wrap.append(el("span", { class: "source-chip gone", title: "That line was changed or removed" }, "source changed"));
+      wrap.append(el("span", { class: "source-chip gone", title: tr("That line changed or was removed") }, tr("source changed")));
       continue;
     }
-    const chip = el("button", { class: "source-chip mono", type: "button", "aria-label": `Source at ${source.label}` }, source.label);
+    const chip = el("button", { class: "source-chip mono", type: "button", "aria-label": tr("Source at {label}", { label: source.label }) }, source.label);
     let pop = null;
     const show = () => {
       if (pop) return;
@@ -456,7 +456,7 @@ function sourceChips(evidence, sources, ctx) {
         source.before ? el("p", { class: "dim" }, source.before) : null,
         el("p", {}, el("strong", {}, source.speaker, source.at_s != null ? ` · ${source.label}` : ""), " ", source.text),
         source.after ? el("p", { class: "dim" }, source.after) : null,
-        el("button", { class: "link inline", type: "button", onclick: (e) => { e.stopPropagation(); hide(); ctx.go?.(source); } }, "Go there"));
+        el("button", { class: "link inline", type: "button", onclick: (e) => { e.stopPropagation(); hide(); ctx.go?.(source); } }, tr("Go there")));
       chip.append(pop);
     };
     const hide = () => { pop?.remove(); pop = null; };
@@ -495,85 +495,85 @@ async function showAnalysisSettings(message, setup = false) {
   view = { kind: "analysis-settings" };
   refreshItems();
   const status = await invoke("llm_status");
-  const page = el("div", { class: "page" }, backLinks("‹ Settings", () => showSettings()), el("h1", {}, "Analysis"));
-  page.append(el("p", { class: "hint" }, "Summaries, decisions, action items and other notes are made from transcripts by a small language model that runs on this device. ",
-    "Download one once; after that it works offline and nothing is sent anywhere."));
+  const page = el("div", { class: "page" }, backLinks(tr("‹ Settings"), () => showSettings()), el("h1", {}, tr("Analysis")));
+  page.append(el("p", { class: "hint" }, tr("Summaries, decisions and action items are made from transcripts by a small language model on this device. "),
+    tr("Download one once; then it works offline and nothing is sent anywhere.")));
   if (message) page.append(el("div", { class: "notice" }, message));
   if (setup && !status.installed.length && !status.server) {
-    page.append(el("div", { class: "notice" }, el("strong", {}, "First, choose a model. "),
-      "It's a one-off download; after that, summaries and action items are made on this device, offline. Qwen3 1.7B is a good start. ",
-      "Then star the templates you use most, below, and they'll be one click away on every meeting and note."));
+    page.append(el("div", { class: "notice" }, el("strong", {}, tr("First, choose a model. ")),
+      tr("A one-off download; then analyses run here, offline. Qwen3 1.7B is a good start. "),
+      tr("Then star the templates you use most, below, for one-click access on every meeting and note.")));
   }
   const { device } = status;
-  page.append(el("p", { class: "hint" }, `This ${isPhone() ? "phone" : "computer"} has ${device.ram_gb.toFixed(0)} GB of memory, so models read up to ${device.context.toLocaleString()} tokens at a time${device.too_small ? ". That's too little to run a model well here; a local server (below) can do it instead." : "."}`));
+  page.append(el("p", { class: "hint" }, tr("This {0} has {1} GB of memory, so models read up to {2} tokens at a time{3}", { "0": deviceWord(), "1": device.ram_gb.toFixed(0), "2": device.context.toLocaleString(), "3": device.too_small ? ". That's too little to run a model well here; a local server (below) can do it instead." : "." })));
 
   page.append(el("div", { class: "group" }, device.gpu
-    ? toggleRow("Use the graphics processor", `${device.gpu}. Summaries, translations${platform === "windows" ? " and transcripts" : ""} are made several times faster there.`, status.use_gpu, async (on) => {
+    ? toggleRow(tr("Use the GPU"), tr("{gpu}. Summaries, translations{1} are made several times faster there.", { gpu: device.gpu, "1": platform === "windows" ? tr(" and transcripts") : "" }), status.use_gpu, async (on) => {
       await invoke("save_voice_settings", { useGpu: on });
     })
-    : el("div", { class: "row" }, el("span", { class: "label" }, "Graphics processor",
+    : el("div", { class: "row" }, el("span", { class: "label" }, tr("GPU"),
       el("small", {}, isDesktop() && platform === "windows"
-        ? "None found that models can use, so they run on the processor. Updating the graphics driver can help."
-        : "None that models can use here, so they run on the processor.")), el("span", { class: "value" }, "Processor"))));
+        ? tr("None usable found, so models run on the CPU. Updating the graphics driver may help.")
+        : tr("None usable here, so models run on the CPU."))), el("span", { class: "value" }, tr("CPU")))));
   const installed = new Map(status.installed.map((i) => [i.file, i]));
   const group = el("div", { class: "group" });
   for (const m of status.catalogue) {
     const have = installed.has(m.file);
     if (!m.offered && !have) continue;
     const chosen = status.chosen === m.file && !status.server;
-    const label = el("span", { class: "label" }, m.name, chosen ? el("span", { class: "badge ok" }, "In use") : null,
-      el("small", {}, `${m.about} ${gb(m.size)} · ${m.licence}${device.ram_gb < m.min_ram_gb ? " · May be slow with this much memory" : ""}`));
+    const label = el("span", { class: "label" }, m.name, chosen ? el("span", { class: "badge ok" }, tr("In use")) : null,
+      el("small", {}, `${m.about} ${gb(m.size)} · ${m.licence}${device.ram_gb < m.min_ram_gb ? tr(" · May be slow with this memory") : ""}`));
     const row = el("div", { class: "row" }, label);
     if (status.downloading === m.id) {
-      row.append(el("span", { class: "value" }, el("span", { class: "spinner" }), " ", el("span", { "data-llm-progress": m.id }, llmProgress?.id === m.id ? `${Math.round(llmProgress.fraction * 100)}%` : "Starting…")),
-        el("button", { class: "pill", onclick: () => invoke("cancel_llm_download") }, "Stop"));
+      row.append(el("span", { class: "value" }, el("span", { class: "spinner" }), " ", el("span", { "data-llm-progress": m.id }, llmProgress?.id === m.id ? `${Math.round(llmProgress.fraction * 100)}%` : tr("Starting…"))),
+        el("button", { class: "pill", onclick: () => invoke("cancel_llm_download") }, tr("Stop")));
     } else if (have) {
-      if (!chosen) row.append(el("button", { class: "pill", onclick: async () => { await invoke("save_analysis_settings", { model: m.file, server: "" }); showAnalysisSettings(); } }, "Use"));
-      row.append(el("button", { class: "icon-only danger", title: "Delete", "aria-label": `Delete ${m.name}`, onclick: async () => {
+      if (!chosen) row.append(el("button", { class: "pill", onclick: async () => { await invoke("save_analysis_settings", { model: m.file, server: "" }); showAnalysisSettings(); } }, tr("Use")));
+      row.append(el("button", { class: "icon-only danger", title: "Delete", "aria-label": tr("Delete {name}", { name: m.name }), onclick: async () => {
         try { await invoke("delete_llm", { file: m.file }); showAnalysisSettings(); } catch (e) { showError(page, e); }
       } }, svg("trash", 16)));
     } else {
       row.append(el("button", { class: "primary pill", disabled: !!status.downloading, onclick: async () => {
         const run = invoke("download_llm", { id: m.id });
         setTimeout(() => showAnalysisSettings(), 150);
-        try { await run; if (view.kind === "analysis-settings") showAnalysisSettings(`${m.name} is ready.`); }
+        try { await run; if (view.kind === "analysis-settings") showAnalysisSettings(tr("{name} is ready.", { name: m.name })); }
         catch (e) { if (view.kind === "analysis-settings") showAnalysisSettings(String(e)); }
-      } }, `Download (${gb(m.size)})`));
+      } }, tr("Download ({0})", { "0": gb(m.size) })));
     }
     group.append(row);
   }
   for (const i of status.installed.filter((i) => !i.catalogued)) {
     const chosen = status.chosen === i.file && !status.server;
-    const row = el("div", { class: "row" }, el("span", { class: "label" }, i.file, chosen ? el("span", { class: "badge ok" }, "In use") : null,
-      el("small", {}, `Added by you · ${gb(i.size)} · Not checked by Superteem`)));
-    if (!chosen) row.append(el("button", { class: "pill", onclick: async () => { await invoke("save_analysis_settings", { model: i.file, server: "" }); showAnalysisSettings(); } }, "Use"));
-    row.append(el("button", { class: "icon-only danger", title: "Delete", "aria-label": `Delete ${i.file}`, onclick: async () => {
+    const row = el("div", { class: "row" }, el("span", { class: "label" }, i.file, chosen ? el("span", { class: "badge ok" }, tr("In use")) : null,
+      el("small", {}, tr("Yours · {0} · Not checked by Superteem", { "0": gb(i.size) }))));
+    if (!chosen) row.append(el("button", { class: "pill", onclick: async () => { await invoke("save_analysis_settings", { model: i.file, server: "" }); showAnalysisSettings(); } }, tr("Use")));
+    row.append(el("button", { class: "icon-only danger", title: "Delete", "aria-label": tr("Delete {file}", { file: i.file }), onclick: async () => {
       try { await invoke("delete_llm", { file: i.file }); showAnalysisSettings(); } catch (e) { showError(page, e); }
     } }, svg("trash", 16)));
     group.append(row);
   }
   if (isDesktop()) {
-    group.append(el("div", { class: "row" }, el("span", { class: "label" }, "Your own model",
-      el("small", {}, "Put any instruct model in GGUF format in the models folder and it appears here.")),
-      el("button", { class: "pill", onclick: () => invoke("open_llm_folder").catch((e) => showError(page, e)) }, "Open folder"),
-      el("button", { class: "pill", onclick: () => showAnalysisSettings() }, "Refresh")));
+    group.append(el("div", { class: "row" }, el("span", { class: "label" }, tr("Your own model"),
+      el("small", {}, tr("Put any GGUF instruct model in the models folder and it appears here."))),
+      el("button", { class: "pill", onclick: () => invoke("open_llm_folder").catch((e) => showError(page, e)) }, tr("Open folder")),
+      el("button", { class: "pill", onclick: () => showAnalysisSettings() }, tr("Refresh"))));
   }
-  page.append(el("h2", {}, "Model"), group);
+  page.append(el("h2", {}, tr("Model")), group);
 
-  page.append(el("h2", {}, "When to run"), el("div", { class: "group" },
-    toggleRow("Summarise meetings when they're processed", "Runs the Summary template in the background after each meeting. It waits while you record.", status.auto, async (on) => {
+  page.append(el("h2", {}, tr("When to run")), el("div", { class: "group" },
+    toggleRow(tr("Summarise new meetings"), tr("Runs Summary after each meeting is processed. Waits while you record."), status.auto, async (on) => {
       await invoke("save_analysis_settings", { auto: on });
     }),
-    linkRow("Analysis templates", "Star the ones you use, and make your own", () => showTemplates())));
+    linkRow(tr("Templates"), tr("Star yours, or make your own"), () => showTemplates())));
 
   // A server the person runs: never used unless set here, and anything not on this computer is named first.
-  const url = el("input", { type: "url", value: status.server, placeholder: "http://localhost:11434/v1", "aria-label": "Server address" });
-  const model = el("input", { type: "text", value: status.server_model, placeholder: "qwen3:1.7b", "aria-label": "Model name on the server" });
+  const url = el("input", { type: "url", value: status.server, placeholder: "http://localhost:11434/v1", "aria-label": tr("Server address") });
+  const model = el("input", { type: "text", value: status.server_model, placeholder: "qwen3:1.7b", "aria-label": tr("Model name") });
   const confirmBox = el("div", { class: "notice confirm", hidden: true });
   const saveServer = async () => {
     try {
       await invoke("save_analysis_settings", { server: url.value.trim(), serverModel: model.value.trim() });
-      showAnalysisSettings(url.value.trim() ? "Analyses now run on that server." : "Analyses run on this device.");
+      showAnalysisSettings(url.value.trim() ? tr("Analyses now run on that server.") : tr("Analyses run on this device."));
     } catch (e) {
       showError(page, e);
     }
@@ -583,14 +583,14 @@ async function showAnalysisSettings(message, setup = false) {
     const local = !address || /^https?:\/\/(localhost|127\.|\[::1\])/i.test(address);
     if (local) return saveServer();
     const host = address.replace(/^https?:\/\//, "").split("/")[0];
-    confirmBox.replaceChildren(el("p", {}, `Transcripts and notes will be sent to ${host} to be analysed. They leave this device. Only do this for a server you trust.`),
-      el("button", { class: "primary danger-fill", onclick: saveServer }, "Send them there"),
-      el("button", { onclick: () => { confirmBox.hidden = true; } }, "Cancel"));
+    confirmBox.replaceChildren(el("p", {}, tr("Transcripts and notes will be sent to {host} and leave this device. Only use a server you trust.", { host: host })),
+      el("button", { class: "primary danger-fill", onclick: saveServer }, tr("Send")),
+      el("button", { onclick: () => { confirmBox.hidden = true; } }, tr("Cancel")));
     confirmBox.hidden = false;
-  } }, "Save");
-  page.append(el("h2", {}, "Run on a local server instead"), el("div", { class: "group" },
-    el("div", { class: "row server-row" }, el("span", { class: "label" }, "Server",
-      el("small", {}, "An OpenAI-compatible server you run, such as Ollama or LM Studio. Leave empty to use this device.")),
+  } }, tr("Save"));
+  page.append(el("h2", {}, tr("Use a local server")), el("div", { class: "group" },
+    el("div", { class: "row server-row" }, el("span", { class: "label" }, tr("Server"),
+      el("small", {}, tr("An OpenAI-compatible server, such as Ollama or LM Studio. Leave empty to use this device."))),
     el("div", { class: "server-fields" }, url, model, save))), confirmBox);
   main.replaceChildren(page);
 }
@@ -601,7 +601,7 @@ function backLinks(text, back) {
   if (analysisOrigin) {
     const { kind, id } = analysisOrigin;
     links.append(el("button", { class: "pill with-icon back-to", onclick: () => (kind === "note" ? openNote(id) : openSession(id)) },
-      svg("chevron-left", 14), `Back to the ${kind}`));
+      svg("chevron-left", 14), tr("Back", { kind: kind })));
   }
   return links;
 }
@@ -614,24 +614,24 @@ async function showTemplates(message) {
   view = { kind: "templates" };
   refreshItems();
   const { templates: all, starred } = await invoke("list_templates");
-  const page = el("div", { class: "page" }, backLinks("‹ Analysis", () => showAnalysisSettings()), el("h1", {}, "Analysis templates"));
-  page.append(el("p", { class: "hint" }, "A template says what to pull out of a meeting or note and how to lay it out. Star the ones you use: they're offered first under Analysis templates on every meeting and note. Each one stacks there and can be made again."));
+  const page = el("div", { class: "page" }, backLinks(tr("‹ Analysis"), () => showAnalysisSettings()), el("h1", {}, tr("Templates")));
+  page.append(el("p", { class: "hint" }, tr("A template says what to pull from a meeting or note and how to lay it out. Starred ones are offered first on every meeting and note.")));
   if (message) page.append(el("div", { class: "notice" }, message));
   const group = el("div", { class: "group" });
   for (const t of all) {
-    const kinds = t.applies_to.length === 2 ? "Meetings and notes" : t.applies_to[0] === "note" ? "Notes" : "Meetings";
+    const kinds = t.applies_to.length === 2 ? tr("Meetings and notes") : t.applies_to[0] === "note" ? tr("Notes") : tr("Meetings");
     const label = el("span", { class: "label" }, t.name,
-      t.source !== "built-in" ? el("span", { class: "badge" }, t.source === "customised" ? "Customised" : "Yours") : null,
-      el("small", {}, t.errors.length ? "" : `${t.description} · ${kinds}${t.manual_only ? " · Only when asked" : ""}`));
+      t.source !== "built-in" ? el("span", { class: "badge" }, t.source === "customised" ? tr("Customised") : tr("Yours")) : null,
+      el("small", {}, t.errors.length ? "" : `${t.description} · ${kinds}${t.manual_only ? tr(" · Only when asked") : ""}`));
     if (t.errors.length) label.append(el("ul", { class: "danger template-errors" }, t.errors.map((e) => el("li", {}, e))));
     const on = starred.includes(t.id);
-    const star = el("button", { class: `icon-only star${on ? " on" : ""}`, title: on ? "Starred: offered first on meetings and notes" : "Star it, to offer it first",
-      "aria-label": on ? `Unstar ${t.name}` : `Star ${t.name}`, "aria-pressed": String(on), disabled: !!t.errors.length,
+    const star = el("button", { class: `icon-only star${on ? " on" : ""}`, title: on ? tr("Starred: offered first") : tr("Star to offer first"),
+      "aria-label": on ? tr("Unstar {name}", { name: t.name }) : tr("Star {name}", { name: t.name }), "aria-pressed": String(on), disabled: !!t.errors.length,
       onclick: async () => { await invoke("star_template", { id: t.id, starred: !on }).catch((e) => showError(page, e)); showTemplates(); } }, svg(on ? "star-filled" : "star", 18));
     const row = el("div", { class: "row template-row" }, star, label);
-    row.append(el("button", { class: "pill", onclick: () => editTemplate(t) }, t.file ? "Edit" : "Customise"));
+    row.append(el("button", { class: "pill", onclick: () => editTemplate(t) }, t.file ? tr("Edit") : tr("Customise")));
     if (t.file) {
-      row.append(el("button", { class: "icon-only danger", title: t.source === "customised" ? "Back to the built-in" : "Delete", "aria-label": "Delete",
+      row.append(el("button", { class: "icon-only danger", title: t.source === "customised" ? tr("Reset to built-in") : "Delete", "aria-label": "Delete",
         onclick: async () => { await invoke("delete_template", { file: t.file }).catch((e) => showError(page, e)); showTemplates(); } }, svg("trash", 16)));
     }
     group.append(row);
@@ -639,34 +639,34 @@ async function showTemplates(message) {
   page.append(group);
 
   // New from headings: no TOML needed.
-  const name = el("input", { type: "text", placeholder: "Client check-in", "aria-label": "Template name", maxlength: "60" });
+  const name = el("input", { type: "text", placeholder: tr("Client check-in"), "aria-label": tr("Template name"), maxlength: "60" });
   const rows = el("div", { class: "heading-rows" });
   const addRow = (text = "", kind = "list") => {
-    const title = el("input", { type: "text", value: text, placeholder: "Heading", "aria-label": "Heading", maxlength: "60" });
-    const type = el("select", { "aria-label": "Kind" }, ["paragraph", "list", "tasks"].map((k) =>
-      el("option", { value: k, selected: k === kind }, { paragraph: "A paragraph", list: "A list of points", tasks: "Tasks: who, what, when" }[k])));
-    const row = el("div", { class: "heading-row" }, title, type, el("button", { class: "icon-only", type: "button", "aria-label": "Remove", onclick: () => row.remove() }, svg("close", 14)));
+    const title = el("input", { type: "text", value: text, placeholder: tr("Heading"), "aria-label": tr("Heading"), maxlength: "60" });
+    const type = el("select", { "aria-label": tr("Kind") }, ["paragraph", "list", "tasks"].map((k) =>
+      el("option", { value: k, selected: k === kind }, { paragraph: tr("A paragraph"), list: tr("A list of points"), tasks: tr("Tasks: who, what, when") }[k])));
+    const row = el("div", { class: "heading-row" }, title, type, el("button", { class: "icon-only", type: "button", "aria-label": tr("Remove"), onclick: () => row.remove() }, svg("close", 14)));
     rows.append(row);
   };
-  [["Decisions", "list"], ["Blockers", "list"], ["Client sentiment", "paragraph"], ["Follow-ups", "tasks"]].forEach(([t, k]) => addRow(t, k));
+  [[tr("Decisions"), "list"], [tr("Blockers"), "list"], [tr("Client sentiment"), "paragraph"], [tr("Follow-ups"), "tasks"]].forEach(([t, k]) => addRow(t, k));
   const create = el("button", { class: "primary pill", onclick: async () => {
     const headings = [...rows.querySelectorAll(".heading-row")].map((r) => [r.querySelector("input").value.trim(), r.querySelector("select").value]).filter(([t]) => t);
     try {
       await invoke("new_template", { name: name.value.trim(), headings });
-      showTemplates(`"${name.value.trim()}" is ready, and starred, so it's offered first under Analysis templates on every meeting and note.`);
+      showTemplates(tr("\"{0}\" is ready and starred, so it's offered first.", { "0": name.value.trim() }));
     } catch (e) {
       showError(form, e);
     }
-  } }, "Create template");
+  } }, tr("Create template"));
   const form = el("div", { class: "group template-new" },
-    el("div", { class: "row" }, el("span", { class: "label" }, "Name"), name),
-    el("div", { class: "row column" }, el("span", { class: "label" }, "Headings", el("small", {}, "Each becomes a section. Points and tasks link to the lines they come from.")), rows,
-      el("button", { class: "link", type: "button", onclick: () => addRow() }, "+ Add heading")),
+    el("div", { class: "row" }, el("span", { class: "label" }, tr("Name")), name),
+    el("div", { class: "row column" }, el("span", { class: "label" }, tr("Headings"), el("small", {}, tr("Each becomes a section. Points and tasks link to their source lines."))), rows,
+      el("button", { class: "link", type: "button", onclick: () => addRow() }, tr("+ Add heading"))),
     el("div", { class: "row" }, el("span", { class: "grow" }), create));
-  page.append(el("h2", {}, "New template"), form);
+  page.append(el("h2", {}, tr("New template")), form);
   if (isDesktop()) {
-    page.append(el("p", { class: "hint" }, "Templates are TOML files in your Superteem Voice folder, so they can also be edited in any text editor. ",
-      el("button", { class: "link inline", onclick: () => invoke("open_templates_folder") }, "Open the folder")));
+    page.append(el("p", { class: "hint" }, tr("Templates are TOML files in your Superteem Voice folder, editable in any text editor. "),
+      el("button", { class: "link inline", onclick: () => invoke("open_templates_folder") }, tr("Open folder"))));
   }
   main.replaceChildren(page);
 }
@@ -676,22 +676,22 @@ async function editTemplate(t) {
   leave();
   showPage();
   view = { kind: "template-edit" };
-  const area = el("textarea", { class: "template-source mono", spellcheck: "false", "aria-label": "Template" }, source);
+  const area = el("textarea", { class: "template-source mono", spellcheck: "false", "aria-label": tr("Template") }, source);
   const result = el("div", { role: "status" });
-  const page = el("div", { class: "page" }, backLinks("‹ Analysis templates", () => showTemplates()),
-    el("h1", {}, file ? t.name : `Customise ${t.name}`),
-    el("p", { class: "hint" }, file ? "Changes take effect the next time it runs." : "Saving makes your own copy, which replaces the built-in until you delete it."),
+  const page = el("div", { class: "page" }, backLinks(tr("‹ Templates"), () => showTemplates()),
+    el("h1", {}, file ? t.name : tr("Customise {name}", { name: t.name })),
+    el("p", { class: "hint" }, file ? tr("Changes apply next time it runs.") : tr("Saving makes your own copy, replacing the built-in until you delete it.")),
     area, result,
     el("div", { class: "toolbar" }, el("span", { class: "grow" }),
-      el("button", { class: "pill", onclick: () => showTemplates() }, "Cancel"),
+      el("button", { class: "pill", onclick: () => showTemplates() }, tr("Cancel")),
       el("button", { class: "primary pill", onclick: async () => {
         try {
           const saved = await invoke("save_template", { source: area.value, file, was: t.id });
-          showTemplates(`Saved. "${saved.name}" is used from now on, the next time it's made${analysisOrigin ? ", including with Make again" : ""}.`);
+          showTemplates(tr("Saved. \"{name}\" is used from the next run{1}.", { name: saved.name, "1": analysisOrigin ? tr(", including Redo") : "" }));
         } catch (e) {
           result.replaceChildren(el("pre", { class: "danger template-errors" }, String(e)));
         }
-      } }, "Save")));
+      } }, tr("Save"))));
   main.replaceChildren(page);
   area.focus();
 }
@@ -717,14 +717,14 @@ let reading = null;
 /// { start, pieces, at (the piece to go on from; pieces.length when it read to the end), heard (about how
 /// many words were heard), finished }. `menu()` gives the items of a menu (see showContextMenu) shown when
 /// the button is held down, or right-clicked.
-function readAloudButton(text, what = "Read aloud", { label, lang, pieces, onPiece, voice, pronounce, speed, startOf, onEnd, menu } = {}) {
+function readAloudButton(text, what = tr("Read aloud"), { label, lang, pieces, onPiece, voice, pronounce, speed, startOf, onEnd, menu } = {}) {
   const button = label
     ? el("button", { class: "pill with-icon read-aloud", type: "button", title: what, "aria-pressed": "false" }, svg("play", 14), label)
     : el("button", { class: "icon-only read-aloud", type: "button", title: what, "aria-label": what, "aria-pressed": "false" },
       ...["speak", "play", "stop"].map((name) => { const icon = svg(name, 16); icon.classList.add(`ra-${name}`); return icon; }));
   button.dataset.what = what;
   // A labelled button says Stop while it reads.
-  if (label) button.reading = (on) => button.replaceChildren(svg(on ? "pause" : "play", 14), on ? "Stop" : label);
+  if (label) button.reading = (on) => button.replaceChildren(svg(on ? "pause" : "play", 14), on ? tr("Stop") : label);
   button.addEventListener("mousedown", (e) => e.preventDefault());
   const langNow = () => (typeof lang === "function" ? lang() : lang);
   const pronounceNow = () => (typeof pronounce === "function" ? pronounce() : pronounce);
@@ -981,13 +981,13 @@ async function readAloud(button, text, lang, { pieces: given, onPiece, voice: pr
   // so changing the speed while reading takes effect at once.)
   const gap = (i) => (i + 1 < pieces.length ? Math.max(pieces[i].after, pieces[i + 1].before) : 0) / rate();
   // Where it is, so it can go on from there in another voice (see readOn).
-  const mine = { button, cancelled: false, onPiece, what: button.dataset.what || "Read aloud", pieces, index: 0, start, at: 0, heard: 0, began: 0, pronounce };
+  const mine = { button, cancelled: false, onPiece, what: button.dataset.what || tr("Read aloud"), pieces, index: 0, start, at: 0, heard: 0, began: 0, pronounce };
   // Each piece heard to its end counts all its words; one stopped part way, about as many as were said by then.
   const heardAll = (i) => { mine.heard += wordCount(pieces[i].text); mine.at = i + 1; mine.began = 0; };
   reading = mine;
   button.classList.add("on");
   button.setAttribute("aria-pressed", "true");
-  button.title = "Stop reading";
+  button.title = tr("Stop");
   button.reading?.(true);
   // The listener doesn't take the app's own voice for someone talking.
   invoke("listen_mute", { muted: true }).catch(() => {});
@@ -1066,7 +1066,7 @@ async function saveBookVoice(book, choice) {
     prefs.book_voices = { ...prefs.book_voices, [book.id]: choice };
     return true;
   } catch (e) {
-    micToast(`The choice wasn't saved: ${e}`);
+    micToast(tr("Not saved: {e}", { e: e }));
     return false;
   }
 }
@@ -1076,13 +1076,13 @@ async function saveBookVoice(book, choice) {
 async function changeBookVoice(book, lang, readOn) {
   const status = await invoke("tts_status").catch(() => null);
   const suggested = status?.supported && status.voices.find((v) => v.id === book.voice);
-  if (!suggested) return micToast("This book's own voice can't be used on this device.");
+  if (!suggested) return micToast(tr("This book's voice can't be used on this device."));
   const usual = await invoke("reading_voice", { language: lang ?? null, prefer: null }).catch(() => null);
   const current = prefs.book_voices?.[book.id] ?? null;
   const choice = await bookVoiceDialog(book, usual, suggested, status.downloading, current);
   if (!choice || choice === current || !(await saveBookVoice(book, choice))) return;
   if (readOn) readOn();
-  else micToast(`${book.title || "This book"} now reads in ${choice === "default" ? (usual?.name ?? "your voice") : suggested.name}.`);
+  else micToast(tr("{0} now reads in {1}.", { "0": book.title || tr("This book"), "1": choice === "default" ? (usual?.name ?? tr("your voice")) : suggested.name }));
 }
 
 /// What a voice is, in a few words: "British English, male".
@@ -1095,24 +1095,24 @@ function bookVoiceDialog(book, usual, suggested, busy, current) {
   return new Promise((done) => {
     let result = null;
     let downloading = false;
-    const usualName = usual ? usual.name : prefs.system_voice || "The system's voice";
-    const usualKind = usual ? voiceKind(usual) : "Built into this device";
-    const size = suggested.size ? `${Math.round(suggested.size / 1e6)} MB download` : "Download";
+    const usualName = usual ? usual.name : prefs.system_voice || tr("System voice");
+    const usualKind = usual ? voiceKind(usual) : tr("Built into this device");
+    const size = suggested.size ? tr("{0} MB download", { "0": Math.round(suggested.size / 1e6) }) : tr("Download");
     const status = el("p", { class: "hint book-voice-status" });
     const option = (title, name, kind, extra) => el("div", { class: "book-voice-option" },
       el("small", {}, title), el("strong", {}, name), el("span", {}, kind), extra ? el("span", { class: "book-voice-extra" }, extra) : null);
     const changing = current !== undefined;
     const onSuggested = current === suggested.id;
-    const keep = el("button", { class: onSuggested ? "primary pill" : "pill", type: "button" }, changing && onSuggested ? "Use my voice" : "Keep my voice");
+    const keep = el("button", { class: onSuggested ? "primary pill" : "pill", type: "button" }, changing && onSuggested ? tr("Use my voice") : tr("Keep my voice"));
     const use = el("button", { class: onSuggested ? "pill" : "primary pill", type: "button", disabled: !suggested.ready && !!busy },
-      onSuggested ? `Keep ${suggested.name}` : suggested.ready ? `Use ${suggested.name}` : `Download and use ${suggested.name}`);
+      onSuggested ? tr("Keep {name}", { name: suggested.name }) : suggested.ready ? tr("Use {name}", { name: suggested.name }) : tr("Get {name}", { name: suggested.name }));
     const finish = (value) => { result = value; dialog.close(); };
     keep.addEventListener("click", () => finish("default"));
     use.addEventListener("click", async () => {
       if (suggested.ready) return finish(suggested.id);
       downloading = true;
       use.disabled = keep.disabled = true;
-      status.replaceChildren(el("span", { class: "spinner" }), " ", `Downloading ${suggested.name}… `, el("span", { "data-tts-progress": suggested.id }, ""));
+      status.replaceChildren(el("span", { class: "spinner" }), " ", tr("Downloading {name}… ", { name: suggested.name }), el("span", { "data-tts-progress": suggested.id }, ""));
       try {
         await invoke("download_tts", { id: suggested.id });
         downloading = false;
@@ -1123,17 +1123,17 @@ function bookVoiceDialog(book, usual, suggested, busy, current) {
         status.replaceChildren(el("span", { class: "danger" }, String(e)));
       }
     });
-    const dialog = el("dialog", { class: "sheet book-voice-dialog", "aria-label": "A voice for this book" },
-      el("h2", {}, "A voice for this book"),
-      el("p", {}, changing ? `Choose which voice reads ${book.title || "this book"}.`
-        : `${book.title || "This book"} suggests a voice to read it.${book.voice_why ? ` ${book.voice_why}` : ""}`),
+    const dialog = el("dialog", { class: "sheet book-voice-dialog", "aria-label": tr("A voice for this book") },
+      el("h2", {}, tr("A voice for this book")),
+      el("p", {}, changing ? tr("Choose which voice reads {0}.", { "0": book.title || tr("this book") })
+        : tr("{0} suggests a voice to read it.{1}", { "0": book.title || tr("This book"), "1": book.voice_why ? ` ${book.voice_why}` : "" })),
       el("div", { class: "book-voice-options" },
-        option(changing && !onSuggested ? "Your voice · in use" : "Your voice", usualName, usualKind),
-        option(onSuggested ? "Suggested · in use" : "Suggested", suggested.name, voiceKind(suggested), suggested.ready ? "Downloaded" : `${size}, then works offline`)),
-      el("p", { class: "hint" }, "Only this book changes. Everything else keeps reading in your voice."),
+        option(changing && !onSuggested ? tr("Your voice · in use") : tr("Your voice"), usualName, usualKind),
+        option(onSuggested ? tr("Suggested · in use") : tr("Suggested"), suggested.name, voiceKind(suggested), suggested.ready ? tr("Downloaded") : tr("{size}, then offline", { size: size }))),
+      el("p", { class: "hint" }, tr("Only this book changes.")),
       status,
       el("div", { class: "actions" }, el("span", { class: "grow" }), keep, use));
-    if (busy && !suggested.ready) status.textContent = "Another voice is downloading. Try again when it's done, or keep your voice.";
+    if (busy && !suggested.ready) status.textContent = tr("Another voice is downloading. Try again later, or keep your voice.");
     // Closing while it downloads stops the download.
     dialog.addEventListener("cancel", () => { if (downloading) invoke("cancel_tts_download").catch(() => {}); });
     dialog.addEventListener("close", () => { dialog.remove(); done(result); });
@@ -1155,8 +1155,8 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
   const status = isDesktop() ? await invoke("tts_status").catch(() => null) : null;
   const usual = isDesktop() ? await invoke("reading_voice", { language: lang ?? null, prefer: null }).catch(() => null) : null;
   return new Promise((done) => {
-    const sample = el("button", { class: "pill with-icon", type: "button" }, svg("speak", 14), "Hear it");
-    sample.dataset.what = "Hear it";
+    const sample = el("button", { class: "pill with-icon", type: "button" }, svg("speak", 14), tr("Hear it"));
+    sample.dataset.what = tr("Hear it");
     const chosenVoice = () => {
       const c = prefs.book_voices?.[book.id];
       return c && c !== "default" ? c : null;
@@ -1164,8 +1164,8 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
 
     // Speed: buttons for the usual few, and a slider for anything between.
     const shown = el("span", { class: "value" }, speedText(bookSpeed()));
-    const slider = el("input", { type: "range", min: String(READ_SPEED.min), max: String(READ_SPEED.max), step: "0.05", value: String(bookSpeed()), "aria-label": "Reading speed" });
-    const chips = BOOK_SPEEDS.map((v) => el("button", { class: "pill speed-chip", type: "button", "data-speed": String(v), "aria-pressed": "false" }, v === 1 ? "1× normal" : `${v}×`));
+    const slider = el("input", { type: "range", min: String(READ_SPEED.min), max: String(READ_SPEED.max), step: "0.05", value: String(bookSpeed()), "aria-label": tr("Reading speed") });
+    const chips = BOOK_SPEEDS.map((v) => el("button", { class: "pill speed-chip", type: "button", "data-speed": String(v), "aria-pressed": "false" }, v === 1 ? tr("1× normal") : `${v}×`));
     const mark = (v) => {
       shown.textContent = speedText(v);
       slider.value = String(v);
@@ -1181,7 +1181,7 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
       try {
         await saveReading({ bookSpeed: v });
       } catch (e) {
-        micToast(`The speed wasn't saved: ${e}`);
+        micToast(tr("Speed not saved: {e}", { e: e }));
       }
     };
     for (const c of chips) c.addEventListener("click", () => setSpeed(Number(c.dataset.speed)));
@@ -1189,9 +1189,9 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
     slider.addEventListener("change", () => setSpeed(Number(slider.value)));
     mark(bookSpeed());
     const speedGroup = el("div", { class: "book-setting" },
-      el("h3", {}, "Speed"),
-      el("p", { class: "hint" }, "How fast books are read aloud. It's kept for every book, apart from how fast notes and transcripts are read, and changes what's being read from its next sentence."),
-      el("div", { class: "speed-chips", role: "group", "aria-label": "Reading speed" }, chips),
+      el("h3", {}, tr("Speed")),
+      el("p", { class: "hint" }, tr("How fast books are read aloud, set apart from notes and transcripts. Applies from the next sentence.")),
+      el("div", { class: "speed-chips", role: "group", "aria-label": tr("Reading speed") }, chips),
       el("div", { class: "slider" }, slider, shown));
 
     // Voice: the person's usual one, the book's suggested one (downloaded when chosen) and any other natural
@@ -1200,11 +1200,11 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
     const voices = status?.supported ? status.voices.filter((v) => !lang || !v.langs || v.langs.includes(lang)) : [];
     const suggested = book.voice ? voices.find((v) => v.id === book.voice) : null;
     if (voices.length) {
-      const usualName = usual ? usual.name : prefs.system_voice || "The system's voice";
-      const select = el("select", { "aria-label": "Voice for this book" },
-        el("option", { value: "default" }, `My usual voice: ${usualName}`),
+      const usualName = usual ? usual.name : prefs.system_voice || tr("System voice");
+      const select = el("select", { "aria-label": tr("Voice for this book") },
+        el("option", { value: "default" }, tr("My voice: {usualName}", { usualName: usualName })),
         voices.filter((v) => v.ready || v.id === book.voice).map((v) => el("option", { value: v.id },
-          `${v.name}, ${voiceKind(v)}${v.id === book.voice ? " (this book's own)" : ""}${v.ready ? "" : ` — download${v.size ? `, ${Math.round(v.size / 1e6)} MB` : ""}`}`)));
+          `${v.name}, ${voiceKind(v)}${v.id === book.voice ? tr(" (this book's own)") : ""}${v.ready ? "" : tr(" — download{0}", { "0": v.size ? `, ${Math.round(v.size / 1e6)} MB` : "" })}`)));
       select.value = prefs.book_voices?.[book.id] ?? "default";
       const voiceStatus = el("p", { class: "hint book-voice-status" });
       select.addEventListener("change", async () => {
@@ -1213,7 +1213,7 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
         select.disabled = true;
         try {
           if (v && !v.ready) {
-            voiceStatus.replaceChildren(el("span", { class: "spinner" }), " ", `Downloading ${v.name}… `, el("span", { "data-tts-progress": v.id }, ""));
+            voiceStatus.replaceChildren(el("span", { class: "spinner" }), " ", tr("Downloading {name}… ", { name: v.name }), el("span", { "data-tts-progress": v.id }, ""));
             await invoke("download_tts", { id: v.id });
             v.ready = true;
           }
@@ -1222,34 +1222,34 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
             if (button?.isReading()) button.readOn();
           }
         } catch (e) {
-          voiceStatus.textContent = `${v?.name ?? "The voice"} couldn't be downloaded: ${e}`;
+          voiceStatus.textContent = tr("{0} couldn't be downloaded: {e}", { "0": v?.name ?? tr("The voice"), e: e });
           select.value = prefs.book_voices?.[book.id] ?? "default";
         }
         select.disabled = false;
       });
       voiceGroup = el("div", { class: "book-setting" },
-        el("h3", {}, "Voice"),
-        el("p", { class: "hint" }, suggested ? `This book suggests ${suggested.name}. The voice chosen here reads only this book.` : "The voice chosen here reads only this book."),
+        el("h3", {}, tr("Voice")),
+        el("p", { class: "hint" }, suggested ? tr("This book suggests {name}. The voice chosen here reads only this book.", { name: suggested.name }) : tr("The voice chosen here reads only this book.")),
         select, voiceStatus);
     } else {
       voiceGroup = el("div", { class: "book-setting" },
-        el("h3", {}, "Voice"),
-        el("p", { class: "hint" }, `Read by ${prefs.system_voice || "this device's voice"}. Choose it, and its pitch, in Settings › Reading aloud.`));
+        el("h3", {}, tr("Voice")),
+        el("p", { class: "hint" }, tr("Read by {0}. Change it in Settings › Reading aloud.", { "0": prefs.system_voice || tr("this device's voice") })));
     }
 
     // Following: the text scrolls to keep what's read in the middle of the window.
     const follow = el("input", { type: "checkbox", checked: followsReading() });
     follow.addEventListener("change", () => setFollowReading(follow.checked));
     const followGroup = el("div", { class: "book-setting" },
-      el("label", { class: "check-row" }, follow, el("span", {}, "Scroll to follow the reading",
-        el("small", { class: "hint" }, "Keeps what's being read in the middle of the window. Scroll yourself and it waits a few seconds before following again."))));
+      el("label", { class: "check-row" }, follow, el("span", {}, tr("Follow the reading"),
+        el("small", { class: "hint" }, tr("Keeps what's read in view. Scroll yourself and it pauses a few seconds.")))));
 
     // Pronunciation: the book's, this chapter's (which win where both say a word), and the person's own.
     const pronGroup = el("div", { class: "book-setting" });
     const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
     const hear = (text) => {
-      const b = el("button", { class: "icon-only", type: "button", title: "Hear it", "aria-label": "Hear it" }, svg("speak", 14));
-      b.dataset.what = "Hear it";
+      const b = el("button", { class: "icon-only", type: "button", title: tr("Hear it"), "aria-label": tr("Hear it") }, svg("speak", 14));
+      b.dataset.what = tr("Hear it");
       b.addEventListener("click", async () => {
         if (reading?.button === b) return stopReading();
         stopReading();
@@ -1257,7 +1257,7 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
       });
       return b;
     };
-    const chapterName = chapter?.title || "this chapter";
+    const chapterName = chapter?.title || tr("this chapter");
     const drawPron = () => {
       const bookList = book.pronounce ?? {};
       const own = chapter?.pronounce ?? {};
@@ -1273,27 +1273,27 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
       const list = el("div", { class: "pron-list" }, listed.map((w) => el("div", { class: "pron-item" },
         el("span", { class: "pron-word" }, w), el("span", { class: "pron-arrow", "aria-hidden": "true" }, "→"),
         el("span", { class: "pron-said" }, said[w] ?? "as written",
-          yours(w) ? el("small", { class: "pron-replaces" }, "your own") : w in bookList ? el("small", { class: "pron-replaces" }, `instead of the book's “${bookList[w]}”`) : null),
+          yours(w) ? el("small", { class: "pron-replaces" }, "your own") : w in bookList ? el("small", { class: "pron-replaces" }, tr("instead of the book's “{0}”", { "0": bookList[w] })) : null),
         hear(said[w] ?? w))));
       const nMine = Object.keys(mineBook).length + Object.keys(mineHere).length;
       const change = (forChapter) => el("button", { class: "pill with-icon", type: "button", onclick: async () => {
         if (await myPronounceDialog(book, forChapter ? chapter : null, { lang })) drawPron();
-      } }, svg("pen", 13), forChapter ? `Change words in ${chapterName}…` : "Change words in the book…");
+      } }, svg("pen", 13), forChapter ? tr("Words in {chapterName}…", { chapterName: chapterName }) : tr("Words in the book…"));
       pronGroup.replaceChildren(
-        el("h3", {}, "Pronunciation"),
+        el("h3", {}, tr("Pronunciation")),
         el("p", { class: "hint" }, Object.keys(bookList).length
-          ? `The book says ${plural(Object.keys(bookList).length, "name", "names")} its own way, so the voice gets them right.`
-          : "The book doesn't change how the voice says any words."),
+          ? tr("The book says {0} its own way, so the voice gets them right.", { "0": plural(Object.keys(bookList).length, "name", "names") })
+          : tr("The book doesn't change how the voice says any words.")),
         chapter ? el("p", { class: "hint" }, ownWords.length
-          ? `${chapterName} has ${plural(ownWords.length, "word", "words")} of its own${replaced.length
+          ? tr("{chapterName} has {1} of its own{2}.", { chapterName: chapterName, "1": plural(ownWords.length, "word", "words"), "2": replaced.length
             ? `. ${plural(replaced.length, "is one", "are ones")} the book says too: in this chapter, ${chapterName}'s way is used instead`
-            : ", used on top of the book's"}.`
-          : `${chapterName} uses the book's.`) : null,
+            : tr(", used on top of the book's") })
+          : tr("{chapterName} uses the book's.", { chapterName: chapterName })) : null,
         el("p", { class: "hint" }, nMine
-          ? `You've changed ${plural(nMine, "word", "words")}. Yours are kept on this device and win over the book's; the book itself stays as it is.`
-          : "Change any word to say it your way. Yours are kept on this device and win over the book's."),
+          ? tr("You've changed {0}. Yours stay on this device and win over the book's.", { "0": plural(nMine, "word", "words") })
+          : tr("Change any word to say it your way. Yours stay on this device and win over the book's.")),
         listed.length ? el("details", { class: "pron-details", open: listed.length <= 12 && (replaced.length > 0 || nMine > 0) },
-          el("summary", {}, chapter ? `${chapterName}'s words` : "Your words"), list) : null,
+          el("summary", {}, chapter ? tr("{chapterName}'s words", { chapterName: chapterName }) : tr("Your words")), list) : null,
         el("div", { class: "pron-change" }, chapter ? change(true) : null, change(false)));
     };
     drawPron();
@@ -1301,7 +1301,7 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
     const sampleText = () => {
       const own = Object.keys(chapter?.pronounce ?? {});
       const name = own.find((w) => w in (book.pronounce ?? {})) ?? own[0] ?? Object.keys(book.pronounce ?? {})[0];
-      return `This is how ${book.title || "this book"} sounds, read aloud at this speed${name ? `, with names like ${name}` : ""}.`;
+      return tr("This is how {0} sounds, read aloud at this speed{1}.", { "0": book.title || tr("this book"), "1": name ? tr(", with names like {name}", { name: name }) : "" });
     };
     sample.addEventListener("click", () => {
       if (reading?.button === sample) return stopReading();
@@ -1309,12 +1309,12 @@ async function bookReadingDialog(book, { button = null, chapter = null, lang = n
       readAloud(sample, sampleText(), lang, { voice: chosenVoice(), speed: bookSpeed, pronounce: bookWords(book, chapter) });
     });
 
-    const everything = el("button", { class: "link", type: "button" }, "Reading aloud for everything else");
-    const dialog = el("dialog", { class: "sheet extras-dialog book-reading-dialog", "aria-label": "Reading aloud settings" },
-      el("h2", {}, `Reading ${book.title || "this book"} aloud`),
+    const everything = el("button", { class: "link", type: "button" }, tr("Reading aloud elsewhere"));
+    const dialog = el("dialog", { class: "sheet extras-dialog book-reading-dialog", "aria-label": tr("Reading aloud") },
+      el("h2", {}, tr("Reading {0} aloud", { "0": book.title || tr("this book") })),
       speedGroup, followGroup, voiceGroup, pronGroup,
       el("div", { class: "actions" }, everything, el("span", { class: "grow" }), sample,
-        el("button", { class: "primary pill", type: "button", onclick: () => dialog.close() }, "Done")));
+        el("button", { class: "primary pill", type: "button", onclick: () => dialog.close() }, tr("Done"))));
     let toSettings = false;
     everything.addEventListener("click", () => { toSettings = true; dialog.close(); });
     dialog.addEventListener("close", () => {
@@ -1386,7 +1386,7 @@ function analysisCopyText(card) {
   clone.querySelectorAll(".sources, .row-delete, .add-row, .badge, input, .when-chip.empty").forEach((n) => n.remove());
   clone.querySelectorAll("select").forEach((s) => s.replaceWith(s.value ? (s.selectedOptions[0]?.textContent ?? "") : ""));
   clone.querySelectorAll("button").forEach((b) => b.replaceWith(b.textContent));
-  clone.querySelectorAll("li.done").forEach((li) => li.append(" [done]"));
+  clone.querySelectorAll("li.done").forEach((li) => li.append(tr(" [done]")));
   // Headings are drawn in capitals; the paste should read as the words, not the styling.
   clone.querySelectorAll("h3").forEach((h) => { h.style.textTransform = "none"; });
   const host = document.createElement("div");
@@ -1412,10 +1412,10 @@ function analysisSpeech(card) {
     const who = node.querySelector(".who-chip")?.textContent;
     const what = [...node.querySelectorAll(":scope > .editable, :scope > .field-extra .editable")].map((n) => n.textContent).join(", ");
     const when = node.querySelector(".when-chip:not(.empty)")?.textContent;
-    const done = node.classList.contains("done") ? " Done." : "";
+    const done = node.classList.contains("done") ? tr(" Done.") : "";
     const time = node.querySelector(".bookmark-time")?.textContent;
     const point = `${who && who !== "Unassigned" ? `${who}: ` : ""}${what}${when ? `, ${when}` : ""}`;
-    lines.push(`${time ? `At ${time}. ` : ""}${point}${/[.!?。！？]$/.test(point) ? "" : "."}${done}`);
+    lines.push(`${time ? tr("At {time}. ", { time: time }) : ""}${point}${/[.!?。！？]$/.test(point) ? "" : "."}${done}`);
   }
   return lines.join("\n");
 }
@@ -1440,7 +1440,7 @@ function systemVoices() {
   });
 }
 
-const speedText = (s) => (Math.abs(s - 1) < 0.01 ? "Normal" : `${Number(s.toFixed(2))}×`);
+const speedText = (s) => (Math.abs(s - 1) < 0.01 ? tr("Normal") : `${Number(s.toFixed(2))}×`);
 
 /// The slowest and fastest anything is read aloud.
 const READ_SPEED = { min: 0.5, max: 3 };
@@ -1490,7 +1490,7 @@ async function myPronounceDialog(book, chapter = null, { lang = null } = {}) {
     if (said && said !== w) words[w] = said;
   }
   const chosen = prefs.book_voices?.[book.id];
-  const about = chapter ? chapter.title || "this chapter" : book.title || "this book";
+  const about = chapter ? chapter.title || tr("this chapter") : book.title || tr("this book");
   const result = await pronounceDialog(about, words, { fresh: selectedWord(), defaults, voice: chosen && chosen !== "default" ? chosen : null, lang });
   if (!result) return false;
   const next = {};
@@ -1501,7 +1501,7 @@ async function myPronounceDialog(book, chapter = null, { lang = null } = {}) {
   try {
     await saveMyPronounce(key, next);
   } catch (e) {
-    micToast(`They weren't saved: ${e}`);
+    micToast(tr("Not saved: {e}", { e: e }));
     return false;
   }
   return true;
@@ -1516,12 +1516,12 @@ async function setFollowReading(on) {
   try {
     await saveReading({ followReading: on });
   } catch (e) {
-    micToast(`That wasn't saved: ${e}`);
+    micToast(tr("Not saved: {e}", { e: e }));
   }
 }
 
 /// The Read aloud menu's item that turns following on or off.
-const followItem = () => ({ icon: followsReading() ? "check" : null, text: "Scroll to follow the reading", run: () => setFollowReading(!followsReading()) });
+const followItem = () => ({ icon: followsReading() ? "check" : null, text: tr("Follow the reading"), run: () => setFollowReading(!followsReading()) });
 
 /// When the person last scrolled themselves: following waits a few seconds after, so it doesn't pull them back.
 let scrolledByHand = 0;
@@ -1700,7 +1700,7 @@ async function readingAloudSummary() {
   const status = await invoke("tts_status").catch(() => null);
   const natural = prefs.natural_voice && status?.voices.find((v) => v.id === status.chosen && v.ready);
   const speed = prefs.read_speed ?? 1;
-  return `${natural ? `${natural.name}, natural voice` : prefs.system_voice || "The system's voice"}${Math.abs(speed - 1) < 0.01 ? "" : ` · ${speedText(speed)}`}`;
+  return `${natural ? tr("{name}, natural voice", { name: natural.name }) : prefs.system_voice || tr("System voice")}${Math.abs(speed - 1) < 0.01 ? "" : ` · ${speedText(speed)}`}`;
 }
 
 async function saveReading(change) {
@@ -1724,7 +1724,7 @@ function rateSlider(label, hint, value, save, max = 2) {
   const input = el("input", { type: "range", min: "0.5", max: String(max), step: "0.05", value: String(value), "aria-label": label });
   input.addEventListener("input", () => { shown.textContent = speedText(Number(input.value)); });
   input.addEventListener("change", () => save(Number(input.value)));
-  const reset = el("button", { class: "link", type: "button", onclick: () => { input.value = "1"; shown.textContent = speedText(1); save(1); } }, "Reset");
+  const reset = el("button", { class: "link", type: "button", onclick: () => { input.value = "1"; shown.textContent = speedText(1); save(1); } }, tr("Reset"));
   return el("div", { class: "row slider-row" }, el("span", { class: "label" }, label, hint ? el("small", {}, hint) : null),
     el("div", { class: "slider" }, input, shown, reset));
 }
@@ -1739,66 +1739,66 @@ async function showReadingSettings(message) {
   view = { kind: "reading-settings" };
   refreshItems();
   const [status, voices] = await Promise.all([invoke("tts_status").catch(() => null), systemVoices()]);
-  const page = el("div", { class: "page" }, backLinks("‹ Voices", () => showVoices()), el("h1", {}, "Reading aloud"));
-  page.append(el("p", { class: "hint" }, "Notes, transcripts and analyses can be read aloud with the speaker button beside them. Choose how it reads and the voice here."));
+  const page = el("div", { class: "page" }, backLinks(tr("‹ Voices"), () => showVoices()), el("h1", {}, tr("Reading aloud")));
+  page.append(el("p", { class: "hint" }, tr("Notes, transcripts and analyses are read aloud with the speaker button beside them. Set how here.")));
   if (message) page.append(el("div", { class: "notice" }, message));
-  const sample = "This is how notes, transcripts and summaries sound when they're read aloud.";
+  const sample = tr("How notes, transcripts and summaries sound read aloud.");
   const natural = !!prefs.natural_voice && !!status?.voices.some((v) => v.id === status.chosen && v.ready);
   const chosenVoice = natural ? status.voices.find((v) => v.id === status.chosen) : null;
 
   // How it reads.
   const how = el("div", { class: "group" },
-    rateSlider("Speed", "How fast it reads", prefs.read_speed ?? 1, (s) => saveReading({ speed: s })),
-    rateSlider("Books", "How fast books are read, on their own", bookSpeed(), (s) => saveReading({ bookSpeed: s }), READ_SPEED.max));
+    rateSlider(tr("Speed"), tr("Speed"), prefs.read_speed ?? 1, (s) => saveReading({ speed: s })),
+    rateSlider(tr("Books"), tr("Book speed, set separately"), bookSpeed(), (s) => saveReading({ bookSpeed: s }), READ_SPEED.max));
   const systemNames = voices.filter((v) => /^en/i.test(v.lang)).map((v) => v.name);
   if (!natural) {
-    how.append(rateSlider("Pitch", "The system's voice only", prefs.read_pitch ?? 1, (s) => saveReading({ pitch: s })));
+    how.append(rateSlider(tr("Pitch"), tr("System voice only"), prefs.read_pitch ?? 1, (s) => saveReading({ pitch: s })));
     if (systemNames.length > 1) {
-      const select = el("select", { "aria-label": "System voice" }, el("option", { value: "" }, "This device's default"),
+      const select = el("select", { "aria-label": tr("System voice") }, el("option", { value: "" }, tr("Device default")),
         systemNames.map((n) => el("option", { value: n, selected: n === prefs.system_voice }, n)));
       select.addEventListener("change", () => saveReading({ systemVoice: select.value }));
-      how.append(el("div", { class: "row stack-narrow" }, el("span", { class: "label" }, "System voice", el("small", {}, "The English voices this device has")), select));
+      how.append(el("div", { class: "row stack-narrow" }, el("span", { class: "label" }, tr("System voice"), el("small", {}, tr("This device's English voices"))), select));
     }
   }
   // A Chinese and English voice tries both.
   const trySample = chosenVoice?.langs?.includes("zh") ? `${sample} 这是用中文朗读的样子。` : sample;
   how.append(
-    toggleRow("Say who's speaking", "Reading a transcript, say each speaker's name before what they said.", prefs.read_speakers ?? true,
+    toggleRow(tr("Say who's speaking"), tr("Say each speaker's name before their words."), prefs.read_speakers ?? true,
       (on) => saveReading({ readSpeakers: on })),
-    el("div", { class: "row" }, el("span", { class: "label" }, "Try it", el("small", {}, chosenVoice ? `${chosenVoice.name}, with the settings above` : "The system's voice, with the settings above")),
-      readAloudButton(() => trySample, "Hear the voice", { label: "Play" })));
-  page.append(el("h2", {}, "How it reads"), how);
+    el("div", { class: "row" }, el("span", { class: "label" }, tr("Try it"), el("small", {}, chosenVoice ? tr("{name}, with the settings above", { name: chosenVoice.name }) : tr("System voice, with the settings above"))),
+      readAloudButton(() => trySample, tr("Hear it"), { label: tr("Play") })));
+  page.append(el("h2", {}, tr("How it reads")), how);
 
   // The voice: the system's, or one of the natural ones, downloaded once.
-  const group = el("div", { class: "group voice-list", role: "radiogroup", "aria-label": "Voice" });
+  const group = el("div", { class: "group voice-list", role: "radiogroup", "aria-label": tr("Voice") });
   const pick = (on, title, about, choose, extra = []) => {
     const radio = el("input", { type: "radio", name: "reading-voice", checked: on, "aria-label": title });
     radio.addEventListener("change", choose);
     return el("label", { class: `row voice-row${on ? " chosen" : ""}` }, radio,
-      el("span", { class: "label" }, title, on ? el("span", { class: "badge ok" }, "Reading") : null, el("small", {}, about)), ...extra);
+      el("span", { class: "label" }, title, on ? el("span", { class: "badge ok" }, tr("Reading")) : null, el("small", {}, about)), ...extra);
   };
-  group.append(pick(!natural, "The system's voice", status?.supported
-    ? "Built into this device. Nothing to download."
-    : "Built into this device. Natural voices are on Windows now, and coming here.",
+  group.append(pick(!natural, tr("System voice"), status?.supported
+    ? tr("Built in. Nothing to download.")
+    : tr("Built in. Natural voices are on Windows now, coming here soon."),
   async () => { await saveReading({ natural: false }); showReadingSettings(); }));
   // Voices for the person's languages are listed; the rest, one or two for each other language, fold away.
   const mine = (await languageData()).chosen;
-  const others = el("div", { class: "group voice-list", role: "radiogroup", "aria-label": "Voices for other languages" });
+  const others = el("div", { class: "group voice-list", role: "radiogroup", "aria-label": tr("Other languages") });
   for (const v of status?.supported ? status.voices : []) {
     const on = natural && status.chosen === v.id;
     const listed = on || v.ready || v.custom || status.downloading === v.model || v.langs?.some((l) => mine.includes(l));
     const size = v.size >= 1e9 ? `${(v.size / 1e9).toFixed(1)} GB` : `${Math.round(v.size / 1e6)} MB`;
     const extra = [];
     if (status.downloading && status.downloading === v.model) {
-      extra.push(el("span", { class: "value" }, el("span", { class: "spinner" }), " ", el("span", { "data-tts-progress": v.id }, "Starting…")),
-        el("button", { class: "pill", type: "button", onclick: (e) => { e.preventDefault(); invoke("cancel_tts_download"); } }, "Stop"));
+      extra.push(el("span", { class: "value" }, el("span", { class: "spinner" }), " ", el("span", { "data-tts-progress": v.id }, tr("Starting…"))),
+        el("button", { class: "pill", type: "button", onclick: (e) => { e.preventDefault(); invoke("cancel_tts_download"); } }, tr("Stop")));
     } else if (v.ready || v.custom) {
-      extra.push(el("button", { class: "icon-only danger", type: "button", title: v.custom ? `Remove ${v.name}` : `Delete ${v.name}'s download`, "aria-label": `Delete ${v.name}`,
+      extra.push(el("button", { class: "icon-only danger", type: "button", title: v.custom ? tr("Remove {name}", { name: v.name }) : tr("Delete {name}", { name: v.name }), "aria-label": tr("Delete {name}", { name: v.name }),
         onclick: async (e) => { e.preventDefault(); await invoke("delete_tts", { id: v.id }).catch((err) => showError(page, err)); await refreshPrefs(); showReadingSettings(); } }, svg("trash", 16)));
     } else {
-      extra.push(el("button", { class: "pill", type: "button", disabled: !!status.downloading, onclick: (e) => { e.preventDefault(); getVoice(v); } }, `Download (${size})`));
+      extra.push(el("button", { class: "pill", type: "button", disabled: !!status.downloading, onclick: (e) => { e.preventDefault(); getVoice(v); } }, tr("Download ({size})", { size: size })));
     }
-    const row = pick(on, `${v.name}${v.recommended ? " (recommended)" : ""}`, `${voiceAbout(v)}${v.custom ? " · Added by you" : ""}`, async () => {
+    const row = pick(on, `${v.name}${v.recommended ? tr(" (recommended)") : ""}`, `${voiceAbout(v)}${v.custom ? tr(" · Added by you") : ""}`, async () => {
       if (!v.ready) return getVoice(v);
       await saveReading({ voice: v.id, natural: true });
       showReadingSettings();
@@ -1815,25 +1815,25 @@ async function showReadingSettings(message) {
       const primary = languageInfo?.primary ?? "en";
       if (v.custom || !v.langs?.length || v.langs.includes(primary)) {
         await saveReading({ voice: v.id, natural: true });
-        if (view.kind === "reading-settings") showReadingSettings(`${v.name} is ready, and reads from now on.`);
+        if (view.kind === "reading-settings") showReadingSettings(tr("{name} is ready, and reads from now on.", { name: v.name }));
       } else if (view.kind === "reading-settings") {
         await refreshPrefs();
-        showReadingSettings(`${v.name} is ready, and reads ${v.langs.map((l) => languageName(l)).join(" and ")} from now on.`);
+        showReadingSettings(tr("{name} is ready, and reads {1} from now on.", { name: v.name, "1": trList(v.langs.map((l) => languageName(l))) }));
       }
     } catch (e) {
       if (view.kind === "reading-settings") showReadingSettings(String(e));
     }
   }
-  page.append(el("h2", {}, "Voice"), group);
+  page.append(el("h2", {}, tr("Voice")), group);
   if (others.childElementCount) {
-    page.append(el("details", { class: "more-voices" }, el("summary", {}, `Voices for other languages (${others.childElementCount})`),
-      el("p", { class: "hint" }, "For reading translations and notes in those languages. A downloaded voice reads its language; your own language keeps the voice chosen above."), others));
+    page.append(el("details", { class: "more-voices" }, el("summary", {}, tr("Other languages ({childElementCount})", { childElementCount: others.childElementCount })),
+      el("p", { class: "hint" }, tr("For translations and notes in those languages. Your own language keeps the voice above.")), others));
   }
   const langs = await languageData();
-  if (status?.supported && langs.chosen.length > 1) page.append(el("h2", {}, "Voice for each language"), voiceForLanguages(page, status, langs));
+  if (status?.supported && langs.chosen.length > 1) page.append(el("h2", {}, tr("Voice for each language")), voiceForLanguages(page, status, langs));
   if (status?.supported) {
-    page.append(el("p", { class: "hint" }, "Natural voices run on this device, offline, once downloaded. Choose the system's voice to read without one."));
-    page.append(el("h2", {}, "Add a voice"), addVoiceForm(page, !!status.downloading));
+    page.append(el("p", { class: "hint" }, tr("Natural voices run offline once downloaded. Choose the system voice to read without one.")));
+    page.append(el("h2", {}, tr("Add a voice")), addVoiceForm(page, !!status.downloading));
   }
   main.replaceChildren(page);
 }
@@ -1841,34 +1841,34 @@ async function showReadingSettings(message) {
 /// Adding a voice from sherpa-onnx's collection: its download address or its file, and what to call it.
 function addVoiceForm(page, busy) {
   const COLLECTION = "https://k2-fsa.github.io/sherpa/onnx/tts/all/";
-  const name = el("input", { type: "text", maxlength: "60", placeholder: "Mia", "aria-label": "Name" });
-  const language = el("input", { type: "text", maxlength: "40", placeholder: "Australian English", list: "voice-languages", "aria-label": "Language" });
+  const name = el("input", { type: "text", maxlength: "60", placeholder: tr("Mia"), "aria-label": tr("Name") });
+  const language = el("input", { type: "text", maxlength: "40", placeholder: tr("Australian English"), list: "voice-languages", "aria-label": tr("Language") });
   const languages = el("datalist", { id: "voice-languages" },
-    ["British English", "US English", "Australian English", "Chinese English", "Chinese (Mandarin)", "Arabic", "French", "Hindi", "Spanish", "Turkish", "Welsh"]
+    [tr("British English"), tr("US English"), tr("Australian English"), tr("Chinese English"), tr("Chinese (Mandarin)"), tr("Arabic"), tr("French"), tr("Hindi"), tr("Spanish"), tr("Turkish"), tr("Welsh")]
       .map((l) => el("option", { value: l })));
-  const gender = el("select", { "aria-label": "Gender" }, el("option", { value: "" }, "Not given"), el("option", { value: "Female" }, "Female"), el("option", { value: "Male" }, "Male"));
-  const url = el("input", { type: "url", placeholder: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/….tar.bz2", "aria-label": "Model download address" });
+  const gender = el("select", { "aria-label": tr("Gender") }, el("option", { value: "" }, tr("Not given")), el("option", { value: "Female" }, tr("Female")), el("option", { value: "Male" }, tr("Male")));
+  const url = el("input", { type: "url", placeholder: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/….tar.bz2", "aria-label": tr("Download address") });
   let file = "";
   const fileName = el("small", { class: "hint" });
-  const choose = el("button", { class: "pill", type: "button" }, "Choose a file…");
+  const choose = el("button", { class: "pill", type: "button" }, tr("Choose a file…"));
   choose.addEventListener("click", async () => {
-    const picked = await window.__TAURI__?.dialog?.open({ title: "Choose a voice model", filters: [{ name: "Voice model", extensions: ["bz2"] }] }).catch(() => null);
+    const picked = await window.__TAURI__?.dialog?.open({ title: tr("Choose a voice model"), filters: [{ name: tr("Voice model"), extensions: ["bz2"] }] }).catch(() => null);
     if (picked) { file = picked; url.value = ""; fileName.textContent = picked.split(/[\\/]/).pop(); }
   });
   url.addEventListener("input", () => { if (url.value) { file = ""; fileName.textContent = ""; } });
-  const speaker = el("input", { type: "number", min: "0", step: "1", value: "0", class: "mono", "aria-label": "Speaker number" });
+  const speaker = el("input", { type: "number", min: "0", step: "1", value: "0", class: "mono", "aria-label": tr("Speaker number") });
   const status = el("div", { class: "hint", role: "status" });
-  const add = el("button", { class: "primary pill", type: "button", disabled: busy }, "Add the voice");
+  const add = el("button", { class: "primary pill", type: "button", disabled: busy }, tr("Add voice"));
   add.addEventListener("click", async () => {
-    if (!name.value.trim()) return status.replaceChildren(el("span", { class: "danger" }, "Give the voice a name."));
-    if (!url.value.trim() && !file) return status.replaceChildren(el("span", { class: "danger" }, "Paste the model's download address, or choose its file."));
+    if (!name.value.trim()) return status.replaceChildren(el("span", { class: "danger" }, tr("Give the voice a name.")));
+    if (!url.value.trim() && !file) return status.replaceChildren(el("span", { class: "danger" }, tr("Paste the download address, or choose the file.")));
     add.disabled = true;
-    status.replaceChildren(el("span", { class: "spinner" }), " ", el("span", { "data-tts-progress": "new" }, "Starting…"), " Downloading and trying it…");
+    status.replaceChildren(el("span", { class: "spinner" }), " ", el("span", { "data-tts-progress": "new" }, tr("Starting…")), tr(" Downloading and testing…"));
     try {
       const voice = await invoke("add_tts_voice", { voice: { name: name.value.trim(), language: language.value.trim(), gender: gender.value,
         speaker: Math.max(0, Math.floor(Number(speaker.value) || 0)), url: url.value.trim(), file } });
       await saveReading({ voice: voice.id, natural: true });
-      showReadingSettings(`${voice.name} is added, and reads from now on.`);
+      showReadingSettings(tr("{name} is added and reads from now on.", { name: voice.name }));
     } catch (e) {
       add.disabled = false;
       status.replaceChildren(el("span", { class: "danger" }, String(e)));
@@ -1877,14 +1877,14 @@ function addVoiceForm(page, busy) {
   const field = (label, hint, ...input) => el("div", { class: "row stack-narrow" }, el("span", { class: "label" }, label, hint ? el("small", {}, hint) : null), ...input);
   const wide = (label, hint, input) => el("div", { class: "row column" }, el("span", { class: "label" }, label, hint ? el("small", {}, hint) : null), input);
   return el("div", { class: "group add-voice" },
-    el("div", { class: "row" }, el("span", { class: "label" }, "From the sherpa-onnx collection",
-      el("small", {}, "Listen to the voices there. On a model's page, copy its download address, or download its .tar.bz2 file. A model with several speakers lists their numbers.")),
-    el("button", { class: "pill", type: "button", onclick: () => invoke("open_link", { url: COLLECTION }).catch(() => window.open(COLLECTION)) }, "Open the collection")),
-    wide("Model", "Its download address, or its file", el("div", { class: "add-voice-model" }, url, el("span", { class: "or" }, "or"), choose, fileName)),
-    field("Speaker", "0 for a model with one voice", speaker),
-    field("Name", null, name),
-    field("Language", "As you'd like it shown", language, languages),
-    field("Gender", null, gender),
+    el("div", { class: "row" }, el("span", { class: "label" }, tr("From the sherpa-onnx collection"),
+      el("small", {}, tr("Listen to the voices there. Copy a model's download address, or download its .tar.bz2 file. Multi-speaker models list speaker numbers."))),
+    el("button", { class: "pill", type: "button", onclick: () => invoke("open_link", { url: COLLECTION }).catch(() => window.open(COLLECTION)) }, tr("Open collection"))),
+    wide(tr("Model"), tr("Download address or file"), el("div", { class: "add-voice-model" }, url, el("span", { class: "or" }, "or"), choose, fileName)),
+    field(tr("Speaker"), tr("0 for a single-voice model"), speaker),
+    field(tr("Name"), null, name),
+    field(tr("Language"), tr("Display name"), language, languages),
+    field(tr("Gender"), null, gender),
     el("div", { class: "row" }, el("span", { class: "label" }, status), add));
 }
 
@@ -1899,9 +1899,9 @@ function voiceForLanguages(page, status, langs) {
     const speakers = status.voices.filter((v) => v.ready && v.langs?.includes(code));
     // Left to itself: the main voice when it speaks the language, else the first downloaded voice that does.
     const automatic = prefs.natural_voice ? (main?.ready && main.langs?.includes(code) ? main : speakers[0]) : null;
-    const select = el("select", { "aria-label": `Voice for ${name(code)}` },
-      el("option", { value: "" }, automatic ? `${automatic.name}${automatic === main ? " (the main voice)" : ""}` : "The system's voice"),
-      automatic ? el("option", { value: "system", selected: set === "system" }, "The system's voice") : null,
+    const select = el("select", { "aria-label": tr("Voice for {code}", { code: name(code) }) },
+      el("option", { value: "" }, automatic ? `${automatic.name}${automatic === main ? tr(" (the main voice)") : ""}` : tr("System voice")),
+      automatic ? el("option", { value: "system", selected: set === "system" }, tr("System voice")) : null,
       speakers.filter((v) => v !== automatic).map((v) => el("option", { value: v.id, selected: set === v.id }, `${v.name} · ${voiceAbout(v)}`)));
     select.addEventListener("change", async () => {
       try {
@@ -1910,11 +1910,11 @@ function voiceForLanguages(page, status, langs) {
         if (select.value) prefs.voice_for[code] = select.value; else delete prefs.voice_for[code];
       } catch (e) { showError(page, e); }
     });
-    const none = !speakers.length ? " No downloaded natural voice speaks it yet." : "";
+    const none = !speakers.length ? tr(" No downloaded natural voice speaks it.") : "";
     group.append(el("div", { class: "row stack-narrow" }, el("span", { class: "label" }, name(code),
-      el("small", {}, `For notes and meetings in ${name(code)}.${none}`)), select));
+      el("small", {}, tr("For notes and meetings in {code}.{none}", { code: name(code), none: none }))), select));
   }
-  return el("div", {}, group, el("p", { class: "hint" }, "A note or meeting is in your primary language unless you choose another for it, beside its status."));
+  return el("div", {}, group, el("p", { class: "hint" }, tr("Notes and meetings use your primary language unless you pick another beside their status.")));
 }
 
 async function refreshPrefs() {
