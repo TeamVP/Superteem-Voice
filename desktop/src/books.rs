@@ -2,8 +2,12 @@
 //! stay where they are, so a note can be in more than one book and removing it from one keeps the note.
 //! `parts` groups those notes under headings such as "Book 1" and "Chapter 2". A book without parts is
 //! still a flat list.
+//!
+//! Books are rows in the vault (vault.rs), as are where reading aloud stopped and which bookmarks a book
+//! shows. A book's own files (its cover, pictures, register) are sealed files in `books/<id>.files/`.
 
-use crate::{library, notes};
+use crate::{library, notes, vault};
+use rusqlite::Connection;
 use include_dir::{include_dir, Dir};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -264,7 +268,7 @@ pub fn file_problems(id: &str) -> Result<Vec<String>, String> {
     let book = load(id)?;
     let mut problems = Vec::new();
     for f in &book.files {
-        let Ok(bytes) = file_path(id, &f.name).and_then(|p| std::fs::read(p).map_err(|e| e.to_string())) else {
+        let Ok(bytes) = file_path(id, &f.name).and_then(|p| crate::sealed::read(&p)) else {
             problems.push(format!("{} is missing.", f.name));
             continue;
         };
@@ -337,12 +341,36 @@ fn dir() -> PathBuf {
     library::data_dir().join("books")
 }
 
+const GONE: &str = "That book no longer exists.";
+
+/// Book ids come from the page and name the book's folder, so only a bare name is accepted.
+fn check_id(id: &str) -> Result<(), String> {
+    if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') { Ok(()) } else { Err(GONE.into()) }
+}
+
+/// Where a book was kept before the vault, and where its own files still are (`<id>.files/` beside it).
 fn path(id: &str) -> Result<PathBuf, String> {
-    if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        Ok(dir().join(format!("{id}.json")))
-    } else {
-        Err("That book no longer exists.".into())
-    }
+    check_id(id)?;
+    Ok(dir().join(format!("{id}.json")))
+}
+
+/// A book, read through a connection already in hand.
+pub fn get(conn: &Connection, id: &str) -> Result<Book, String> {
+    check_id(id)?;
+    let mut book: Book = vault::get_doc(conn, "book", id, "").ok_or(GONE)?;
+    book.id = id.to_string();
+    align(&mut book);
+    Ok(book)
+}
+
+fn put(conn: &Connection, book: &Book) -> Result<(), String> {
+    check_id(&book.id)?;
+    vault::put_doc(conn, "book", &book.id, "", book)
+}
+
+/// Every book in the vault.
+fn all_in(conn: &Connection) -> Vec<Book> {
+    vault::doc_names_of(conn, "book").into_iter().filter_map(|id| get(conn, &id).ok()).collect()
 }
 
 fn title_of(book: &Book) -> String {
@@ -350,10 +378,7 @@ fn title_of(book: &Book) -> String {
 }
 
 pub fn load(id: &str) -> Result<Book, String> {
-    let mut book: Book = library::read_json(&path(id)?).map_err(|_| "That book no longer exists.".to_string())?;
-    book.id = id.to_string();
-    align(&mut book);
-    Ok(book)
+    vault::with(|conn| get(conn, id))
 }
 
 /// Reading order follows the parts. A note listed only in `notes` stays at the end, so adding one
@@ -397,11 +422,10 @@ fn drop_note(book: &mut Book, note: &str) {
 
 fn write(book: &mut Book, touch: bool) -> Result<(), String> {
     align(book);
-    std::fs::create_dir_all(dir()).map_err(|e| e.to_string())?;
     if touch {
         book.updated = library::now();
     }
-    library::write_json(&path(&book.id)?, book)
+    vault::with(|conn| put(conn, book))
 }
 
 pub fn create(title: String) -> Result<String, String> {
@@ -598,22 +622,18 @@ pub struct BookmarkView {
     pub hidden_authors: Vec<String>,
 }
 
-fn view_path(id: &str) -> Result<PathBuf, String> {
-    Ok(path(id)?.with_extension("marks-shown.json"))
-}
-
 pub fn bookmark_view(id: &str) -> BookmarkView {
-    view_path(id).ok().and_then(|p| library::read_json(&p).ok()).unwrap_or_default()
+    if check_id(id).is_err() {
+        return BookmarkView::default();
+    }
+    vault::doc("book-view", id, "")
 }
 
 pub fn set_bookmark_view(id: &str, view: BookmarkView) -> Result<(), String> {
-    load(id)?;
-    let file = view_path(id)?;
-    if view == BookmarkView::default() {
-        let _ = std::fs::remove_file(file);
-        return Ok(());
-    }
-    library::write_json(&file, &view)
+    vault::write(|conn| {
+        get(conn, id)?;
+        if view == BookmarkView::default() { vault::drop_doc(conn, "book-view", id, "") } else { vault::put_doc(conn, "book-view", id, "", &view) }
+    })
 }
 
 /// Adds a note at the end, once.
@@ -660,26 +680,19 @@ pub fn reorder(id: &str, order: Vec<String>) -> Result<(), String> {
 pub fn delete(id: &str) -> Result<(), String> {
     let book = load(id)?;
     reading_only(&book)?;
-    let _ = std::fs::remove_file(place_path(id)?);
-    let _ = std::fs::remove_file(view_path(id)?);
+    vault::write(|conn| {
+        for kind in ["book", "book-place", "book-view"] {
+            vault::drop_doc(conn, kind, id, "")?;
+        }
+        Ok(())
+    })?;
     let _ = std::fs::remove_dir_all(files_dir(id)?);
-    std::fs::remove_file(path(id)?).map_err(|e| e.to_string())
+    Ok(())
 }
 
+/// Every book; none while the vault is shut.
 fn all() -> Vec<Book> {
-    std::fs::read_dir(dir())
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| {
-            let p = e.path();
-            let id = p.file_name()?.to_str()?.strip_suffix(".json")?.to_string();
-            if id.contains('.') {
-                return None;
-            }
-            load(&id).ok()
-        })
-        .collect()
+    vault::with(|conn| Ok(all_in(conn))).unwrap_or_default()
 }
 
 /// Every book, newest change first. With a query, those whose title matches.
@@ -838,22 +851,17 @@ pub fn file_path(id: &str, file: &str) -> Result<PathBuf, String> {
     Ok(parts.iter().fold(files_dir(id)?, |dir, part| dir.join(part)))
 }
 
-fn place_path(id: &str) -> Result<PathBuf, String> {
-    Ok(path(id)?.with_extension("listened.json"))
-}
-
 pub fn listen_place(id: &str) -> Option<ListenPlace> {
-    let place: ListenPlace = library::read_json(&place_path(id).ok()?).ok()?;
+    check_id(id).ok()?;
+    let place: ListenPlace = vault::doc("book-place", id, "");
     (!place.note.is_empty()).then_some(place)
 }
 
 /// Keeps where reading aloud stopped, in place of the last; `None` forgets it.
 pub fn set_listen_place(id: &str, place: Option<ListenPlace>) -> Result<(), String> {
     let book = load(id)?;
-    let file = place_path(id)?;
     let Some(mut place) = place else {
-        let _ = std::fs::remove_file(file);
-        return Ok(());
+        return vault::with(|conn| vault::drop_doc(conn, "book-place", id, ""));
     };
     if !book.notes.contains(&place.note) {
         return Err("That chapter isn't in this book.".into());
@@ -869,7 +877,7 @@ pub fn set_listen_place(id: &str, place: Option<ListenPlace>) -> Result<(), Stri
     if place.created == 0 {
         place.created = library::now();
     }
-    library::write_json(&file, &place)
+    vault::save_doc("book-place", id, "", &place)
 }
 
 /// Takes a deleted note out of every book it was in. A book kept for reading holds onto its chapters.
@@ -884,7 +892,11 @@ pub fn forget_note(note: &str) {
 
 /// Copies the example book into this device's library, and stamps it with now so it shows as just
 /// added. `resource_dir` is unused: the book is compiled in, which is the only place Android can read it.
+/// Waits for the vault: while it's shut nothing is added, and it's tried again the next time it opens.
 pub fn install_example(_resource_dir: Option<&std::path::Path>) {
+    if !vault::is_open() {
+        return;
+    }
     // A newer copy than the one installed, by the book's own version, replaces it.
     let installed = load(EXAMPLE_ID).map(|b| b.version).unwrap_or(0);
     if crate::prefs::load().example_books >= EXAMPLE_BOOK && installed >= EXAMPLE_BOOK {
@@ -905,22 +917,14 @@ fn install_bundled(now: u64) -> Result<(), String> {
     book.created = now;
     book.updated = now;
     let notes_dir = EXAMPLE.get_dir("notes").ok_or("The example book is missing.")?;
-    let notes_dst = library::data_dir().join("notes");
-    std::fs::create_dir_all(&notes_dst).map_err(|e| e.to_string())?;
+    let mut chapters = Vec::new();
     for file in notes_dir.files() {
-        let Some(name) = file.path().file_name().and_then(|n| n.to_str()) else { continue };
-        if !name.ends_with(".json") {
-            continue;
-        }
-        // A newer copy of the book replaces its notes: they are only read, so nothing of the person's is lost
-        // (their bookmarks are kept beside each note).
-        let dest = notes_dst.join(name);
-        let mut note: serde_json::Value = serde_json::from_slice(file.contents()).map_err(|e| e.to_string())?;
-        if let Some(obj) = note.as_object_mut() {
-            obj.insert("created".into(), serde_json::json!(now));
-            obj.insert("updated".into(), serde_json::json!(now));
-        }
-        library::write_json(&dest, &note)?;
+        let Some(id) = file.path().file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".json")) else { continue };
+        let mut note: notes::Note = serde_json::from_slice(file.contents()).map_err(|e| e.to_string())?;
+        note.id = id.to_string();
+        note.created = now;
+        note.updated = now;
+        chapters.push(note);
     }
     // The book's own files (its cover and pictures), in their folders, in place of any before.
     if let Some(files) = EXAMPLE.get_dir("files") {
@@ -928,23 +932,161 @@ fn install_bundled(now: u64) -> Result<(), String> {
         let _ = std::fs::remove_dir_all(&dest);
         copy_bundled(files, files.path(), &dest)?;
     }
-    let book_file = library::data_dir().join("books").join(format!("{EXAMPLE_ID}.json"));
-    std::fs::create_dir_all(book_file.parent().unwrap()).map_err(|e| e.to_string())?;
-    library::write_json(&book_file, &book)
+    // A newer copy of the book replaces its notes: they are only read, so nothing of the person's is lost
+    // (their bookmarks are kept apart from each note's text).
+    vault::write(|conn| {
+        for note in &chapters {
+            notes::put(conn, note)?;
+        }
+        put(conn, &book)
+    })
 }
 
-/// Writes a compiled-in folder's files under `dest`, by where they are below `root`.
+/// Writes a compiled-in folder's files under `dest`, by where they are below `root`, sealed like the rest.
 fn copy_bundled(dir: &Dir<'_>, root: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
     for file in dir.files() {
         let rel = file.path().strip_prefix(root).map_err(|e| e.to_string())?;
         let to = dest.join(rel);
         std::fs::create_dir_all(to.parent().unwrap_or(dest)).map_err(|e| e.to_string())?;
-        std::fs::write(&to, file.contents()).map_err(|e| e.to_string())?;
+        crate::sealed::write(&to, file.contents())?;
     }
     for sub in dir.dirs() {
         copy_bundled(sub, root, dest)?;
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Books kept as files, before the vault
+
+/// What bringing books in from a folder did.
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct Brought {
+    pub added: usize,
+    /// Books the vault already had, left as they are there.
+    pub had: usize,
+    pub failed: Vec<String>,
+}
+
+/// Brings the books kept as files in `folder` (`<id>.json`, with `<id>.listened.json` and
+/// `<id>.marks-shown.json` beside it) into the vault. With `consume`, as for this device's own books folder,
+/// each book's files are deleted once it's safely in, or moved to `before-vault` where the vault isn't
+/// sealed; its own files (`<id>.files/`) stay where they are and are sealed in place. Otherwise the folder
+/// is only read, and a new book's own files are copied in, sealed.
+pub fn bring_in_folder(conn: &Connection, folder: &std::path::Path, consume: bool) -> Brought {
+    let mut out = Brought::default();
+    let entries: Vec<PathBuf> = std::fs::read_dir(folder).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    // One transaction, a step for each book, saved once; files are removed only after (see notes.rs).
+    let Ok(tx) = conn.unchecked_transaction() else { return out };
+    let mut landed: Vec<(String, bool, PathBuf, Vec<PathBuf>)> = Vec::new();
+    for file in entries {
+        let Some(id) = file.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".json")).map(str::to_string) else { continue };
+        // `<id>.listened.json` and the like come with their book.
+        if id.contains('.') || check_id(&id).is_err() {
+            continue;
+        }
+        let Ok(mut book) = library::read_json::<Book>(&file) else {
+            out.failed.push(id);
+            continue;
+        };
+        book.id = id.clone();
+        let extras = [("book-place", file.with_extension("listened.json")), ("book-view", file.with_extension("marks-shown.json"))];
+        let step = notes::step(&tx, || -> Result<bool, String> {
+            let known = vault::get_doc::<serde_json::Value>(&tx, "book", &id, "").is_some();
+            if !known {
+                put(&tx, &book)?;
+                for (kind, path) in &extras {
+                    if let Ok(value) = library::read_json::<serde_json::Value>(path) {
+                        vault::put_doc(&tx, kind, &id, "", &value)?;
+                    }
+                }
+                // Read back before anything is removed.
+                if get(&tx, &id)?.title != book.title {
+                    return Err("it didn't read back the same".into());
+                }
+            }
+            Ok(known)
+        });
+        match step {
+            Ok(known) => {
+                let files: Vec<PathBuf> = std::iter::once(file.clone()).chain(extras.iter().map(|(_, p)| p.clone())).filter(|p| p.exists()).collect();
+                landed.push((id, known, file.clone(), files));
+            }
+            Err(why) => {
+                eprintln!("The book {id} wasn't brought into the vault: {why}");
+                out.failed.push(id);
+            }
+        }
+    }
+    if let Err(why) = tx.commit() {
+        eprintln!("The books weren't brought into the vault: {why}");
+        out.failed.extend(landed.into_iter().map(|(id, ..)| id));
+        return out;
+    }
+    for (id, known, file, files) in landed {
+        if known {
+            out.had += 1;
+        } else {
+            out.added += 1;
+        }
+        if !consume {
+            if !known {
+                if let Ok(to) = files_dir(&id) {
+                    copy_own_files(&file.with_extension("files"), &to);
+                }
+            }
+            continue;
+        }
+        for path in files {
+            let gone = if vault::SEALED {
+                std::fs::remove_file(&path)
+            } else {
+                let aside = folder.join("before-vault");
+                std::fs::create_dir_all(&aside).and_then(|_| std::fs::rename(&path, aside.join(path.file_name().unwrap_or_default())))
+            };
+            if let Err(why) = gone {
+                eprintln!("{} is in the vault but its file is still there: {why}", path.display());
+            }
+        }
+    }
+    out
+}
+
+/// Copies a book's own files, folders and all, from elsewhere into its folder here, sealed as written.
+fn copy_own_files(from: &std::path::Path, to: &std::path::Path) {
+    for entry in std::fs::read_dir(from).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let target = to.join(entry.file_name());
+        if path.is_dir() {
+            copy_own_files(&path, &target);
+            continue;
+        }
+        if target.exists() {
+            continue;
+        }
+        let copied = crate::sealed::read(&path).and_then(|bytes| {
+            std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
+            crate::sealed::write(&target, &bytes)
+        });
+        if let Err(why) = copied {
+            eprintln!("{} wasn't brought in: {why}", path.display());
+        }
+    }
+}
+
+/// Brings this device's books still kept as files into the vault, as when this version first runs.
+pub fn bring_in_files(conn: &Connection) -> Brought {
+    bring_in_folder(conn, &dir(), true)
+}
+
+/// How many books are still kept as files in this device's books folder.
+pub fn files_waiting() -> usize {
+    std::fs::read_dir(dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".json")).is_some_and(|id| !id.contains('.') && check_id(id).is_ok()))
+        .count()
 }
 
 /// The example book's version, which is its `version`: what changed in each is in its `changes`.

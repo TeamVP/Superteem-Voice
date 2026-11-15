@@ -2,10 +2,9 @@
 //! and rewrites of it. A rewrite becomes a new version of the note (see notes.rs), never a silent change.
 //! The conversation is kept beside the note as `<id>.chat.json`.
 
-use crate::{library, notes};
+use crate::{library, notes, vault};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::path::PathBuf;
 use stv_core::analysis::{Model, CANCELLED};
 
 /// The job name a chat answer waits under in the analysis queue.
@@ -49,29 +48,18 @@ pub struct Chat {
     pub messages: Vec<Message>,
 }
 
-fn path(id: &str) -> Result<PathBuf, String> {
-    notes::load(id)?;
-    Ok(library::data_dir().join("notes").join(format!("{id}.chat.json")))
-}
-
 pub fn load(id: &str) -> Chat {
-    path(id).ok().and_then(|p| library::read_json(&p).ok()).unwrap_or_default()
+    vault::doc("chat", id, "")
 }
 
 fn save(id: &str, chat: &Chat) -> Result<(), String> {
-    let file = path(id)?;
-    let text = serde_json::to_string_pretty(chat).map_err(|e| e.to_string())?;
-    let partial = file.with_extension("json.tmp");
-    std::fs::write(&partial, text).map_err(|e| e.to_string())?;
-    std::fs::rename(&partial, &file).map_err(|e| e.to_string())
+    notes::load(id)?;
+    vault::save_doc("chat", id, "", chat)
 }
 
 pub fn clear(id: &str) -> Result<(), String> {
-    let file = path(id)?;
-    if file.exists() {
-        std::fs::remove_file(file).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    notes::load(id)?;
+    vault::forget_doc("chat", id, "")
 }
 
 /// Adds what the person said, to be answered by `answer`.

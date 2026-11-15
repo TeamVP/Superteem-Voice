@@ -12,17 +12,33 @@ const VERSION: u8 = 1;
 const FILE_HEADER: usize = 5;
 const MAX_RECORD: usize = 64 * 1024;
 
+/// Where a journal's bytes go: a file, or something that wraps them on the way to one.
+pub trait Sink: Write + Send {
+    /// Makes everything written so far durable.
+    fn sync(&mut self) -> io::Result<()>;
+}
+
+impl Sink for File {
+    fn sync(&mut self) -> io::Result<()> {
+        self.sync_data()
+    }
+}
+
 pub struct JournalWriter {
-    out: BufWriter<File>,
+    out: BufWriter<Box<dyn Sink>>,
 }
 
 impl JournalWriter {
     pub fn create(path: &Path) -> io::Result<Self> {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-        file.write_all(MAGIC)?;
-        file.write_all(&[VERSION])?;
-        file.sync_all()?;
-        Ok(Self { out: BufWriter::new(file) })
+        Self::to(Box::new(OpenOptions::new().write(true).create_new(true).open(path)?))
+    }
+
+    /// Starts a journal on a sink the caller opened.
+    pub fn to(mut sink: Box<dyn Sink>) -> io::Result<Self> {
+        sink.write_all(MAGIC)?;
+        sink.write_all(&[VERSION])?;
+        sink.sync()?;
+        Ok(Self { out: BufWriter::new(sink) })
     }
 
     pub fn append(&mut self, arrival_us: u64, frame: &[u8]) -> io::Result<()> {
@@ -42,7 +58,7 @@ impl JournalWriter {
     /// Makes everything appended so far durable. The capture service calls this at least once a second.
     pub fn sync(&mut self) -> io::Result<()> {
         self.out.flush()?;
-        self.out.get_ref().sync_data()
+        self.out.get_mut().sync()
     }
 }
 
@@ -62,12 +78,32 @@ pub struct Recovered {
 
 /// Reads every intact record, stopping at the first torn or corrupt one.
 pub fn read(path: &Path) -> io::Result<Recovered> {
-    let data = fs::read(path)?;
-    if data.len() < FILE_HEADER || &data[..4] != MAGIC || data[4] != VERSION {
+    parse(&fs::read(path)?)
+}
+
+/// Whether these bytes start a journal.
+pub fn is_journal(data: &[u8]) -> bool {
+    data.len() >= FILE_HEADER && &data[..4] == MAGIC && data[4] == VERSION
+}
+
+/// `read`, for a journal already in memory.
+pub fn parse(data: &[u8]) -> io::Result<Recovered> {
+    if !is_journal(data) {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "not a journal file"));
     }
+    let (records, used) = parse_records(&data[FILE_HEADER..]);
+    let pos = FILE_HEADER + used;
+    Ok(Recovered { records, valid_bytes: pos as u64, had_bad_tail: pos != data.len() })
+}
+
+/// The header every journal starts with, which `parse_records` expects to have been taken off.
+pub const HEADER_BYTES: usize = FILE_HEADER;
+
+/// The intact records at the start of `data`, which begins at a record, and how many bytes they took.
+/// What follows is a record still being written, or a torn or corrupt one.
+pub fn parse_records(data: &[u8]) -> (Vec<Record>, usize) {
     let mut records = Vec::new();
-    let mut pos = FILE_HEADER;
+    let mut pos = 0usize;
     while let Some(head) = data.get(pos..pos + 8) {
         let len = u32::from_le_bytes(head[..4].try_into().unwrap()) as usize;
         let crc = u32::from_le_bytes(head[4..].try_into().unwrap());
@@ -78,13 +114,10 @@ pub fn read(path: &Path) -> io::Result<Recovered> {
         if crc32fast::hash(body) != crc {
             break;
         }
-        records.push(Record {
-            arrival_us: u64::from_le_bytes(body[..8].try_into().unwrap()),
-            frame: body[8..].to_vec(),
-        });
+        records.push(Record { arrival_us: u64::from_le_bytes(body[..8].try_into().unwrap()), frame: body[8..].to_vec() });
         pos += 8 + len;
     }
-    Ok(Recovered { records, valid_bytes: pos as u64, had_bad_tail: pos != data.len() })
+    (records, pos)
 }
 
 /// Reads the records written since byte `from` of a journal that is still being written, for following a

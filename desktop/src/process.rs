@@ -12,7 +12,7 @@ use std::fs;
 use std::path::Path;
 use stv_core::attribute::{self, Config};
 use stv_core::merge::{self, Utterance};
-use stv_core::{export, pipeline};
+use stv_core::pipeline;
 
 /// Every source is processed at this rate, whatever it was captured at.
 pub const RATE: u32 = 16_000;
@@ -164,7 +164,7 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     let mut entries: Vec<_> = fs::read_dir(dir).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).collect();
     entries.sort();
     for path in entries.iter().filter(|p| p.extension().is_some_and(|e| e == "stvj")) {
-        let source = pipeline::load_source(path, RATE).map_err(|e| format!("{}: {e}", path.display()))?;
+        let source = crate::sealed::load_source(path, RATE)?;
         if !source.pcm.is_empty() {
             names.push(path.file_stem().unwrap().to_string_lossy().into_owned());
             sources.push(source);
@@ -201,7 +201,7 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     // One voice heard on several microphones is one line, transcribed from the clearest of them.
     let utterances: Vec<Utterance> = merge::utterances(&attribution.segments, &levels);
     for (name, source) in names.iter().zip(&sources) {
-        export::write_wav(&dir.join(format!("{name}.wav")), &source.pcm, RATE).map_err(|e| e.to_string())?;
+        crate::sealed::write_wav(&dir.join(format!("{name}.wav")), &source.pcm, RATE)?;
     }
 
     let name_of = |i: Option<usize>| i.map_or("Unknown speaker".to_string(), |i| names[i].clone());
@@ -280,7 +280,7 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
         })).collect::<Vec<_>>(),
     });
     let text = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
-    fs::write(dir.join("session.json"), text).map_err(|e| e.to_string())?;
+    crate::sealed::write(&dir.join("session.json"), text.as_bytes())?;
 
     progress("Recognising voices", 0.95);
     let mut clips: Vec<script::Clip> = utterances
@@ -370,7 +370,7 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
     progress("Listening for key phrases", 0.96);
     let streams: Vec<(String, &[i16])> = names.iter().cloned().zip(sources.iter().map(|s| s.pcm.as_slice())).collect();
     let phrases = keyphrases::scan_session(&streams);
-    library::write_json(&dir.join(keyphrases::SESSION_FILE), &phrases)?;
+    library::seal_json(&dir.join(keyphrases::SESSION_FILE), &phrases)?;
     let mut marks: Vec<f64> = library::load_meta(dir).markers.iter().filter(|m| !m.removed).map(|m| m.at_s).collect();
     marks.extend(phrases.iter().filter(|h| !h.rejected && matches!(h.phrase.as_str(), "bookmark" | "action")).map(|h| h.start_s));
 
@@ -412,7 +412,7 @@ pub fn process_session(dir: &Path, progress: &dyn Fn(&str, f32)) -> Result<Strin
         meta.set_langs(item_languages);
     }
     name_from_prints(&mut meta, &segments, &line_voices);
-    library::write_json(&dir.join(voices::LINE_VOICES), &line_voices)?;
+    library::seal_json(&dir.join(voices::LINE_VOICES), &line_voices)?;
     library::save(dir, &meta, &segments)?;
 
     let outcome = transcription.map_or_else(|e| format!("transcription failed: {e}"), str::to_string);

@@ -755,7 +755,8 @@ mod imp {
 
     static DICTATION: Mutex<Option<Recorder>> = Mutex::new(None);
     /// Following the recording as it's written: where the next read starts, and the audio read but not taken.
-    static FOLLOW: Mutex<(u64, Vec<i16>)> = Mutex::new((0, Vec::new()));
+    /// Where the journal being dictated into has been read to, and the audio waiting to be taken.
+    static FOLLOW: Mutex<(Option<crate::sealed::Tail>, Vec<i16>)> = Mutex::new((None, Vec::new()));
     const PHONE: &str = "Phone microphone";
 
     pub fn dictate_start() -> Result<(), String> {
@@ -773,7 +774,7 @@ mod imp {
         match recorder::start(dir.clone(), &[device], false) {
             Ok(r) => {
                 *slot = Some(r);
-                *FOLLOW.lock().unwrap() = (0, Vec::new());
+                *FOLLOW.lock().unwrap() = (None, Vec::new());
                 Ok(())
             }
             Err(e) => {
@@ -798,14 +799,14 @@ mod imp {
             .map(|e| e.path())
             .find(|p| p.extension().is_some_and(|x| x == "stvj"))
             .ok_or("Nothing was recorded. Check Voice may use the microphone, in Settings.")?;
-        Ok(stv_core::pipeline::load_source(&journal, RATE).map_err(|e| e.to_string())?.pcm)
+        Ok(crate::sealed::load_source(&journal, RATE)?.pcm)
     }
 
     pub fn dictate_cancel() -> Result<(), String> {
         if let Ok(dir) = stop() {
             let _ = std::fs::remove_dir_all(dir);
         }
-        *FOLLOW.lock().unwrap() = (0, Vec::new());
+        *FOLLOW.lock().unwrap() = (None, Vec::new());
         Ok(())
     }
 
@@ -813,8 +814,7 @@ mod imp {
     fn follow(dir: &Path) {
         let Some(journal) = std::fs::read_dir(dir).ok().and_then(|d| d.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|x| x == "stvj"))) else { return };
         let mut follow = FOLLOW.lock().unwrap();
-        let Ok((records, next)) = stv_core::journal::read_since(&journal, follow.0) else { return };
-        follow.0 = next;
+        let Ok(records) = follow.0.get_or_insert_with(Default::default).more(&journal) else { return };
         for record in records {
             let Ok(frame) = stv_core::protocol::Frame::decode(&record.frame) else { continue };
             match frame.codec {
@@ -843,14 +843,14 @@ mod imp {
     /// wasn't (the vocabulary test) returns the whole recording.
     pub fn dictate_stop_audio() -> Result<Vec<i16>, String> {
         let dir = stop()?;
-        let followed = FOLLOW.lock().unwrap().0 > 0;
+        let followed = FOLLOW.lock().unwrap().0.as_ref().is_some_and(|tail| tail.started());
         let pcm = if followed {
             follow(&dir);
             Ok(std::mem::take(&mut FOLLOW.lock().unwrap().1))
         } else {
             recorded(&dir)
         };
-        *FOLLOW.lock().unwrap() = (0, Vec::new());
+        *FOLLOW.lock().unwrap() = (None, Vec::new());
         let _ = std::fs::remove_dir_all(&dir);
         pcm
     }

@@ -44,6 +44,21 @@ tauri-plugin-dialog = "2"
 # Memory and free disk space, to size the model's context and check a download fits.
 sysinfo = { version = "0.33", default-features = false, features = ["system", "disk"] }
 
+# The vault notes, books and everything written about them are kept in (vault.rs): one SQLite database. On
+# Windows it is SQLCipher, encrypted with a key only this person's Windows account, their recovery words or
+# their vault password can release; see the Windows section below. `backup` makes the sealed copies kept in
+# case the database is damaged.
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+# Wraps the vault key under a vault password (Argon2id, then AES-256-GCM), derives the database key from the
+# vault key, seals meeting files (sealed.rs), and writes the vault key as 24 recovery words.
+aes-gcm = "0.10"
+argon2 = "0.5"
+hkdf = "0.12"
+zeroize = "1"
+getrandom = "0.2"
+bip39 = "2"
+base64 = "0.22"
+
 # Android records in its Kotlin foreground service, so these are for Windows, the Mac and the iPhone.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 btleplug = "0.11"
@@ -75,8 +90,12 @@ opt-level = 2
 # models through sherpa-onnx (k2-fsa's own crate), offline. Its libraries are prebuilt DLLs installed beside
 # the app. Windows only for now.
 [target.'cfg(windows)'.dependencies]
-# The sandbox analyses run their model in (an AppContainer); see isolate.rs.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Isolation", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
+# SQLCipher in place of plain SQLite, with OpenSSL built from source and linked in (needs Perl and NASM; see
+# build-env.ps1). The other platforms keep plain SQLite until their key stores are wired up.
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
+# The sandbox analyses run their model in (an AppContainer); see isolate.rs. Cryptography is DPAPI, which
+# holds the vault key for this Windows account (vault.rs).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Security_Authorization", "Win32_Security_Isolation", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
 # Other apps' sound as meeting tracks (sources.rs): the per-app loopback and the list of apps playing.
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_Security", "Win32_Devices_FunctionDiscovery", "Win32_UI_Shell_PropertiesSystem", "Win32_Devices_Properties"] }
 windows-core = "0.61"

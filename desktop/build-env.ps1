@@ -174,4 +174,43 @@ if ($Android) {
     $env:GGML_FMA = 'ON'
     $env:GGML_F16C = 'ON'
     $env:GGML_AVX512 = 'OFF'
+    # The notes vault is SQLCipher, whose encryption is OpenSSL, built from source with the app. OpenSSL's
+    # build scripts are Perl, and the Perl that comes with Git can't run them, so Strawberry Perl is used:
+    # the one installed (as on GitHub's machines), or a portable copy fetched once. The folder has no
+    # spaces in its name, which OpenSSL's makefiles don't all allow for.
+    if (-not $env:OPENSSL_SRC_PERL) {
+        $tools = Join-Path $env:LOCALAPPDATA 'stv-build-tools'
+        $perl = @('C:\Strawberry\perl\bin\perl.exe', (Join-Path $tools 'perl\perl\bin\perl.exe')) | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if (-not $perl) {
+            New-Item -ItemType Directory -Force $tools | Out-Null
+            $zip = Join-Path $tools 'perl.zip'
+            curl.exe -sSfL --retry 3 'https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54001_64bit_UCRT/strawberry-perl-5.40.0.1-64bit-portable.zip' -o $zip
+            if ($LASTEXITCODE -ne 0) { throw 'Could not download Strawberry Perl, which builds OpenSSL for the notes vault' }
+            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+            if ($hash -ne '754F3E2A8E473DC68D1540C7802FB166A025F35EF18960C4564A31F8B5933907') { throw "Strawberry Perl has hash $hash" }
+            Expand-Archive $zip (Join-Path $tools 'perl') -Force
+            Remove-Item $zip
+            $perl = Join-Path $tools 'perl\perl\bin\perl.exe'
+        }
+        $env:OPENSSL_SRC_PERL = $perl
+    }
+    # With NASM, OpenSSL is built with its assembly, so the vault's AES uses the processor's own
+    # instructions (several times faster, and less battery) and not plain C.
+    if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+        $tools = Join-Path $env:LOCALAPPDATA 'stv-build-tools'
+        $nasm = Get-ChildItem (Join-Path $tools 'nasm') -Recurse -Filter nasm.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $nasm) {
+            New-Item -ItemType Directory -Force $tools | Out-Null
+            $zip = Join-Path $tools 'nasm.zip'
+            curl.exe -sSfL --retry 3 'https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/win64/nasm-2.16.03-win64.zip' -o $zip
+            if ($LASTEXITCODE -ne 0) { throw 'Could not download NASM, which builds OpenSSL''s assembly for the notes vault' }
+            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+            if ($hash -ne '3EE4782247BCB874378D02F7EAB4E294A84D3D15F3F6EE2DE2F47A46AA7226E6') { throw "NASM has hash $hash" }
+            Expand-Archive $zip (Join-Path $tools 'nasm') -Force
+            Remove-Item $zip
+            $nasm = Get-ChildItem (Join-Path $tools 'nasm') -Recurse -Filter nasm.exe | Select-Object -First 1
+        }
+        $env:PATH = "$($nasm.DirectoryName);$env:PATH"
+    }
+    $env:OPENSSL_RUST_USE_NASM = '1'
 }

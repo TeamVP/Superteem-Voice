@@ -27,6 +27,11 @@ pub fn init(sessions: PathBuf, data: PathBuf) {
     let _ = PATHS.set(Paths { sessions, data });
 }
 
+/// Whether `init` was called. Tests that never call it must not touch the person's own notes vault.
+pub fn initialised() -> bool {
+    PATHS.get().is_some()
+}
+
 fn env_dir(var: &str) -> PathBuf {
     std::env::var_os(var).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
 }
@@ -324,9 +329,15 @@ impl Meta {
     }
 }
 
+/// Reads a JSON file, sealed or plain.
 pub fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
-    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+    crate::sealed::read_json(path)
+}
+
+/// Writes a meeting's JSON file, sealed where files are. write_json is for what isn't sealed: this
+/// device's preferences and the like.
+pub fn seal_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    crate::sealed::write_json(path, value)
 }
 
 pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
@@ -351,13 +362,15 @@ pub fn has_meta(dir: &Path) -> bool {
 
 pub fn load_meta(dir: &Path) -> Meta {
     read_json(&dir.join(META)).unwrap_or_else(|_| {
+        // Sealed by a vault that isn't open here, as after starting an empty one: said, not shown as blank.
+        let locked = crate::sealed::is_sealed(&dir.join(META));
         let created = dir
             .file_name()
             .and_then(|n| n.to_str())
             .and_then(|n| n.strip_prefix("session-"))
             .and_then(|n| n.parse().ok())
             .unwrap_or(0);
-        Meta { title: "Untitled session".into(), created, ..Meta::default() }
+        Meta { title: if locked { "Locked meeting (from another vault)" } else { "Untitled session" }.into(), created, ..Meta::default() }
     })
 }
 
@@ -367,8 +380,15 @@ pub fn load_segments(dir: &Path) -> Vec<Segment> {
 
 /// Saves both files and regenerates the text exports that people open outside the app.
 pub fn save(dir: &Path, meta: &Meta, segments: &[Segment]) -> Result<(), String> {
-    write_json(&dir.join(META), meta)?;
-    write_json(&dir.join(TRANSCRIPT), &segments)?;
+    seal_json(&dir.join(META), meta)?;
+    seal_json(&dir.join(TRANSCRIPT), &segments)?;
+    // A sealed meeting has no readable copies in its folder: they would be the meeting in the clear.
+    if crate::sealed::is_sealed(&dir.join(TRANSCRIPT)) {
+        for name in crate::sealed::READABLE_COPIES {
+            let _ = fs::remove_file(dir.join(name));
+        }
+        return Ok(());
+    }
     let lines: Vec<Line> = segments
         .iter()
         .filter(|s| !s.text.is_empty() && s.in_script())
@@ -432,6 +452,10 @@ pub struct Summary {
 /// Sessions in `busy` are being recorded or processed, so they are not offered for processing.
 pub fn list(query: &str, busy: &[String]) -> Vec<Summary> {
     let query = query.trim().to_lowercase();
+    // While the vault is shut no meeting can be read, so none is listed as a blank.
+    if crate::sealed::shut() {
+        return Vec::new();
+    }
     let Ok(entries) = fs::read_dir(root()) else { return Vec::new() };
     let mut out = Vec::new();
     for dir in entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()) {
@@ -504,7 +528,7 @@ pub fn compact(dir: &Path) -> Result<u64, String> {
     let mut meta = load_meta(dir);
     if !meta.compacted {
         meta.compacted = true;
-        write_json(&dir.join(META), &meta)?;
+        seal_json(&dir.join(META), &meta)?;
     }
     let mut freed = 0;
     for file in audio_files(dir) {
@@ -569,7 +593,7 @@ pub fn delete_track(dir: &Path, stream: &str) -> Result<(), String> {
     meta.locked.retain(|k| k != stream);
     // A meeting not yet processed has no details or transcript to change.
     if has_meta(dir) {
-        write_json(&dir.join(META), &meta)?;
+        seal_json(&dir.join(META), &meta)?;
     }
     Ok(())
 }

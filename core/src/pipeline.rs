@@ -22,7 +22,11 @@ pub struct SourceTrack {
 }
 
 pub fn load_source(path: &Path, rate: u32) -> io::Result<SourceTrack> {
-    let recovered = journal::read(path)?;
+    source_from(journal::read(path)?, rate)
+}
+
+/// `load_source`, for a journal already read.
+pub fn source_from(recovered: journal::Recovered, rate: u32) -> io::Result<SourceTrack> {
     let mut frames: Vec<(u64, Frame)> = Vec::with_capacity(recovered.records.len());
     let mut duplicate_frames = 0;
     let mut newest = None;

@@ -62,6 +62,8 @@ const icon = {
   check: '<path d="M5 12l5 5 9-10"></path>',
   close: '<path d="M6 6l12 12M18 6L6 18"></path>',
   archive: '<path d="M3 5h18v4H3zM5 9v10h14V9M10 13h4"></path>',
+  // Lucide's lock.
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>',
   unarchive: '<path d="M3 5h18v4H3zM5 9v10h14V9M12 17v-6M9.5 13.5L12 11l2.5 2.5"></path>',
   trash: '<path d="M4 7h16M10 3h4M6 7l1 13h10l1-13M10 11v5M14 11v5"></path>',
   home: '<path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"></path>',
@@ -503,6 +505,9 @@ async function refreshItems() {
   ].sort((a, b) => b.when - a.when);
 
   itemsNav.replaceChildren();
+  // While the vault is shut there are no notes, books or meetings to list, only the way back in.
+  const shut = typeof vaultItem === "function" ? vaultItem() : null;
+  if (shut) itemsNav.append(shut);
   if (recording) {
     itemsNav.append(el("button", { class: "item" + (view.kind === "recorder" ? " active" : ""), onclick: () => showMeeting() },
       el("span", { class: "icon meeting" }, svg("wave", 16)),
@@ -516,7 +521,7 @@ async function refreshItems() {
       el("span", { class: "body" }, el("span", { class: "title" }, "Archive"), el("span", { class: "sub" }, `${archived} note${archived > 1 ? "s" : ""}`)))
     : null;
   if (!items.length) {
-    itemsNav.append(el("div", { class: "empty" }, query ? "Nothing matches." : "No notes or meetings yet. Start one above, or say “Hey Superteem”."));
+    if (!shut || query) itemsNav.append(el("div", { class: "empty" }, query ? "Nothing matches." : "No notes or meetings yet. Start one above, or say “Hey Superteem”."));
     if (archiveLink) itemsNav.append(archiveLink);
     return;
   }
@@ -646,11 +651,12 @@ function showHome() {
 /// Four things to make, two of them not built yet.
 function showNewHome() {
   const kinds = [
-    { name: "Note", sub: "Write or dictate a thought", icon: "pen", open: () => openNote(null) },
-    { name: "Meeting", sub: "Record and transcribe", icon: "wave", open: () => showMeeting() },
+    // While the vault is shut, these show the way back in: nothing could be saved.
+    { name: "Note", sub: "Write or dictate a thought", icon: "pen", open: vaultGate(() => openNote(null)) },
+    { name: "Meeting", sub: "Record and transcribe", icon: "wave", open: vaultGate(() => showMeeting()) },
     { name: "Call", sub: "Capture a phone call", icon: "phone" },
     { name: "Event", sub: "Notes for a talk or session", icon: "calendar" },
-    { name: "Book", sub: "Gather notes into one place", icon: "book", open: () => newBook(), wide: true },
+    { name: "Book", sub: "Gather notes into one place", icon: "book", open: vaultGate(() => newBook()), wide: true },
   ];
   const tiles = kinds.map((k) => el("button", {
     class: `new-tile${k.open ? "" : " soon"}${k.wide ? " wide" : ""}`, "aria-disabled": k.open ? null : "true",
@@ -680,6 +686,11 @@ function homeExtras() {
     hint?.after(el("p", { class: "just-updated" }, svg("check", 14), `Updated to ${u.version}`, " · ",
       el("button", { class: "link inline", onclick: () => invoke("open_link", { url: u.notes }).catch(() => {}) }, "What's new")));
   }).catch(() => {});
+  // The vault: the way back in when it's shut, what was moved into it, or a reminder to save the words.
+  refreshVault().then(() => {
+    const card = vaultCard();
+    if (card && view.kind === "home" && !main.querySelector(".vault-card")) main.querySelector(".home > .hint")?.after(card);
+  });
   // Once a note and a meeting are made, a suggestion to optimise, when it would change something.
   optimiseNudge().then((card) => { if (card && view.kind === "home") main.querySelector(".home")?.append(card); }).catch(() => {});
 }
@@ -3328,11 +3339,13 @@ function stopPlayback() {
 function makePlayer(session, duration, onTick) {
   const audios = new Map();
   const shifts = new Map(Object.entries(session.pending_offsets ?? {}));
+  // Where the vault seals files, a track comes through the app, which unseals only the stretch being played.
+  const sealedAudio = vault?.sealed ? (platform === "windows" || platform === "android" ? "http://stvaudio.localhost/" : "stvaudio://localhost/") : null;
   for (const [stream, path] of Object.entries(session.audio)) {
     const audio = new Audio();
-    // Read by Web Audio for lifting a track; the asset protocol allows it.
+    // Read by Web Audio for lifting a track; the asset protocol and the app's own both allow it.
     audio.crossOrigin = "anonymous";
-    audio.src = convertFileSrc(path);
+    audio.src = sealedAudio ? `${sealedAudio}${encodeURIComponent(session.id)}/${encodeURIComponent(stream)}.wav` : convertFileSrc(path);
     audio.preload = "auto";
     audio.preservesPitch = true;
     audio.playbackRate = playRate;
@@ -6244,6 +6257,11 @@ async function showSettings() {
       await invoke("save_prefs", { dictateManually: !on });
     }))];
 
+  // The vault: what's protected, and the ways back in.
+  await refreshVault();
+  const vaultSection = vault ? [el("h2", {}, "Vault"), el("div", { class: "group" },
+    linkRow("Vault", vaultSummary(), () => showVaultSettings(), { drop: true }))] : [];
+
   // Archived: how many notes are archived, and the way to them.
   const archivedSection = [el("h2", {}, "Archived"), el("div", { class: "group" },
     linkRow("Archive", archivedCount ? `${archivedCount} archived note${archivedCount === 1 ? "" : "s"}` : "Nothing archived", () => showArchive(), { drop: true }))];
@@ -6282,7 +6300,7 @@ async function showSettings() {
     el("div", { class: "row" }, el("span", { class: "label" }, "Recordings and notes", el("small", {}, "Kept on this device only.")),
       isDesktop() ? el("button", { class: "pill", onclick: () => invoke("open_folder", { id: null }) }, "Open folder") : null))];
 
-  for (const section of [about, phone, optimise, languages, listening, notesSection, archivedSection, meetings, transcription, analysis, voices, appearance, storage]) {
+  for (const section of [about, phone, optimise, languages, listening, notesSection, vaultSection, archivedSection, meetings, transcription, analysis, voices, appearance, storage]) {
     page.append(...section.filter(Boolean));
   }
   main.replaceChildren(page);
@@ -7754,6 +7772,7 @@ async function installUpdate() {
     await invoke("set_wake", { on: true }).catch(() => { prefs.wake = false; });
   }
   await refreshPhrasesTrained();
+  await refreshVault();
   showListening();
   const status = await invoke("recording_status").catch(() => ({ recording: false }));
   if (status.recording && !enrolment) {

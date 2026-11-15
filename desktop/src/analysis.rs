@@ -199,21 +199,6 @@ impl Item {
         }
     }
 
-    fn path(&self) -> Result<PathBuf, String> {
-        Ok(match self {
-            Item::Meeting(id) => library::session_dir(id)?.join("analysis.json"),
-            Item::Note(id) => {
-                notes::load(id)?;
-                library::data_dir().join("notes").join(format!("{id}.analysis.json"))
-            }
-        })
-    }
-}
-
-/// Removes a note's analyses with it.
-pub fn forget_note(id: &str) {
-    let _ = std::fs::remove_file(library::data_dir().join("notes").join(format!("{id}.analysis.json")));
-    crate::translations::forget_note(id);
 }
 
 /// What a template reads, and how to find its citations again.
@@ -483,15 +468,31 @@ fn one() -> u32 {
 }
 
 pub fn load(item: &Item) -> Stack {
-    item.path().ok().and_then(|p| library::read_json(&p).ok()).unwrap_or_default()
+    match item {
+        Item::Meeting(id) => library::session_dir(id).ok().and_then(|dir| library::read_json(&dir.join("analysis.json")).ok()).unwrap_or_default(),
+        // A note's analyses are in the vault with it.
+        Item::Note(id) => crate::vault::doc("analysis", id, ""),
+    }
 }
 
 fn save(item: &Item, stack: &Stack) -> Result<(), String> {
-    let path = item.path()?;
-    if stack.stack.is_empty() {
-        let _ = std::fs::remove_file(&path);
-    } else {
-        library::write_json(&path, stack)?;
+    match item {
+        Item::Meeting(id) => {
+            let path = library::session_dir(id)?.join("analysis.json");
+            if stack.stack.is_empty() {
+                let _ = std::fs::remove_file(&path);
+            } else {
+                library::seal_json(&path, stack)?;
+            }
+        }
+        Item::Note(id) => {
+            notes::load(id)?;
+            if stack.stack.is_empty() {
+                crate::vault::forget_doc("analysis", id, "")?;
+            } else {
+                crate::vault::save_doc("analysis", id, "", stack)?;
+            }
+        }
     }
     // The documents people open outside the app carry the analyses, so they're written again.
     if let Item::Meeting(id) = item {

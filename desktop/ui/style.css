@@ -1884,3 +1884,45 @@ dialog.picture-viewer::backdrop { background: #000; }
 .viewer-about { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 13px; }
 .viewer-about dt { color: #a9a3b6; }
 .viewer-about dd { margin: 0; overflow-wrap: anywhere; color: #e6e2ee; }
+
+/* The vault: its sheets, the recovery words, the ways back in, and the card on the home page. */
+dialog.vault-sheet { max-width: 520px; max-height: calc(100% - 48px); overflow-y: auto; }
+dialog.vault-sheet.wide { max-width: 620px; }
+dialog.vault-sheet .hint { margin: 0 0 12px; font-size: 14px; line-height: 1.45; }
+dialog.vault-sheet .hint strong { color: var(--text); font-weight: 600; }
+dialog.vault-sheet textarea, dialog.vault-sheet input[type="text"], dialog.vault-sheet input[type="password"] { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; }
+dialog.vault-sheet textarea { font: 14px ui-monospace, "Cascadia Mono", Consolas, monospace; resize: vertical; }
+dialog.vault-sheet .actions { margin-top: 10px; flex-wrap: wrap; }
+dialog.vault-sheet .notice { margin: 0 0 12px; }
+.vault-count { color: var(--muted); }
+.vault-count.ok { color: var(--ok); }
+.vault-count.bad { color: var(--danger); }
+.vault-or { display: flex; align-items: center; gap: 10px; margin: 16px 0 12px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.vault-or::before, .vault-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.vault-more { margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; }
+.vault-more summary { cursor: pointer; color: var(--muted); }
+.vault-more[open] summary { margin-bottom: 10px; }
+.vault-words { list-style: none; counter-reset: word; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 0 0 14px; padding: 0; }
+.vault-words li { counter-increment: word; display: flex; align-items: baseline; gap: 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font: 14px ui-monospace, "Cascadia Mono", Consolas, monospace; user-select: text; }
+.vault-words li::before { content: counter(word); min-width: 1.4em; color: var(--muted); font-size: 11px; text-align: right; user-select: none; }
+.vault-copies { max-height: 300px; overflow-y: auto; margin-bottom: 12px; }
+.vault-path { margin: 0 0 12px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.vault-list { margin: 0 0 14px; padding-left: 18px; font-size: 14px; line-height: 1.45; }
+.vault-list li { margin-bottom: 6px; }
+.vault-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 4px; }
+.vault-choice > div { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+.vault-choice small { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.vault-card { margin-top: 22px; }
+.item.vault-item .icon { color: var(--danger); }
+.vault-way { align-items: flex-start; }
+.vault-way .label { flex: 1 1 auto; }
+.vault-way button { white-space: nowrap; }
+.vault-mark { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; background: var(--warn-bg); color: var(--danger); font-weight: 700; font-size: 13px; }
+.vault-mark.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.vault-id-line strong { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 0.04em; }
+.vault-print { display: none; }
+@media print {
+  body.printing-vault > *:not(.vault-print) { display: none !important; }
+  body.printing-vault > .vault-print { display: block; margin: 0; white-space: pre-wrap; font: 11pt ui-monospace, "Cascadia Mono", Consolas, monospace; color: #000; background: #fff; }
+}
+@media (max-width: 560px) { .vault-words { grid-template-columns: repeat(2, 1fr); } .vault-choice { grid-template-columns: 1fr; } }

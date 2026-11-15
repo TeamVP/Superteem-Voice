@@ -22,12 +22,14 @@ pub mod probe;
 pub mod process;
 pub mod recorder;
 pub mod script;
+pub mod sealed;
 pub mod shell;
 pub mod sources;
 pub mod transcribe;
 pub mod translations;
 pub mod tts;
 pub mod update;
+pub mod vault;
 pub mod vocabulary;
 pub mod voices;
 
@@ -263,6 +265,8 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>, devices: Vec<String>, pi
     if devices.is_empty() && !pins {
         return Err("Choose at least one input.".into());
     }
+    // A recording is sealed as it's made, which needs the vault open.
+    sealed::ready()?;
     // The microphone test lets go of the devices before they are recorded.
     probe::stop();
     if state.busy() {
@@ -288,7 +292,7 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>, devices: Vec<String>, pi
             meta.names.insert(format!("input{}", i + 1), label);
         }
     }
-    library::write_json(&dir.join(library::META), &meta)?;
+    library::seal_json(&dir.join(library::META), &meta)?;
     let started = blocking(move || recorder::start(dir, &devices, pins)).await??;
     *state.recording.lock().unwrap() = Some(started);
     *state.chosen.lock().unwrap() = chosen;
@@ -329,7 +333,7 @@ fn keep_track_records(dir: &std::path::Path, status: &recorder::Status) {
             },
         );
     }
-    let _ = library::write_json(&dir.join(library::META), &meta);
+    let _ = library::seal_json(&dir.join(library::META), &meta);
 }
 
 /// Remembers which of the chosen inputs recorded audio, from the streams' final counts.
@@ -412,7 +416,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, discard: Option<bool>) ->
 }
 
 /// Processes a session again, or for the first time after a crash. Edited lines are kept.
-#[tauri::command]
+#[tauri::command(async)]
 fn process_session<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(), String> {
     if library::load_meta(&library::session_dir(&id)?).compacted {
         return Err(process::COMPACTED.into());
@@ -421,7 +425,7 @@ fn process_session<R: Runtime>(app: AppHandle<R>, id: String) -> Result<(), Stri
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_sessions(state: State<AppState>, query: String) -> Vec<library::Summary> {
     let mut busy: Vec<String> = state.recording.lock().unwrap().as_ref().map(|r| id_of(r.dir())).into_iter().collect();
     busy.extend(state.processing.lock().unwrap().clone());
@@ -495,7 +499,7 @@ fn people(mut prints: Vec<voices::VoicePrint>) -> Vec<PrintChoice> {
     out
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_session(state: State<AppState>, id: String) -> Result<SessionView, String> {
     let dir = library::session_dir(&id)?;
     let meta = library::load_meta(&dir);
@@ -574,7 +578,7 @@ fn edit_session(
     library::save(&dir, &meta, &segments)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_session_status(state: State<AppState>, id: String, status: String) -> Result<(), String> {
     let status = library::check_status(&status)?;
     edit_session(&state, &id, |meta, _| {
@@ -583,7 +587,7 @@ fn set_session_status(state: State<AppState>, id: String, status: String) -> Res
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn rename_session(state: State<AppState>, id: String, title: String) -> Result<(), String> {
     edit_session(&state, &id, |meta, _| {
         meta.title = title.trim().to_string();
@@ -592,7 +596,7 @@ fn rename_session(state: State<AppState>, id: String, title: String) -> Result<(
 }
 
 /// Renames a speaker everywhere in the session.
-#[tauri::command]
+#[tauri::command(async)]
 fn rename_speaker(state: State<AppState>, id: String, key: String, name: String) -> Result<(), String> {
     edit_session(&state, &id, |meta, _| {
         let name = name.trim();
@@ -611,7 +615,7 @@ fn rename_speaker(state: State<AppState>, id: String, key: String, name: String)
 }
 
 /// Adds a person who has no stream, such as a guest the host wants to name.
-#[tauri::command]
+#[tauri::command(async)]
 fn add_speaker(state: State<AppState>, id: String, name: String) -> Result<String, String> {
     let mut key = String::new();
     edit_session(&state, &id, |meta, _| {
@@ -666,7 +670,7 @@ async fn set_line_language<R: Runtime>(app: AppHandle<R>, id: String, segment: u
 
 /// Changes a line. When its speaker changes, returns the other lines that sound like it and still have
 /// the old speaker, so the page can offer to move them too.
-#[tauri::command]
+#[tauri::command(async)]
 fn update_segment(
     state: State<AppState>,
     id: String,
@@ -706,7 +710,7 @@ fn update_segment(
 
 /// Splits a line in two at a character in its text, as when another person cuts in mid-line.
 /// There are no word timings, so the time is split in proportion to the text. Returns the new line's id.
-#[tauri::command]
+#[tauri::command(async)]
 fn split_segment(state: State<AppState>, id: String, segment: usize, at: usize) -> Result<usize, String> {
     let mut new_id = 0;
     edit_session(&state, &id, |_, segments| {
@@ -749,7 +753,7 @@ fn join_blocker(first: &Segment, second: &Segment) -> Option<&'static str> {
 
 /// Mutes a line, or brings a muted one back: muted, it leaves the script and is silent in the transcript
 /// mix, so the lines either side of it can be joined.
-#[tauri::command]
+#[tauri::command(async)]
 fn mute_segment(state: State<AppState>, id: String, segment: usize, muted: bool) -> Result<(), String> {
     edit_session(&state, &id, |_, segments| {
         let s = segments.iter_mut().find(|s| s.id == segment).ok_or("That line no longer exists.")?;
@@ -761,7 +765,7 @@ fn mute_segment(state: State<AppState>, id: String, segment: usize, muted: bool)
 }
 
 /// Joins a line onto the one before it. The joined line takes the earlier line's speaker.
-#[tauri::command]
+#[tauri::command(async)]
 fn join_segments(state: State<AppState>, id: String, first: usize, second: usize) -> Result<(), String> {
     edit_session(&state, &id, |_, segments| {
         let i = segments.iter().position(|s| s.id == first).ok_or("That line no longer exists.")?;
@@ -800,7 +804,7 @@ fn join_segments(state: State<AppState>, id: String, first: usize, second: usize
 }
 
 /// Moves several lines to one speaker, as when accepting the lines that sound alike.
-#[tauri::command]
+#[tauri::command(async)]
 fn move_lines(state: State<AppState>, id: String, segments: Vec<usize>, speaker: String) -> Result<(), String> {
     edit_session(&state, &id, |_, all| {
         for s in all.iter_mut().filter(|s| segments.contains(&s.id)) {
@@ -813,7 +817,7 @@ fn move_lines(state: State<AppState>, id: String, segments: Vec<usize>, speaker:
 }
 
 /// Two speakers turned out to be one person: every line of `from` goes to `into`.
-#[tauri::command]
+#[tauri::command(async)]
 fn merge_speakers(state: State<AppState>, id: String, from: String, into: String) -> Result<(), String> {
     edit_session(&state, &id, |meta, segments| {
         for s in segments.iter_mut().filter(|s| s.speaker == from) {
@@ -830,7 +834,7 @@ fn merge_speakers(state: State<AppState>, id: String, from: String, into: String
 
 /// Says which voice print a speaker is, or that they are none (`print` None). With `learn`, this
 /// session's speech for them is added to the print so it recognises them better next time.
-#[tauri::command]
+#[tauri::command(async)]
 fn link_speaker(state: State<AppState>, id: String, key: String, print: Option<String>, learn: bool) -> Result<(), String> {
     edit_session(&state, &id, |meta, segments| {
         meta.suggested.remove(&key);
@@ -869,7 +873,7 @@ fn recorded_on(meta: &Meta, key: &str) -> String {
 }
 
 /// Starts a voice print from what a speaker said in this session.
-#[tauri::command]
+#[tauri::command(async)]
 fn save_speaker_print(state: State<AppState>, id: String, key: String, name: String, consent: bool) -> Result<(), String> {
     if !consent {
         return Err("Confirm that this person agreed to have a voice print kept.".into());
@@ -887,7 +891,7 @@ fn save_speaker_print(state: State<AppState>, id: String, key: String, name: Str
 
 /// Starts a voice print from one track: what its own wearer said into it, less what was muted by hand in
 /// the mix, and links the track's speaker to it.
-#[tauri::command]
+#[tauri::command(async)]
 fn save_track_print(state: State<AppState>, id: String, stream: String, name: String, consent: bool) -> Result<(), String> {
     if !consent {
         return Err("Confirm that this person agreed to have a voice print kept.".into());
@@ -996,6 +1000,7 @@ async fn start_enrolment(
     if print.is_none() && person.is_none() && name.trim().is_empty() {
         return Err("Give the voice print a name.".into());
     }
+    sealed::ready()?;
     if state.busy() {
         return Err("Already recording.".into());
     }
@@ -1052,7 +1057,7 @@ fn longest_recording(dir: &Path) -> Result<Vec<i16>, String> {
     let mut best: Option<Vec<i16>> = None;
     for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
         if entry.path().extension().is_some_and(|x| x == "stvj") {
-            let source = stv_core::pipeline::load_source(&entry.path(), process::RATE).map_err(|e| e.to_string())?;
+            let source = sealed::load_source(&entry.path(), process::RATE)?;
             if best.as_ref().map_or(true, |b| source.pcm.len() > b.len()) {
                 best = Some(source.pcm);
             }
@@ -1260,7 +1265,7 @@ fn save_prefs(
 /// Lifts a track for playback: `boost_db` louder (0 to 24), with `compress` evened out and its peaks held
 /// back, so it can be lifted further without distorting, and its bottom or top end cut (0 for none).
 /// Nothing changes in the transcript.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_track_level(
     state: State<AppState>,
     id: String,
@@ -1284,7 +1289,7 @@ fn set_track_level(
 }
 
 /// Sets where a track is played or muted by hand in the transcript mix, replacing what was set before.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_mix_edits(state: State<AppState>, id: String, name: String, edits: Vec<library::MixEdit>) -> Result<(), String> {
     let mut edits: Vec<library::MixEdit> = edits
         .into_iter()
@@ -1302,7 +1307,7 @@ fn set_mix_edits(state: State<AppState>, id: String, name: String, edits: Vec<li
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_markers(state: State<AppState>, id: String, markers: Vec<library::Marker>) -> Result<(), String> {
     edit_session(&state, &id, |meta, _| {
         meta.markers.extend(markers);
@@ -1313,7 +1318,7 @@ fn save_markers(state: State<AppState>, id: String, markers: Vec<library::Marker
 
 /// Keeps bookmarks and action items that only a track about to be removed has, at meeting times: on the
 /// imported track `to` (and the others recorded with it), or, without one, as the meeting's own.
-#[tauri::command]
+#[tauri::command(async)]
 fn keep_markers(state: State<AppState>, id: String, markers: Vec<library::Marker>, to: Option<String>) -> Result<(), String> {
     match to {
         Some(name) => {
@@ -1330,7 +1335,7 @@ fn keep_markers(state: State<AppState>, id: String, markers: Vec<library::Marker
 
 /// Changes the note on a marker, or deletes it. `index` is its place among the saved markers; without one,
 /// it is a phrase heard in the recording at `at_s`, which is saved as a marker of its own to change it.
-#[tauri::command]
+#[tauri::command(async)]
 fn edit_marker(
     state: State<AppState>,
     id: String,
@@ -1358,7 +1363,7 @@ fn edit_marker(
 
 /// Has the language model write a short label for an action item with no note, from what was said around
 /// `at_s`. It arrives with the "analysed" event.
-#[tauri::command]
+#[tauri::command(async)]
 fn label_action_item<R: Runtime>(app: AppHandle<R>, id: String, at_s: f64) -> Result<(), String> {
     library::session_dir(&id)?;
     let p = prefs::load();
@@ -1370,7 +1375,7 @@ fn label_action_item<R: Runtime>(app: AppHandle<R>, id: String, at_s: f64) -> Re
 }
 
 /// Puts a doubled-up line back in the script, when it was something said after all.
-#[tauri::command]
+#[tauri::command(async)]
 fn keep_segment(state: State<AppState>, id: String, segment: usize) -> Result<(), String> {
     edit_session(&state, &id, |_, segments| {
         let s = segments.iter_mut().find(|s| s.id == segment).ok_or("That line no longer exists.")?;
@@ -1407,7 +1412,7 @@ fn reveal_export(path: String) -> Result<(), String> {
     exports::reveal(std::path::Path::new(&path))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_consent(state: State<AppState>, id: String, consent: library::Consent) -> Result<(), String> {
     edit_session(&state, &id, |meta, _| {
         meta.consent = Some(consent);
@@ -1415,35 +1420,35 @@ fn save_consent(state: State<AppState>, id: String, consent: library::Consent) -
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_notes(query: String) -> Vec<notes::NoteSummary> {
     notes::list(&query)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_note(id: String) -> Result<notes::Note, String> {
     notes::load(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_note(id: Option<String>, title: String, body: String, keep_audio: Option<bool>, rich: Option<bool>, doc: Option<serde_json::Value>) -> Result<String, String> {
     let rich = rich.unwrap_or(false).then_some(notes::Rich { doc });
     notes::save(id, title, body, keep_audio.unwrap_or(false), rich)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn note_bookmarks(id: String) -> Result<Vec<notes::Bookmark>, String> {
     notes::bookmarks(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_note_bookmarks(id: String, bookmarks: Vec<notes::Bookmark>) -> Result<(), String> {
     notes::save_bookmarks(&id, bookmarks)
 }
 
 /// Keeps a picture or file with a note. The file's bytes are the request's body; the note and the
 /// file's name come in its headers.
-#[tauri::command]
+#[tauri::command(async)]
 fn add_note_file(request: tauri::ipc::Request) -> Result<notes::Kept, String> {
     let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     let name = percent_decode(&header("x-file-name"));
@@ -1464,19 +1469,81 @@ async fn import_note_image(id: String, url: String) -> Result<notes::Kept, Strin
 }
 
 /// Opens a note's link: a kept file with the app the system uses for it, a web page in the browser.
-#[tauri::command]
+#[tauri::command(async)]
 fn open_note_link(id: String, href: String) -> Result<(), String> {
     if let Some(file) = href.strip_prefix("attachment:") {
         let path = notes::file_path(&id, file)?;
         if cfg!(any(target_os = "android", target_os = "ios")) {
             return Err("Files kept in a note can't be opened on a phone yet.".into());
         }
-        return shell::open(path);
+        if !sealed::is_sealed(&path) {
+            return shell::open(path);
+        }
+        // Another app can only open a file in the clear, so a copy is made for it, under the name the
+        // file came with. The copies are removed the next time Voice starts.
+        let folder = opened_files_dir();
+        std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        let copy = folder.join(file.split_once('-').map_or(file, |(_, name)| name));
+        sealed::copy_plain(&path, &copy)?;
+        return shell::open(copy);
     }
     if href.starts_with("https://") || href.starts_with("http://") || href.starts_with("mailto:") {
         return recorder::open_url(&href);
     }
     Err("That link can't be opened from here.".into())
+}
+
+/// Where files kept in notes are copied in the clear for another app to open.
+fn opened_files_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("Superteem Voice opened files")
+}
+
+/// Serves a meeting's audio to the page, at stvaudio://localhost/<meeting>/<track>.wav (http://stvaudio.localhost/
+/// on Windows and Android), unsealing only the stretch asked for. The page asks for a stretch at a time
+/// (a Range request), which is what lets it seek and keep several tracks in step without loading any whole.
+/// The tracks are read by Web Audio for lifting a track, which needs the response to allow it.
+fn serve_audio(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
+    /// The most sent in answer to one request; the page asks again for what follows.
+    const MOST: u64 = 1024 * 1024;
+    let base = |status: u16| {
+        tauri::http::Response::builder()
+            .status(status)
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges")
+            .header("Cache-Control", "no-store")
+    };
+    let plain = |status: u16| base(status).header("Content-Type", "text/plain").body(Vec::new()).expect("a plain response");
+    let path = percent_decode(request.uri().path());
+    let mut parts = path.trim_start_matches('/').splitn(2, '/');
+    let (Some(id), Some(file)) = (parts.next(), parts.next()) else { return plain(404) };
+    // Only a track of a meeting: a bare name ending .wav, inside that meeting's folder.
+    let bare = file.ends_with(".wav") && !file.starts_with('.') && file.chars().all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' '));
+    let Some(mut reader) = library::session_dir(id).ok().filter(|_| bare).and_then(|dir| sealed::Reader::open(&dir.join(file)).ok()) else { return plain(404) };
+    let len = reader.len();
+    let range = request.headers().get("range").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().strip_prefix("bytes=")).and_then(|v| {
+        let (from, to) = v.split_once('-')?;
+        match (from.trim().parse::<u64>().ok(), to.trim().parse::<u64>().ok()) {
+            (Some(from), to) => Some((from, to.unwrap_or(u64::MAX))),
+            // "-n": the last n bytes.
+            (None, Some(last)) => Some((len.saturating_sub(last), u64::MAX)),
+            (None, None) => None,
+        }
+    });
+    let respond = |status: u16| base(status).header("Content-Type", "audio/wav").header("Accept-Ranges", "bytes");
+    match range {
+        None => match reader.read(0, len as usize) {
+            Ok(body) => respond(200).body(body).expect("a plain response"),
+            Err(_) => plain(500),
+        },
+        Some((from, _)) if from >= len => base(416).header("Content-Range", format!("bytes */{len}")).body(Vec::new()).expect("a plain response"),
+        Some((from, to)) => {
+            let to = to.min(len - 1).min(from + MOST - 1);
+            match reader.read(from, (to - from + 1) as usize) {
+                Ok(body) => respond(206).header("Content-Range", format!("bytes {from}-{to}/{len}")).body(body).expect("a plain response"),
+                Err(_) => plain(500),
+            }
+        }
+    }
 }
 
 /// Serves a note's kept files to the page, at stvnote://localhost/<note>/<file> (http://stvnote.localhost/
@@ -1504,47 +1571,47 @@ fn serve_note_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Resp
         return respond(404, "text/plain", Vec::new());
     };
     let found = if book { books::file_path(id, file) } else { notes::file_path(id, file) };
-    match found.and_then(|p| std::fs::read(p).map_err(|e| e.to_string())) {
+    match found.and_then(|p| sealed::read(&p)) {
         Ok(bytes) => respond(200, notes::media_type(file), bytes),
         Err(_) => respond(404, "text/plain", Vec::new()),
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_books(query: String) -> Vec<books::BookSummary> {
     books::list(&query)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_book(id: String) -> Result<books::Book, String> {
     books::load(&id)
 }
 
 /// Who made each of a book's pictures, where it came from, its rights and the changes made to it.
-#[tauri::command]
+#[tauri::command(async)]
 fn book_media(id: String) -> Result<books::MediaRegister, String> {
     books::media_register(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn book_chapters(id: String) -> Result<Vec<books::Chapter>, String> {
     books::chapters(&id)
 }
 
 /// Changes a book's commentary and/or pronunciations; a field left out stays as it is.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_book_extras(id: String, commentary: Option<String>, pronounce: Option<std::collections::BTreeMap<String, String>>) -> Result<(), String> {
     books::set_extras(&id, commentary, pronounce)
 }
 
 /// Changes a note's commentary and/or pronunciations; a field left out stays as it is.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_note_extras(id: String, commentary: Option<String>, pronounce: Option<std::collections::BTreeMap<String, String>>, author: Option<String>) -> Result<(), String> {
     notes::set_extras(&id, commentary, pronounce, author)
 }
 
 /// Changes who wrote a book, who translated it, what it is, its language, where it came from and its licence.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_book_details(id: String, details: books::BookDetails) -> Result<(), String> {
     books::set_details(&id, details)
 }
@@ -1560,13 +1627,13 @@ async fn open_external(url: String) -> Result<(), String> {
 }
 
 /// What's wrong with a book's own files: each missing, or not the one it lists.
-#[tauri::command]
+#[tauri::command(async)]
 fn book_file_problems(id: String) -> Result<Vec<String>, String> {
     books::file_problems(&id)
 }
 
 /// Every bookmark in a book, by chapter.
-#[tauri::command]
+#[tauri::command(async)]
 fn book_bookmarks(id: String) -> Result<std::collections::BTreeMap<String, Vec<notes::Bookmark>>, String> {
     books::bookmarks(&id)
 }
@@ -1579,40 +1646,40 @@ async fn export_book_bookmarks(id: String, author: String, only: Option<Vec<Stri
 }
 
 /// Takes in someone's bookmarks for a book; `author` names any that don't say who made them.
-#[tauri::command]
+#[tauri::command(async)]
 fn import_book_bookmarks(id: String, file: books::BookmarkFile, author: String) -> Result<books::BookmarkImport, String> {
     books::import_bookmarks(&id, file, &author)
 }
 
 /// Deletes every bookmark in a book that `author` made.
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_book_bookmarks_by(id: String, author: String) -> Result<usize, String> {
     books::remove_bookmarks_by(&id, &author)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn book_bookmark_view(id: String) -> books::BookmarkView {
     books::bookmark_view(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_book_bookmark_view(id: String, view: books::BookmarkView) -> Result<(), String> {
     books::set_bookmark_view(&id, view)
 }
 
 /// Where reading aloud last stopped in a book, or null.
-#[tauri::command]
+#[tauri::command(async)]
 fn book_listen_place(id: String) -> Option<books::ListenPlace> {
     books::listen_place(&id)
 }
 
 /// Keeps where reading aloud stopped in a book; null forgets it.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_book_listen_place(id: String, place: Option<books::ListenPlace>) -> Result<(), String> {
     books::set_listen_place(&id, place)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn book_contents(id: String) -> Result<Vec<books::ChapterHead>, String> {
     books::contents(&id)
 }
@@ -1624,55 +1691,55 @@ async fn search_book(id: String, query: String) -> Result<Vec<books::SearchHit>,
 }
 
 /// The reading book that holds this note, when the note can't be changed. Empty when it can.
-#[tauri::command]
+#[tauri::command(async)]
 fn book_for_note(id: String) -> Option<String> {
     books::book_for_note(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_book(title: String) -> Result<String, String> {
     books::create(title)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn rename_book(id: String, title: String) -> Result<(), String> {
     books::rename(&id, title)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_note_to_book(id: String, note: String) -> Result<(), String> {
     books::add_note(&id, &note)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_note_from_book(id: String, note: String) -> Result<(), String> {
     books::remove_note(&id, &note)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reorder_book(id: String, order: Vec<String>) -> Result<(), String> {
     books::reorder(&id, order)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_book(id: String) -> Result<(), String> {
     books::delete(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn archive_note(id: String, archived: bool) -> Result<(), String> {
     notes::set_archived(&id, archived)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_note_status(id: String, status: String) -> Result<(), String> {
     notes::set_status(&id, &status)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_note(id: String) -> Result<(), String> {
+    // Its analyses, chat, translations and bookmarks go with it, in the vault.
     notes::delete(&id)?;
-    analysis::forget_note(&id);
     books::forget_note(&id);
     Ok(())
 }
@@ -1690,6 +1757,7 @@ async fn dictate_start<R: Runtime>(
     languages: Option<Vec<String>>,
 ) -> Result<u64, String> {
     let languages = stv_core::lang::clean_list(&languages.unwrap_or_default());
+    sealed::ready()?;
     if !continuous.unwrap_or(false) {
         return blocking(listen::dictate_start).await?.map(|_| 0);
     }
@@ -1949,7 +2017,7 @@ async fn listen_level() -> Result<f32, String> {
     blocking(listen::level).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_session(state: State<AppState>, id: String) -> Result<(), String> {
     let _guard = state.edit.lock().unwrap();
     if state.processing.lock().unwrap().as_deref() == Some(id.as_str()) {
@@ -1960,7 +2028,7 @@ fn delete_session(state: State<AppState>, id: String) -> Result<(), String> {
 }
 
 /// Deletes a meeting's audio for good and keeps its transcript. Returns the bytes freed.
-#[tauri::command]
+#[tauri::command(async)]
 fn compact_session(state: State<AppState>, id: String) -> Result<u64, String> {
     let _guard = state.edit.lock().unwrap();
     let dir = library::session_dir(&id)?;
@@ -1973,7 +2041,7 @@ fn compact_session(state: State<AppState>, id: String) -> Result<u64, String> {
     library::compact(&dir)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_folder(id: Option<String>) -> Result<(), String> {
     let dir = match id {
         Some(id) => library::session_dir(&id)?,
@@ -2214,7 +2282,7 @@ struct AnalysesView {
     elsewhere: Vec<analysis::TemplateInfo>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_analyses(state: State<AppState>, kind: String, id: String) -> Result<AnalysesView, String> {
     let item = analysis::Item::new(&kind, &id)?;
     let p = prefs::load();
@@ -2278,7 +2346,7 @@ fn chat_running(state: &AppState, id: &str) -> bool {
     state.analysing.lock().unwrap().as_ref() == Some(&job) || state.analysis_queue.lock().unwrap().contains(&job)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_note_chat(state: State<AppState>, id: String) -> Result<ChatView, String> {
     notes::load(&id)?;
     let running = chat_running(&state, &id);
@@ -2297,7 +2365,7 @@ fn get_note_chat(state: State<AppState>, id: String) -> Result<ChatView, String>
 }
 
 /// Asks the assistant about a note, or to rewrite it. The answer arrives with the "analysed" event.
-#[tauri::command]
+#[tauri::command(async)]
 fn chat_note<R: Runtime>(app: AppHandle<R>, id: String, text: String) -> Result<(), String> {
     if chat_running(&app.state::<AppState>(), &id) {
         return Err("Wait for the answer to the last one first.".into());
@@ -2307,7 +2375,7 @@ fn chat_note<R: Runtime>(app: AppHandle<R>, id: String, text: String) -> Result<
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn clear_note_chat(state: State<AppState>, id: String) -> Result<(), String> {
     // The answer being written would put the cleared conversation back when it's saved.
     if chat_running(&state, &id) {
@@ -2316,22 +2384,22 @@ fn clear_note_chat(state: State<AppState>, id: String) -> Result<(), String> {
     chat::clear(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn note_versions(id: String) -> Result<Vec<notes::Version>, String> {
     notes::versions(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn note_version_number(id: String) -> Result<u32, String> {
     notes::version_number(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn restore_note_version(id: String, version: u32) -> Result<notes::Note, String> {
     notes::restore(&id, version)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn analyse<R: Runtime>(app: AppHandle<R>, kind: String, id: String, template: String) -> Result<(), String> {
     analysis::Item::new(&kind, &id)?;
     let (t, language) = analysis::split_key(&template);
@@ -2354,19 +2422,19 @@ fn cancel_analysis<R: Runtime>(app: AppHandle<R>, kind: String, id: String, temp
     let _ = app.emit("analysis-queue", analysis_queue_state(&state));
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn edit_analysis(state: State<AppState>, kind: String, id: String, template: String, edit: analysis::Edit) -> Result<(), String> {
     let _guard = state.edit.lock().unwrap();
     analysis::edit(&analysis::Item::new(&kind, &id)?, &template, edit)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_analysis(state: State<AppState>, kind: String, id: String, template: String) -> Result<(), String> {
     let _guard = state.edit.lock().unwrap();
     analysis::remove(&analysis::Item::new(&kind, &id)?, &template)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn move_analysis(state: State<AppState>, kind: String, id: String, template: String, by: i32) -> Result<(), String> {
     let _guard = state.edit.lock().unwrap();
     analysis::shift(&analysis::Item::new(&kind, &id)?, &template, by)
@@ -2546,14 +2614,14 @@ fn optimise_dismiss() -> Result<(), String> {
 }
 
 /// The natural voice offered first for `language`, to download.
-#[tauri::command]
+#[tauri::command(async)]
 fn offered_voice(language: String) -> Option<tts::Voice> {
     tts::first_for(&language)
 }
 
 /// The natural voice that reads `language`, or None when the system's voice does. `prefer` (a book's own
 /// voice) reads instead when it's downloaded and speaks the language.
-#[tauri::command]
+#[tauri::command(async)]
 fn reading_voice(language: Option<String>, prefer: Option<String>) -> Option<tts::Voice> {
     if let Some(id) = prefer.filter(|id| !id.is_empty()) {
         let speaks = |v: &tts::Voice| language.as_deref().is_none_or(|l| v.langs.iter().any(|x| x == l));
@@ -2565,7 +2633,7 @@ fn reading_voice(language: Option<String>, prefer: Option<String>) -> Option<tts
 }
 
 /// Sets the voice a book reads in: a natural voice's id, or "default" for the main one.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_book_voice(book: String, voice: String) -> Result<(), String> {
     if !(voice == "default" || tts::voices().iter().any(|v| v.id == voice)) {
         return Err("That voice isn't in the list.".into());
@@ -2786,7 +2854,7 @@ struct ItemLanguages {
 
 /// Sets the languages a note or meeting is in, one or two, main one first. A language the person hasn't
 /// chosen yet becomes one of theirs.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_item_languages(state: State<AppState>, kind: String, id: String, languages: Vec<String>) -> Result<ItemLanguages, String> {
     let languages = stv_core::lang::clean_list(&languages);
     if languages.is_empty() {
@@ -2836,14 +2904,14 @@ struct TranslationView {
     available: Vec<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_translation(kind: String, id: String, language: String) -> Result<TranslationView, String> {
     let item = analysis::Item::new(&kind, &id)?;
     Ok(TranslationView { view: translations::view(&item, &language)?, available: translations::languages(&item) })
 }
 
 /// Translates a note or meeting into `language`, in turn with analyses.
-#[tauri::command]
+#[tauri::command(async)]
 fn translate_item<R: Runtime>(app: AppHandle<R>, kind: String, id: String, language: String) -> Result<(), String> {
     analysis::Item::new(&kind, &id)?;
     if !stv_core::lang::is_known(&language) {
@@ -2857,13 +2925,13 @@ fn translate_item<R: Runtime>(app: AppHandle<R>, kind: String, id: String, langu
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn edit_translation(state: State<AppState>, kind: String, id: String, language: String, line: String, text: String) -> Result<(), String> {
     let _guard = state.edit.lock().unwrap();
     translations::edit(&analysis::Item::new(&kind, &id)?, &language, &line, &text)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_translation(state: State<AppState>, kind: String, id: String, language: String) -> Result<(), String> {
     let _guard = state.edit.lock().unwrap();
     translations::delete(&analysis::Item::new(&kind, &id)?, &language)
@@ -3101,13 +3169,13 @@ async fn sync_track(state: State<'_, AppState>, id: String, name: String, near: 
 }
 
 /// Places an imported track by the time of day it started (Unix seconds).
-#[tauri::command]
+#[tauri::command(async)]
 fn set_track_start(state: State<AppState>, id: String, name: String, started_at: f64) -> Result<(), String> {
     let _guard = state.edit.lock().unwrap();
     imports::set_start_time(&library::session_dir(&id)?, &name, started_at)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_track_offset(state: State<AppState>, id: String, name: String, offset_s: f64) -> Result<(), String> {
     let _guard = state.edit.lock().unwrap();
     imports::set_offset(&library::session_dir(&id)?, &name, offset_s)
@@ -3116,7 +3184,7 @@ fn set_track_offset(state: State<AppState>, id: String, name: String, offset_s: 
 /// A track's settings from its dialog: where it starts (`offset_s` into the meeting), and whether everything
 /// on it is its own speaker (`lock`). Locking takes effect at once; a move when the meeting is transcribed
 /// again, which the page offers.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_track(state: State<AppState>, id: String, name: String, offset_s: Option<f64>, lock: Option<bool>) -> Result<(), String> {
     let _guard = state.edit.lock().unwrap();
     let dir = library::session_dir(&id)?;
@@ -3163,7 +3231,7 @@ fn set_track(state: State<AppState>, id: String, name: String, offset_s: Option<
 }
 
 /// Lines an imported track, and the tracks recorded with it, up by a moment marked in both recordings.
-#[tauri::command]
+#[tauri::command(async)]
 fn line_up_track(state: State<AppState>, id: String, name: String, own_s: f64, meeting_s: f64) -> Result<imports::Import, String> {
     let _guard = state.edit.lock().unwrap();
     let dir = library::session_dir(&id)?;
@@ -3174,7 +3242,7 @@ fn line_up_track(state: State<AppState>, id: String, name: String, own_s: f64, m
     if !meta.tracks_changed.contains(&label) {
         meta.tracks_changed.push(label);
     }
-    library::write_json(&dir.join(library::META), &meta)?;
+    library::seal_json(&dir.join(library::META), &meta)?;
     Ok(found)
 }
 
@@ -3218,7 +3286,7 @@ async fn import_session<R: Runtime>(app: AppHandle<R>, id: String, path: String,
 
 /// Takes a track out of a meeting: an imported one, or one it recorded, such as a silent or doubled-up input.
 /// The page then transcribes the meeting again without it.
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_track(state: State<AppState>, id: String, name: String) -> Result<(), String> {
     let _guard = state.edit.lock().unwrap();
     let dir = library::session_dir(&id)?;
@@ -3226,7 +3294,7 @@ fn remove_track(state: State<AppState>, id: String, name: String) -> Result<(), 
         imports::remove(&dir, &name)?;
         let mut meta = library::load_meta(&dir);
         if meta.track_levels.remove(&name).is_some() | meta.mix_edits.remove(&name).is_some() {
-            library::write_json(&dir.join(library::META), &meta)?;
+            library::seal_json(&dir.join(library::META), &meta)?;
         }
         return Ok(());
     }
@@ -3328,6 +3396,133 @@ fn new_template(name: String, headings: Vec<(String, stv_core::analysis::Heading
     Ok(id)
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// The vault: getting back in, the recovery words and password, copies, and bringing things in
+
+#[tauri::command(async)]
+fn vault_status() -> vault::Status {
+    vault::status()
+}
+
+#[tauri::command(async)]
+fn vault_unlock_words(words: String) -> Result<vault::Status, String> {
+    vault::unlock_with_words(&words)?;
+    Ok(vault::status())
+}
+
+/// Stretching a password takes a moment by design, so these run off the main thread.
+#[tauri::command]
+async fn vault_unlock_password(password: String) -> Result<vault::Status, String> {
+    blocking(move || vault::unlock_with_password(&password)).await??;
+    Ok(vault::status())
+}
+
+/// The vault ID typed recovery words are for, shown as they're typed so the right kit is known.
+#[tauri::command(async)]
+fn vault_words_id(words: String) -> Result<String, String> {
+    vault::id_of_words(&words)
+}
+
+#[tauri::command(async)]
+fn vault_words() -> Result<Vec<String>, String> {
+    vault::words()
+}
+
+#[tauri::command(async)]
+fn vault_words_saved() -> Result<vault::Status, String> {
+    vault::words_saved()?;
+    Ok(vault::status())
+}
+
+#[tauri::command(async)]
+fn vault_check_words(words: String) -> Result<vault::Status, String> {
+    vault::check_words(&words)?;
+    Ok(vault::status())
+}
+
+#[tauri::command(async)]
+fn vault_remind_later() -> Result<(), String> {
+    vault::remind_later()
+}
+
+#[tauri::command(async)]
+fn vault_moved_seen() -> Result<(), String> {
+    vault::moved_seen()
+}
+
+#[tauri::command]
+async fn vault_set_password(password: String, hint: String) -> Result<vault::Status, String> {
+    blocking(move || vault::set_password(&password, &hint)).await??;
+    Ok(vault::status())
+}
+
+/// Writes the recovery kit where the person chose.
+#[tauri::command(async)]
+fn vault_save_kit(path: String) -> Result<(), String> {
+    std::fs::write(&path, vault::kit()?).map_err(|e| format!("The recovery kit couldn't be saved there: {e}"))
+}
+
+/// The recovery kit's text, for printing from the page.
+#[tauri::command(async)]
+fn vault_kit() -> Result<String, String> {
+    vault::kit()
+}
+
+#[tauri::command]
+async fn vault_copy_now() -> Result<vault::Status, String> {
+    blocking(vault::copy_now).await??;
+    Ok(vault::status())
+}
+
+#[tauri::command]
+async fn vault_set_backup_dir(folder: String) -> Result<vault::Status, String> {
+    blocking(move || vault::set_backup_dir(&folder)).await??;
+    Ok(vault::status())
+}
+
+#[tauri::command(async)]
+fn vault_open_backups() -> Result<(), String> {
+    let dir = vault::backup_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    shell::open(dir)
+}
+
+#[tauri::command]
+async fn vault_restore(file: String) -> Result<vault::Status, String> {
+    blocking(move || vault::restore(&file)).await??;
+    Ok(vault::status())
+}
+
+#[tauri::command(async)]
+fn vault_start_new() -> Result<vault::Status, String> {
+    vault::start_new()?;
+    Ok(vault::status())
+}
+
+/// Brings in the notes and books of another vault file.
+#[tauri::command]
+async fn vault_bring_in(path: String, words: Option<String>, password: Option<String>) -> Result<vault::BroughtIn, String> {
+    blocking(move || vault::bring_in(Path::new(&path), &words.unwrap_or_default(), &password.unwrap_or_default())).await?
+}
+
+/// Brings in everything of Voice's found in a folder: a backup, a copy from another computer, old files.
+#[tauri::command]
+async fn vault_bring_in_folder(path: String, words: Option<String>, password: Option<String>) -> Result<vault::BroughtIn, String> {
+    blocking(move || vault::bring_in_folder(Path::new(&path), &words.unwrap_or_default(), &password.unwrap_or_default())).await?
+}
+
+/// Takes on another vault as this computer's own; this one is merged into it.
+#[tauri::command]
+async fn vault_adopt(path: String, words: Option<String>, password: Option<String>) -> Result<vault::BroughtIn, String> {
+    blocking(move || vault::adopt(Path::new(&path), &words.unwrap_or_default(), &password.unwrap_or_default())).await?
+}
+
+/// Keeps another vault's key from its words, so the meetings it sealed open here; gives its ID.
+#[tauri::command(async)]
+fn vault_add_words(words: String) -> Result<String, String> {
+    vault::add_words(&words)
+}
+
 fn capture_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("capture")
         .setup(|_app, _api| {
@@ -3384,7 +3579,11 @@ pub fn run() {
             listen::init(move |text| drop(handle.emit("heard", text)), move |heard| drop(phrases.emit("keyphrase", heard)));
             // After the library is set up (above, on phones), so the vocabulary is in the right place.
             vocabulary::add_examples();
-            books::install_example(app.path().resource_dir().ok().as_deref());
+            // Opens the vault, bringing in notes and books still kept as files, adds the example book, and
+            // keeps copies of it; what was recorded before the vault is sealed in the background.
+            vault::start();
+            // Files copied in the clear for other apps to open, last time.
+            let _ = std::fs::remove_dir_all(opened_files_dir());
             std::thread::spawn(notes::purge_old_audio);
             let root = library::root();
             std::fs::create_dir_all(&root)?;
@@ -3392,6 +3591,7 @@ pub fn run() {
             Ok(())
         })
         .register_uri_scheme_protocol("stvnote", |_ctx, request| serve_note_file(&request))
+        .register_uri_scheme_protocol("stvaudio", |_ctx, request| serve_audio(&request))
         .invoke_handler(tauri::generate_handler![
             platform,
             list_devices,
@@ -3566,6 +3766,27 @@ pub fn run() {
             chat_note,
             clear_note_chat,
             note_versions,
+            vault_status,
+            vault_unlock_words,
+            vault_unlock_password,
+            vault_words_id,
+            vault_words,
+            vault_words_saved,
+            vault_check_words,
+            vault_remind_later,
+            vault_moved_seen,
+            vault_set_password,
+            vault_save_kit,
+            vault_kit,
+            vault_copy_now,
+            vault_set_backup_dir,
+            vault_open_backups,
+            vault_restore,
+            vault_start_new,
+            vault_bring_in,
+            vault_bring_in_folder,
+            vault_adopt,
+            vault_add_words,
             note_version_number,
             restore_note_version,
             edit_analysis,

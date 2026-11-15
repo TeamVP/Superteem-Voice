@@ -12,7 +12,6 @@ use crate::library::{self, Meta};
 use crate::process::RATE;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use stv_core::export;
 
 const FILE: &str = "imports.json";
 /// The imported audio as it came, before it's placed on the timeline. Not ".wav", so it isn't taken for a
@@ -137,7 +136,7 @@ fn save(dir: &Path, imports: &[Import]) -> Result<(), String> {
         let _ = std::fs::remove_file(dir.join(FILE));
         Ok(())
     } else {
-        library::write_json(&dir.join(FILE), &imports)
+        library::seal_json(&dir.join(FILE), &imports)
     }
 }
 
@@ -150,7 +149,7 @@ pub fn is_track_file(path: &Path) -> bool {
 }
 
 fn read_pcm(path: &Path) -> Result<Vec<i16>, String> {
-    let data = std::fs::read(path).map_err(|e| e.to_string())?;
+    let data = crate::sealed::read(path)?;
     let at = data.windows(4).position(|w| w == b"data").ok_or("Not a WAV file.")? + 8;
     Ok(data[at.min(data.len())..].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect())
 }
@@ -271,7 +270,7 @@ pub fn add_in_zone(dir: &Path, label: &str, pcm: &[i16], place: Place, utc_offse
     let mut imports = load(dir);
     let n = (1..).find(|n| !imports.iter().any(|i| i.name == format!("import-{n}")) && !dir.join(format!("import-{n}.wav")).exists()).unwrap_or(1);
     let name = format!("import-{n}");
-    export::write_wav(&source_path(dir, &name), pcm, RATE).map_err(|e| e.to_string())?;
+    crate::sealed::write_wav(&source_path(dir, &name), pcm, RATE)?;
     let start = meeting_start(dir);
     let (offset_s, started_at, placed_by) = match place {
         Place::Time { started_at, .. } => (started_at - start, Some(started_at), "time"),
@@ -297,7 +296,7 @@ pub fn add_in_zone(dir: &Path, label: &str, pcm: &[i16], place: Place, utc_offse
     let label = label.trim();
     if !label.is_empty() {
         meta.names.insert(name.clone(), label.chars().take(60).collect());
-        library::write_json(&dir.join("meta.json"), &meta)?;
+        library::seal_json(&dir.join("meta.json"), &meta)?;
     }
     match place {
         Place::Sound => return sync(dir, &name, false),
@@ -447,7 +446,7 @@ fn session_tracks(root: &Path) -> Result<Vec<(String, Vec<i16>)>, String> {
     let mut names = Vec::new();
     let mut sources = Vec::new();
     for path in of("stvj") {
-        let source = stv_core::pipeline::load_source(&path, RATE).map_err(|e| format!("{}: {e}", path.display()))?;
+        let source = crate::sealed::load_source(&path, RATE)?;
         if !source.pcm.is_empty() {
             names.push(stem(&path));
             sources.push(source);
@@ -563,6 +562,7 @@ pub fn remove(dir: &Path, name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use stv_core::export;
 
     fn temp(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("stv-import-{tag}-{}", std::process::id()));

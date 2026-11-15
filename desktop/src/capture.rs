@@ -12,7 +12,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use stv_core::attribute::window_db;
-use stv_core::journal::JournalWriter;
 use stv_core::protocol::{Codec, Frame};
 use uuid::Uuid;
 
@@ -245,7 +244,7 @@ fn record_input(shared: &Shared, device_name: &str, label: &str) -> Result<(), S
         Err(message) if source => reconnect(shared, device_name, label, &message).ok_or(message)?,
         Err(message) => return Err(message),
     };
-    let mut journal = JournalWriter::create(&shared.dir.join(format!("{label}.stvj"))).map_err(|e| e.to_string())?;
+    let mut journal = crate::sealed::journal_writer(&shared.dir.join(format!("{label}.stvj")))?;
     let mut resampler = Resampler::new(input.rate);
     let mut pending = Vec::new();
     let mut sequence = 0u32;
@@ -425,7 +424,7 @@ async fn stream_pin(shared: &Shared, peripheral: &Peripheral, label: &str, attem
     shared.update(label, |s| s.state = "recording".into());
 
     let mut journal =
-        JournalWriter::create(&shared.dir.join(format!("{label}-{attempt}.stvj"))).map_err(|e| e.to_string())?;
+        crate::sealed::journal_writer(&shared.dir.join(format!("{label}-{attempt}.stvj")))?;
     let mut last_sequence: Option<u32> = None;
     let mut last_sync = Instant::now();
     while !shared.stopped() {

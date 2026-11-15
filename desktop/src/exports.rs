@@ -199,7 +199,7 @@ pub fn render_mix(tracks: &[(Vec<i16>, Vec<(f64, f64)>)], rate: u32) -> Vec<i16>
 
 /// 16-bit mono PCM from a WAV written by this app.
 pub fn read_wav(path: &Path) -> Result<Vec<i16>, String> {
-    let data = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let data = crate::sealed::read(path)?;
     let at = data.windows(4).position(|w| w == b"data").ok_or_else(|| format!("{} is not a WAV file", path.display()))? + 8;
     Ok(data[at..].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect())
 }
@@ -421,7 +421,7 @@ pub fn export_meeting(m: &MeetingExport, format: &str) -> Result<PathBuf, String
             file = format!("{} - {} ({stream}).wav", i + 1, file_name(&name));
         }
         used_names.push(file.clone());
-        fs::copy(m.dir.join(format!("{stream}.wav")), audio.join(&file)).map_err(|e| e.to_string())?;
+        crate::sealed::copy_plain(&m.dir.join(format!("{stream}.wav")), &audio.join(&file))?;
         let quiet = quiet_spans(m.segments, stream, edits_of(m.meta, stream));
         tracks.push(PackageTrack { stream: stream.clone(), name, file, playing: Vec::new() });
         pcm_tracks.push((pcm, quiet));
@@ -500,7 +500,7 @@ pub fn export_note(id: &str, format: &str) -> Result<PathBuf, String> {
             fs::create_dir_all(folder.join("audio")).map_err(|e| e.to_string())?;
             write(&folder.join(format!("{name}.md")), &text("md"))?;
             for (i, file) in audio.iter().enumerate() {
-                fs::copy(file, folder.join("audio").join(format!("Dictation {}.wav", i + 1))).map_err(|e| e.to_string())?;
+                crate::sealed::copy_plain(file, &folder.join("audio").join(format!("Dictation {}.wav", i + 1)))?;
             }
             Ok(folder)
         }

@@ -16,6 +16,18 @@ pub struct Line {
 
 pub fn write_wav(path: &Path, pcm: &[i16], rate: u32) -> io::Result<()> {
     let mut w = BufWriter::new(File::create(path)?);
+    wav_to(&mut w, pcm, rate)?;
+    w.flush()
+}
+
+/// A WAV file's bytes: 16-bit mono.
+pub fn wav_bytes(pcm: &[i16], rate: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(44 + pcm.len() * 2);
+    wav_to(&mut out, pcm, rate).expect("writing to memory doesn't fail");
+    out
+}
+
+fn wav_to(w: &mut impl Write, pcm: &[i16], rate: u32) -> io::Result<()> {
     let bytes = (pcm.len() * 2) as u32;
     w.write_all(b"RIFF")?;
     w.write_all(&(36 + bytes).to_le_bytes())?;
@@ -32,7 +44,7 @@ pub fn write_wav(path: &Path, pcm: &[i16], rate: u32) -> io::Result<()> {
     for s in pcm {
         w.write_all(&s.to_le_bytes())?;
     }
-    w.flush()
+    Ok(())
 }
 
 fn clock(seconds: f64, millis_sep: char) -> String {

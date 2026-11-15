@@ -42,57 +42,65 @@ pub struct Store {
     pub engine: String,
 }
 
-fn dir(item: &Item) -> Result<PathBuf, String> {
-    Ok(match item {
-        Item::Meeting(id) => library::session_dir(id)?.join("translations"),
-        Item::Note(id) => {
-            notes::load(id)?;
-            library::data_dir().join("notes").join(format!("{id}.translations"))
-        }
-    })
+/// A meeting's translations are files in its folder; a note's are in the vault with it.
+fn dir(id: &str) -> Result<PathBuf, String> {
+    Ok(library::session_dir(id)?.join("translations"))
 }
 
-fn path(item: &Item, language: &str) -> Result<PathBuf, String> {
-    if !lang::is_known(language) {
-        return Err("That language isn't one Voice offers yet.".into());
-    }
-    Ok(dir(item)?.join(format!("{language}.json")))
+fn known(language: &str) -> Result<(), String> {
+    if lang::is_known(language) { Ok(()) } else { Err("That language isn't one Voice offers yet.".into()) }
 }
 
 pub fn load(item: &Item, language: &str) -> Store {
-    path(item, language).ok().and_then(|p| library::read_json(&p).ok()).unwrap_or_default()
+    if known(language).is_err() {
+        return Store::default();
+    }
+    match item {
+        Item::Meeting(id) => dir(id).ok().and_then(|d| library::read_json(&d.join(format!("{language}.json"))).ok()).unwrap_or_default(),
+        Item::Note(id) => crate::vault::doc("translation", id, language),
+    }
 }
 
 fn save(item: &Item, store: &Store) -> Result<(), String> {
-    let p = path(item, &store.language)?;
-    std::fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
-    library::write_json(&p, store)
+    known(&store.language)?;
+    match item {
+        Item::Meeting(id) => {
+            let folder = dir(id)?;
+            std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+            library::seal_json(&folder.join(format!("{}.json", store.language)), store)
+        }
+        Item::Note(id) => {
+            notes::load(id)?;
+            crate::vault::save_doc("translation", id, &store.language, store)
+        }
+    }
 }
 
 /// The languages an item has translations in.
 pub fn languages(item: &Item) -> Vec<String> {
-    let Ok(d) = dir(item) else { return vec![] };
-    let mut out: Vec<String> = std::fs::read_dir(d)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().into_owned()))
-        .filter(|l| lang::is_known(l))
-        .collect();
+    let mut out: Vec<String> = match item {
+        Item::Meeting(id) => std::fs::read_dir(dir(id).unwrap_or_default())
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .collect(),
+        Item::Note(id) => crate::vault::with(|conn| Ok(crate::vault::doc_names(conn, "translation", id))).unwrap_or_default(),
+    };
+    out.retain(|l| lang::is_known(l));
     out.sort();
     out
 }
 
 pub fn delete(item: &Item, language: &str) -> Result<(), String> {
-    match std::fs::remove_file(path(item, language)?) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
-        _ => Ok(()),
+    known(language)?;
+    match item {
+        Item::Meeting(id) => match std::fs::remove_file(dir(id)?.join(format!("{language}.json"))) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+            _ => Ok(()),
+        },
+        Item::Note(id) => crate::vault::forget_doc("translation", id, language),
     }
-}
-
-/// Removes a note's translations with it.
-pub fn forget_note(id: &str) {
-    let _ = std::fs::remove_dir_all(library::data_dir().join("notes").join(format!("{id}.translations")));
 }
 
 /// One line of an item to translate.

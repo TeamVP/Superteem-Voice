@@ -1,6 +1,9 @@
-//! Typed and dictated notes, one JSON file each, kept beside the recordings.
+//! Typed and dictated notes. Their text, versions, bookmarks and what's written about them are rows in the
+//! vault (vault.rs); the pictures, files and dictation audio kept with a note are sealed files in the notes
+//! folder (sealed.rs).
 
-use crate::library;
+use crate::{library, vault};
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -80,13 +83,12 @@ const AUDIO_KEEP_S: u64 = 7 * 24 * 3600;
 
 /// Keeps one dictation's audio beside its note, when the note asks for it.
 pub fn keep_dictation(id: &str, pcm: &[i16], rate: u32) -> Result<(), String> {
-    path(id)?;
     if !load(id)?.keep_audio || pcm.is_empty() {
         return Ok(());
     }
     std::fs::create_dir_all(audio_dir()).map_err(|e| e.to_string())?;
     let file = audio_dir().join(format!("{id}_{}.wav", library::now()));
-    stv_core::export::write_wav(&file, pcm, rate).map_err(|e| e.to_string())
+    crate::sealed::write_wav(&file, pcm, rate)
 }
 
 /// Removes kept audio that is over a week old, or belongs to `only`.
@@ -119,14 +121,52 @@ pub fn purge_old_audio() {
     remove_audio(None);
 }
 
-/// Note ids come from the UI, so only a bare name is accepted.
-fn path(id: &str) -> Result<PathBuf, String> {
+const GONE: &str = "That note no longer exists.";
+
+/// Note ids come from the UI and name a folder of kept files, so only a bare name is accepted.
+fn check_id(id: &str) -> Result<(), String> {
     let plain = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-    if plain {
-        Ok(dir().join(format!("{id}.json")))
-    } else {
-        Err("That note no longer exists.".into())
-    }
+    if plain { Ok(()) } else { Err(GONE.into()) }
+}
+
+fn e(err: rusqlite::Error) -> String {
+    err.to_string()
+}
+
+/// A note, read through a connection already in hand (inside a transaction, or by the books).
+pub fn get(conn: &Connection, id: &str) -> Result<Note, String> {
+    check_id(id)?;
+    let json: Option<String> = conn.prepare_cached("SELECT json FROM notes WHERE id = ?1").and_then(|mut s| s.query_row([id], |r| r.get(0)).optional()).map_err(e)?;
+    let mut note: Note = serde_json::from_str(&json.ok_or(GONE)?).map_err(|_| GONE.to_string())?;
+    // The row's id is the note's, even if its JSON lost or never had one.
+    note.id = id.to_string();
+    Ok(note)
+}
+
+/// Whether a note of this id is in the vault.
+pub fn exists(conn: &Connection, id: &str) -> bool {
+    conn.prepare_cached("SELECT EXISTS(SELECT 1 FROM notes WHERE id = ?1)").and_then(|mut s| s.query_row([id], |r| r.get::<_, bool>(0))).unwrap_or(false)
+}
+
+/// The note as the list shows it: its title, the start of its text, and how many words it has.
+fn summary(note: &Note) -> (String, String, usize) {
+    let preview: String = note.body.lines().map(|l| note.line(l)).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ").chars().take(120).collect();
+    (display_title(note), preview, note.body.split_whitespace().count())
+}
+
+/// Writes the note, with the columns the list and search read kept in step.
+pub fn put(conn: &Connection, note: &Note) -> Result<(), String> {
+    check_id(&note.id)?;
+    let json = serde_json::to_string(note).map_err(|e| e.to_string())?;
+    let (title, preview, words) = summary(note);
+    let search = format!("{}\n{}", note.title.to_lowercase(), note.body.to_lowercase());
+    conn.prepare_cached(
+        "INSERT INTO notes(id, json, created, updated, archived, status, title, preview, words, search) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(id) DO UPDATE SET json = ?2, created = ?3, updated = ?4, archived = ?5, status = ?6, title = ?7, preview = ?8, words = ?9, search = ?10",
+    )
+    .and_then(|mut s| s.execute((&note.id, json, note.created as i64, note.updated as i64, note.archived, &note.status, title, preview, words as i64, search)))
+    .map_err(e)?;
+    Ok(())
 }
 
 /// One line of a note without Markdown's marks: "## Plan" is "Plan", "- [x] **Call** Tom" is "Call Tom",
@@ -181,10 +221,18 @@ pub fn display_title(note: &Note) -> String {
 }
 
 pub fn load(id: &str) -> Result<Note, String> {
-    let mut note: Note = library::read_json(&path(id)?).map_err(|_| "That note no longer exists.".to_string())?;
-    // The file name is the id, even if the file itself lost or never had one.
-    note.id = id.to_string();
-    Ok(note)
+    vault::with(|conn| get(conn, id))
+}
+
+/// Changes something about a note that isn't an edit, so it keeps its place by date. A note in a book
+/// kept for reading is refused before the vault is touched.
+fn change(id: &str, change: impl FnOnce(&mut Note) -> Result<(), String>) -> Result<(), String> {
+    crate::books::protect(id)?;
+    vault::write(|conn| {
+        let mut note = get(conn, id)?;
+        change(&mut note)?;
+        put(conn, &note)
+    })
 }
 
 /// What the formatting editor saves with a note's Markdown: its own document.
@@ -198,78 +246,86 @@ pub fn save(id: Option<String>, title: String, body: String, keep_audio: bool, r
     if let Some(id) = &id {
         crate::books::protect(id)?;
     }
-    std::fs::create_dir_all(dir()).map_err(|e| e.to_string())?;
+    // New notes take the person's languages; read before the vault is held, as preferences are a file.
+    let languages = if id.is_none() { crate::prefs::load().new_item_languages() } else { Vec::new() };
     let now = library::now();
-    let mut note = match &id {
-        Some(id) => load(id)?,
-        None => Note {
-            id: format!("n{}-{}", now, std::process::id() ^ (now as u32).rotate_left(7)),
-            created: now,
-            languages: crate::prefs::load().new_item_languages(),
-            ..Default::default()
-        },
-    };
-    // Coming back to a note after a break keeps how it was left, as a version.
-    if id.is_some() && (note.title != title || note.body != body) && now.saturating_sub(note.updated) > SESSION_GAP_S {
-        let mut all = load_versions(&note.id);
-        if all.keep(&note, "you", "", note.updated).1 {
-            save_versions(&note.id, &all)?;
+    let (id, drop_audio) = vault::write(|conn| {
+        let mut note = match &id {
+            Some(id) => get(conn, id)?,
+            None => {
+                // Two notes made in the same second would otherwise share an id, and the second replace the first.
+                let base = format!("n{}-{}", now, std::process::id() ^ (now as u32).rotate_left(7));
+                let id = std::iter::once(base.clone()).chain((2..).map(|n| format!("{base}-{n}"))).find(|id| !exists(conn, id)).unwrap_or(base);
+                Note { id, created: now, languages, ..Default::default() }
+            }
+        };
+        // Coming back to a note after a break keeps how it was left, as a version.
+        if id.is_some() && (note.title != title || note.body != body) && now.saturating_sub(note.updated) > SESSION_GAP_S {
+            keep(conn, &note, "you", "", note.updated)?;
         }
-    }
-    match rich {
-        Some(rich) => {
-            note.format = "md".into();
-            note.doc = rich.doc;
+        match rich {
+            Some(rich) => {
+                note.format = "md".into();
+                note.doc = rich.doc;
+            }
+            // Text changed by something other than the editor: its document no longer matches.
+            None if note.body != body => note.doc = None,
+            None => {}
         }
-        // Text changed by something other than the editor: its document no longer matches.
-        None if note.body != body => note.doc = None,
-        None => {}
+        note.title = title;
+        note.body = body;
+        note.updated = now;
+        let drop_audio = note.keep_audio && !keep_audio;
+        note.keep_audio = keep_audio;
+        put(conn, &note)?;
+        Ok((note.id, drop_audio))
+    })?;
+    if drop_audio {
+        remove_audio(Some(&id));
     }
-    note.title = title;
-    note.body = body;
-    note.updated = now;
-    if note.keep_audio && !keep_audio {
-        remove_audio(Some(&note.id));
-    }
-    note.keep_audio = keep_audio;
-    library::write_json(&path(&note.id)?, &note)?;
-    Ok(note.id)
+    Ok(id)
 }
 
 /// Archiving doesn't count as an edit, so the note keeps its place by date.
 pub fn set_archived(id: &str, archived: bool) -> Result<(), String> {
-    crate::books::protect(id)?;
-    let mut note = load(id)?;
-    note.archived = archived;
-    library::write_json(&path(id)?, &note)
+    change(id, |note| {
+        note.archived = archived;
+        Ok(())
+    })
 }
 
 /// Like archiving, a status change keeps the note's place by date.
 pub fn set_status(id: &str, status: &str) -> Result<(), String> {
-    crate::books::protect(id)?;
-    let mut note = load(id)?;
-    note.status = library::check_status(status)?;
-    library::write_json(&path(id)?, &note)
+    let status = library::check_status(status)?;
+    change(id, |note| {
+        note.status = status;
+        Ok(())
+    })
 }
 
 /// Like a status, languages don't count as an edit.
 pub fn set_languages(id: &str, languages: Vec<String>) -> Result<(), String> {
-    crate::books::protect(id)?;
-    let mut note = load(id)?;
-    note.languages = languages;
-    note.language.clear();
-    library::write_json(&path(id)?, &note)
+    change(id, |note| {
+        note.languages = languages;
+        note.language.clear();
+        Ok(())
+    })
 }
 
+/// Deletes the note with its versions and everything written about it: its chat, analyses, translations
+/// and bookmarks, all in one go. Its kept files and dictation audio go after.
 pub fn delete(id: &str) -> Result<(), String> {
     crate::books::protect(id)?;
+    vault::write(|conn| {
+        get(conn, id)?;
+        conn.execute("DELETE FROM notes WHERE id = ?1", [id]).map_err(e)?;
+        conn.execute("DELETE FROM versions WHERE note = ?1", [id]).map_err(e)?;
+        conn.execute("DELETE FROM docs WHERE owner = ?1 AND kind IN ('chat', 'analysis', 'translation', 'bookmarks')", [id]).map_err(e)?;
+        Ok(())
+    })?;
     remove_audio(Some(id));
-    let file = path(id)?;
-    let _ = std::fs::remove_file(file.with_extension("versions.json"));
-    let _ = std::fs::remove_file(file.with_extension("chat.json"));
-    let _ = std::fs::remove_file(file.with_extension("bookmarks.json"));
-    let _ = std::fs::remove_dir_all(file.with_extension("files"));
-    std::fs::remove_file(file).map_err(|e| e.to_string())
+    let _ = std::fs::remove_dir_all(dir().join(format!("{id}.files")));
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -314,22 +370,23 @@ pub fn clean_commentary(text: String) -> String {
 /// Changes a note's commentary, pronunciations or author, whichever is given. Not its text, so no version is
 /// kept.
 pub fn set_extras(id: &str, commentary: Option<String>, pronounce: Option<std::collections::BTreeMap<String, String>>, author: Option<String>) -> Result<(), String> {
-    crate::books::protect(id)?;
-    let mut note = load(id)?;
-    if let Some(name) = author {
-        note.author = clean_line(&name, 200);
-    }
-    if let Some(text) = commentary {
-        note.commentary = clean_commentary(text);
-    }
-    if let Some(words) = pronounce {
-        note.pronounce = clean_pronounce(words);
-    }
-    library::write_json(&path(id)?, &note)
+    change(id, |note| {
+        if let Some(name) = author {
+            note.author = clean_line(&name, 200);
+        }
+        if let Some(text) = commentary {
+            note.commentary = clean_commentary(text);
+        }
+        if let Some(words) = pronounce {
+            note.pronounce = clean_pronounce(words);
+        }
+        Ok(())
+    })
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// Bookmarks: places and passages marked in a note, kept beside it as `<id>.bookmarks.json`
+// Bookmarks: places and passages marked in a note, kept in the vault with it (before the vault, beside it
+// as `<id>.bookmarks.json`)
 
 /// One bookmark. It finds its place again by the words it covers (`quote`) and those around it, so it
 /// holds through edits, and `at` (where it began in the note's text) chooses between repeats.
@@ -356,16 +413,12 @@ const MAX_LABEL: usize = 120;
 const MAX_QUOTE: usize = 4000;
 
 pub fn bookmarks(id: &str) -> Result<Vec<Bookmark>, String> {
-    let file = path(id)?.with_extension("bookmarks.json");
-    Ok(library::read_json(&file).unwrap_or_default())
+    check_id(id)?;
+    Ok(vault::doc("bookmarks", id, ""))
 }
 
 /// Bookmarks can be kept on a note in a reading book too: marking a place doesn't change it.
 pub fn save_bookmarks(id: &str, mut marks: Vec<Bookmark>) -> Result<(), String> {
-    let file = path(id)?;
-    if !file.exists() {
-        return Err("That note no longer exists.".into());
-    }
     marks.truncate(MAX_BOOKMARKS);
     let clip = |s: &mut String, n: usize| {
         if let Some((i, _)) = s.char_indices().nth(n) {
@@ -382,12 +435,10 @@ pub fn save_bookmarks(id: &str, mut marks: Vec<Bookmark>) -> Result<(), String> 
             m.color.clear();
         }
     }
-    let file = file.with_extension("bookmarks.json");
-    if marks.is_empty() {
-        let _ = std::fs::remove_file(file);
-        return Ok(());
-    }
-    library::write_json(&file, &marks)
+    vault::write(|conn| {
+        get(conn, id)?;
+        if marks.is_empty() { vault::drop_doc(conn, "bookmarks", id, "") } else { vault::put_doc(conn, "bookmarks", id, "", &marks) }
+    })
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -412,7 +463,8 @@ pub struct Kept {
 }
 
 fn files_dir(id: &str) -> Result<PathBuf, String> {
-    Ok(path(id)?.with_extension("files"))
+    check_id(id)?;
+    Ok(dir().join(format!("{id}.files")))
 }
 
 /// The kind of picture these bytes are, by how they start; None for anything else.
@@ -485,7 +537,7 @@ pub fn add_file(id: &str, name: &str, bytes: &[u8]) -> Result<Kept, String> {
     use std::hash::{BuildHasher, Hasher};
     let tag = std::collections::hash_map::RandomState::new().build_hasher().finish() as u32;
     let file = format!("{tag:08x}-{name}");
-    std::fs::write(dir.join(&file), bytes).map_err(|e| e.to_string())?;
+    crate::sealed::write(&dir.join(&file), bytes)?;
     let image = image.is_some() && media_type(&name) != "application/octet-stream";
     Ok(Kept { file, name, size: bytes.len(), image })
 }
@@ -542,156 +594,161 @@ pub struct Version {
     pub label: String,
 }
 
-/// A note's versions, oldest first, kept beside it as `<id>.versions.json`.
+/// A note's versions as they were kept before the vault, in `<id>.versions.json`.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct Versions {
-    pub last: u32,
-    pub versions: Vec<Version>,
+struct VersionsFile {
+    versions: Vec<Version>,
 }
 
-impl Versions {
-    /// Keeps the note as a version unless the newest version already is it. Gives the number of the
-    /// version that holds this text, and whether one was added.
-    fn keep(&mut self, note: &Note, by: &str, label: &str, at: u64) -> (u32, bool) {
-        let n = self.number(note);
-        if n == 0 || n <= self.last {
-            return (n, false);
-        }
-        self.last = n;
-        self.versions.push(Version {
-            n: self.last,
-            at,
-            title: note.title.clone(),
-            body: note.body.clone(),
-            format: note.format.clone(),
-            doc: note.doc.clone(),
-            by: by.into(),
-            label: label.into(),
-        });
-        if self.versions.len() > MAX_VERSIONS {
-            let extra = self.versions.len() - MAX_VERSIONS;
-            self.versions.drain(..extra);
-        }
-        (self.last, true)
-    }
+/// The note's versions, oldest first; `newest` gives only the last.
+fn kept_versions(conn: &Connection, id: &str, newest: bool) -> Result<Vec<Version>, String> {
+    let sql = if newest { "SELECT json FROM versions WHERE note = ?1 ORDER BY n DESC LIMIT 1" } else { "SELECT json FROM versions WHERE note = ?1 ORDER BY n" };
+    let rows: Vec<String> = conn.prepare_cached(sql).and_then(|mut s| s.query_map([id], |r| r.get(0))?.collect()).map_err(e)?;
+    Ok(rows.iter().filter_map(|json| serde_json::from_str(json).ok()).collect())
+}
 
-    /// The number of the version that holds this text: the newest when it already does, else the one it
-    /// will be kept as. 0 for an empty note, which isn't a version.
-    fn number(&self, note: &Note) -> u32 {
-        match self.versions.last() {
-            Some(v) if v.title == note.title && v.body == note.body => v.n,
-            _ if note.title.trim().is_empty() && note.body.trim().is_empty() => 0,
-            _ => self.last + 1,
-        }
+fn put_version(conn: &Connection, id: &str, version: &Version) -> Result<(), String> {
+    let json = serde_json::to_string(version).map_err(|e| e.to_string())?;
+    conn.prepare_cached("INSERT OR REPLACE INTO versions(note, n, json) VALUES(?1, ?2, ?3)").and_then(|mut s| s.execute((id, version.n, json))).map_err(e)?;
+    Ok(())
+}
+
+/// The number of the version that holds this text: the newest when it already does, else the one it will
+/// be kept as. 0 for an empty note, which isn't a version.
+fn number(newest: Option<&Version>, note: &Note) -> u32 {
+    match newest {
+        Some(v) if v.title == note.title && v.body == note.body => v.n,
+        _ if note.title.trim().is_empty() && note.body.trim().is_empty() => 0,
+        // Numbers count up and are never reused: the newest version is never the one dropped.
+        _ => newest.map_or(0, |v| v.n) + 1,
     }
+}
+
+/// Keeps the note as a version unless the newest version already is it. Gives the number of the
+/// version that holds this text, and whether one was added.
+fn keep(conn: &Connection, note: &Note, by: &str, label: &str, at: u64) -> Result<(u32, bool), String> {
+    let newest = kept_versions(conn, &note.id, true)?.pop();
+    let n = number(newest.as_ref(), note);
+    if n == 0 || newest.as_ref().is_some_and(|v| n <= v.n) {
+        return Ok((n, false));
+    }
+    put_version(
+        conn,
+        &note.id,
+        &Version { n, at, title: note.title.clone(), body: note.body.clone(), format: note.format.clone(), doc: note.doc.clone(), by: by.into(), label: label.into() },
+    )?;
+    conn.execute(
+        "DELETE FROM versions WHERE note = ?1 AND n NOT IN (SELECT n FROM versions WHERE note = ?1 ORDER BY n DESC LIMIT ?2)",
+        (&note.id, MAX_VERSIONS as i64),
+    )
+    .map_err(e)?;
+    Ok((n, true))
 }
 
 /// The note's version number as it is now, as shown beside its title on a phone. Keeps nothing.
 pub fn version_number(id: &str) -> Result<u32, String> {
-    Ok(load_versions(id).number(&load(id)?))
-}
-
-fn load_versions(id: &str) -> Versions {
-    path(id).ok().and_then(|p| library::read_json(&p.with_extension("versions.json")).ok()).unwrap_or_default()
-}
-
-fn save_versions(id: &str, all: &Versions) -> Result<(), String> {
-    let file = path(id)?.with_extension("versions.json");
-    // write_json's partial file would otherwise be `<id>.json.part`, the note's own.
-    let text = serde_json::to_string_pretty(all).map_err(|e| e.to_string())?;
-    let partial = file.with_extension("json.tmp");
-    std::fs::write(&partial, text).map_err(|e| e.to_string())?;
-    std::fs::rename(&partial, &file).map_err(|e| e.to_string())
+    vault::with(|conn| {
+        let note = get(conn, id)?;
+        Ok(number(kept_versions(conn, id, true)?.first(), &note))
+    })
 }
 
 /// The note's versions, oldest first. The note as it is now is always the last of them.
 pub fn versions(id: &str) -> Result<Vec<Version>, String> {
     crate::books::protect(id)?;
-    let note = load(id)?;
-    let mut all = load_versions(id);
-    if all.keep(&note, "you", "", note.updated).1 {
-        save_versions(id, &all)?;
-    }
-    Ok(all.versions)
+    vault::write(|conn| {
+        let note = get(conn, id)?;
+        keep(conn, &note, "you", "", note.updated)?;
+        kept_versions(conn, id, false)
+    })
 }
 
 /// The newest version that holds the note's text as it is now, if one does. Unlike `versions`, keeps nothing.
 pub fn current_version(id: &str) -> Result<Option<u32>, String> {
-    let note = load(id)?;
-    Ok(load_versions(id).versions.iter().rev().find(|v| v.title == note.title && v.body == note.body).map(|v| v.n))
+    vault::with(|conn| {
+        let note = get(conn, id)?;
+        Ok(kept_versions(conn, id, false)?.iter().rev().find(|v| v.title == note.title && v.body == note.body).map(|v| v.n))
+    })
 }
 
 /// Replaces the note's text with the assistant's, as a new version. The text before it is kept as a
 /// version too. Gives the new version's number.
 pub fn rewrite(id: &str, body: String, label: &str) -> Result<u32, String> {
     crate::books::protect(id)?;
-    let mut note = load(id)?;
-    let mut all = load_versions(id);
-    all.keep(&note, "you", "", note.updated);
-    let now = library::now();
-    // The assistant writes Markdown, which is the note from here on; the editor reads it back in.
-    note.body = body;
-    note.format = "md".into();
-    note.doc = None;
-    note.updated = now;
-    let (n, _) = all.keep(&note, "ai", label, now);
-    save_versions(id, &all)?;
-    library::write_json(&path(id)?, &note)?;
-    Ok(n)
+    vault::write(|conn| {
+        let mut note = get(conn, id)?;
+        keep(conn, &note, "you", "", note.updated)?;
+        let now = library::now();
+        // The assistant writes Markdown, which is the note from here on; the editor reads it back in.
+        note.body = body;
+        note.format = "md".into();
+        note.doc = None;
+        note.updated = now;
+        let (n, _) = keep(conn, &note, "ai", label, now)?;
+        put(conn, &note)?;
+        Ok(n)
+    })
 }
 
 /// Puts dictated words on the end of the note, as their own paragraph: for a dictation that went on
 /// after its page was left, so nothing said is lost.
 pub fn append_dictation(id: &str, words: &str) -> Result<(), String> {
-    crate::books::protect(id)?;
     let words = words.trim();
     if words.is_empty() {
         return Ok(());
     }
-    let mut note = load(id)?;
-    let body = note.body.trim_end();
-    note.body = if body.is_empty() { words.to_string() } else { format!("{body}
-
-{words}") };
-    // The editor's document doesn't have these words; it reads the body back in.
-    note.doc = None;
-    note.updated = library::now();
-    library::write_json(&path(id)?, &note)
+    crate::books::protect(id)?;
+    vault::write(|conn| {
+        let mut note = get(conn, id)?;
+        let body = note.body.trim_end();
+        note.body = if body.is_empty() { words.to_string() } else { format!("{body}\n\n{words}") };
+        // The editor's document doesn't have these words; it reads the body back in.
+        note.doc = None;
+        note.updated = library::now();
+        put(conn, &note)
+    })
 }
 
 /// Makes an earlier version the note again, as a new version, so nothing in between is lost.
 pub fn restore(id: &str, n: u32) -> Result<Note, String> {
     crate::books::protect(id)?;
-    let mut note = load(id)?;
-    let mut all = load_versions(id);
-    all.keep(&note, "you", "", note.updated);
-    let old = all.versions.iter().find(|v| v.n == n).cloned().ok_or("That version is no longer kept.")?;
-    let now = library::now();
-    note.title = old.title;
-    note.body = old.body;
-    note.format = old.format;
-    note.doc = old.doc;
-    note.updated = now;
-    all.keep(&note, "restore", &format!("Version {n} brought back"), now);
-    save_versions(id, &all)?;
-    library::write_json(&path(id)?, &note)?;
-    Ok(note)
+    vault::write(|conn| {
+        let mut note = get(conn, id)?;
+        keep(conn, &note, "you", "", note.updated)?;
+        let old = kept_versions(conn, id, false)?.into_iter().find(|v| v.n == n).ok_or("That version is no longer kept.")?;
+        let now = library::now();
+        note.title = old.title;
+        note.body = old.body;
+        note.format = old.format;
+        note.doc = old.doc;
+        note.updated = now;
+        keep(conn, &note, "restore", &format!("Version {n} brought back"), now)?;
+        put(conn, &note)?;
+        Ok(note)
+    })
 }
 
-/// A note file found in the folder, or None for anything else kept there.
+// ---------------------------------------------------------------------------------------------------------
+// Notes kept as files, before the vault
+
+/// A note file found in a notes folder, or None for anything else kept there.
 ///
-/// Analyses (`<id>.analysis.json`) and half-written saves sit beside the notes, and every
-/// field of `Note` has a default, so they would otherwise parse as a blank note dated 1970
-/// that can't be opened or deleted. Only `<id>.json` with a plain id counts, and the note
-/// takes its id from its file name, so whatever the list shows can be opened and deleted.
+/// Analyses (`<id>.analysis.json`), bookmarks and half-written saves sit beside the notes, and every
+/// field of `Note` has a default, so they would otherwise parse as a blank note dated 1970. Only
+/// `<id>.json` with a plain id counts, and the note takes its id from its file name.
 fn read_entry(file: &std::path::Path) -> Option<Note> {
     if file.extension()? != "json" {
         return None;
     }
     let id = file.file_stem()?.to_str()?;
-    path(id).ok()?;
+    check_id(id).ok()?;
     let mut note: Note = library::read_json(file).ok()?;
+    // Any JSON object reads as a note, as every field has a default: a file with neither title nor text
+    // (a key file, a setting) isn't taken for one.
+    if note.title.trim().is_empty() && note.body.trim().is_empty() {
+        return None;
+    }
     note.id = id.to_string();
     if note.created == 0 && note.updated == 0 {
         // Undated: fall back to the file's own time rather than show 1970.
@@ -703,33 +760,212 @@ fn read_entry(file: &std::path::Path) -> Option<Note> {
     Some(note)
 }
 
+/// What bringing one note's files in did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Came {
+    /// It's in the vault now, with everything kept beside it.
+    New,
+    /// A note of that id was already in the vault, and stands as it is.
+    Had,
+}
+
+/// Runs `f` as one step inside whatever transaction is open (a savepoint): all of it, or none, without
+/// ending the transaction around it. Outside one, it is a transaction of its own.
+pub fn step<T>(conn: &Connection, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    conn.execute_batch("SAVEPOINT step").map_err(e)?;
+    match f() {
+        Ok(out) => {
+            conn.execute_batch("RELEASE step").map_err(e)?;
+            Ok(out)
+        }
+        Err(why) => {
+            let _ = conn.execute_batch("ROLLBACK TO step; RELEASE step");
+            Err(why)
+        }
+    }
+}
+
+/// Brings one note's files into the vault: the note, its versions, chat, analyses, translations and
+/// bookmarks, all or none. Gives what happened, and the files that are then no longer needed.
+fn bring_in(conn: &Connection, file: &std::path::Path, note: &Note) -> Result<(Came, Vec<PathBuf>), String> {
+    step(conn, || bring_in_step(conn, file, note))
+}
+
+fn bring_in_step(tx: &Connection, file: &std::path::Path, note: &Note) -> Result<(Came, Vec<PathBuf>), String> {
+    let read = |path: &std::path::Path| library::read_json::<serde_json::Value>(path).ok();
+    let mut done = vec![file.to_path_buf()];
+    // A note already in the vault was brought in before, and has been edited there since.
+    let known = exists(&tx, &note.id);
+    if !known {
+        put(&tx, note)?;
+    }
+    let versions = file.with_extension("versions.json");
+    if let Ok(kept) = library::read_json::<VersionsFile>(&versions) {
+        for version in kept.versions.iter().filter(|_| !known) {
+            put_version(&tx, &note.id, version)?;
+        }
+        done.push(versions);
+    }
+    for kind in ["chat", "analysis", "bookmarks"] {
+        let path = file.with_extension(format!("{kind}.json"));
+        if let Some(value) = read(&path) {
+            if !known {
+                vault::put_doc(&tx, kind, &note.id, "", &value)?;
+            }
+            done.push(path);
+        }
+    }
+    let translations = file.with_extension("translations");
+    let mut unread = false;
+    for entry in std::fs::read_dir(&translations).into_iter().flatten().flatten() {
+        let path = entry.path();
+        match (path.file_stem().and_then(|s| s.to_str()), read(&path)) {
+            (Some(language), Some(value)) if path.extension().is_some_and(|x| x == "json") => {
+                if !known {
+                    vault::put_doc(&tx, "translation", &note.id, language, &value)?;
+                }
+                done.push(path);
+            }
+            _ => unread = true,
+        }
+    }
+    // What was written is read back before anything is removed.
+    let back = get(&tx, &note.id)?;
+    let same = known || serde_json::to_value(&back).ok() == serde_json::to_value(note).ok();
+    if !same {
+        return Err("it didn't read back the same".into());
+    }
+    if !unread && translations.is_dir() {
+        done.push(translations);
+    }
+    Ok((if known { Came::Had } else { Came::New }, done))
+}
+
+/// What was found bringing notes in from a folder.
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct Brought {
+    /// Notes now in the vault that weren't.
+    pub added: usize,
+    /// Notes found that the vault already had, left as they are there.
+    pub had: usize,
+    /// Notes that couldn't be read or written, by id; their files are left where they are.
+    pub failed: Vec<String>,
+}
+
+/// Brings the notes kept as files in `folder` into the vault. With `consume`, as when this version first
+/// runs on this device's own notes folder, each note's files are deleted once it's safely in (or, where the
+/// vault isn't sealed, moved to `before-vault`). Otherwise, as for a copy from a backup or another computer,
+/// the folder is only read. Kept pictures and files come along, sealed.
+///
+/// Every note goes in as a step of one transaction, saved to disk once at the end: a library of thousands
+/// comes in in moments even on a spinning disk, where saving each note on its own would take minutes. No
+/// file is removed until that one save has finished.
+pub fn bring_in_folder(conn: &Connection, folder: &std::path::Path, consume: bool) -> Brought {
+    let mut out = Brought::default();
+    let files: Vec<PathBuf> = std::fs::read_dir(folder).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    let Ok(tx) = conn.unchecked_transaction() else { return out };
+    let mut landed: Vec<(String, Came, Vec<PathBuf>)> = Vec::new();
+    for file in files {
+        let Some(note) = read_entry(&file) else { continue };
+        match bring_in(&tx, &file, &note) {
+            Ok((came, done)) => landed.push((note.id.clone(), came, done)),
+            Err(why) => {
+                eprintln!("The note {} wasn't brought into the vault: {why}", note.id);
+                out.failed.push(note.id.clone());
+            }
+        }
+    }
+    if let Err(why) = tx.commit() {
+        eprintln!("The notes weren't brought into the vault: {why}");
+        out.failed.extend(landed.into_iter().map(|(id, _, _)| id));
+        return out;
+    }
+    for (id, came, done) in landed {
+        match came {
+            Came::New => out.added += 1,
+            Came::Had => out.had += 1,
+        }
+        if !consume {
+            // A note's pictures and files come with it, when the folder isn't this device's own.
+            if came == Came::New {
+                copy_kept_files(&folder.join(format!("{id}.files")), &id);
+            }
+            continue;
+        }
+        for path in done {
+            let gone = if vault::SEALED {
+                if path.is_dir() { std::fs::remove_dir(&path) } else { std::fs::remove_file(&path) }
+            } else {
+                let aside = folder.join("before-vault");
+                std::fs::create_dir_all(&aside).and_then(|_| std::fs::rename(&path, aside.join(path.file_name().unwrap_or_default())))
+            };
+            if let Err(why) = gone {
+                eprintln!("{} is in the vault but its file is still there: {why}", path.display());
+            }
+        }
+    }
+    out
+}
+
+/// Copies a note's kept files from another folder into its own, sealed as they're written.
+fn copy_kept_files(from: &std::path::Path, id: &str) {
+    let Ok(to) = files_dir(id) else { return };
+    for entry in std::fs::read_dir(from).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name() else { continue };
+        if !path.is_file() || to.join(name).exists() {
+            continue;
+        }
+        let copied = crate::sealed::read(&path).and_then(|bytes| {
+            std::fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+            crate::sealed::write(&to.join(name), &bytes)
+        });
+        if let Err(why) = copied {
+            eprintln!("{} wasn't brought in: {why}", path.display());
+        }
+    }
+}
+
+/// Brings this device's notes still kept as files into the vault, as when this version first runs. Where
+/// the vault is sealed the files are then deleted, since they are the notes in the clear; elsewhere they
+/// are moved to `notes/before-vault`.
+pub fn bring_in_files(conn: &Connection) -> Brought {
+    bring_in_folder(conn, &dir(), true)
+}
+
+/// How many notes are still kept as files in this device's notes folder, waiting to be brought in.
+pub fn files_waiting() -> usize {
+    std::fs::read_dir(dir()).into_iter().flatten().flatten().filter(|e| read_entry(&e.path()).is_some()).count()
+}
+
+fn listed(conn: &Connection, query: &str) -> Result<Vec<NoteSummary>, String> {
+    conn.prepare_cached(
+        "SELECT id, title, preview, created, updated, words, archived, status FROM notes
+         WHERE ?1 = '' OR instr(search, ?1) > 0 ORDER BY updated DESC",
+    )
+    .and_then(|mut s| {
+        s.query_map([query], |r| {
+            Ok(NoteSummary {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                preview: r.get(2)?,
+                created: r.get::<_, i64>(3)? as u64,
+                updated: r.get::<_, i64>(4)? as u64,
+                words: r.get::<_, i64>(5)? as usize,
+                archived: r.get(6)?,
+                status: r.get(7)?,
+            })
+        })?
+        .collect()
+    })
+    .map_err(e)
+}
+
+/// The notes, newest first; those whose title or text has `query` in it when one is given. Empty while
+/// the vault is shut.
 pub fn list(query: &str) -> Vec<NoteSummary> {
     let query = query.trim().to_lowercase();
-    let mut notes: Vec<Note> = std::fs::read_dir(dir())
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| read_entry(&e.path()))
-        .filter(|n| query.is_empty() || n.title.to_lowercase().contains(&query) || n.body.to_lowercase().contains(&query))
-        .collect();
-    notes.sort_by(|a, b| b.updated.cmp(&a.updated));
-    notes
-        .iter()
-        .map(|n| {
-            let title = display_title(n);
-            let preview: String = n.body.lines().map(|l| n.line(l)).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ").chars().take(120).collect();
-            NoteSummary {
-                id: n.id.clone(),
-                preview,
-                created: n.created,
-                updated: n.updated,
-                words: n.body.split_whitespace().count(),
-                archived: n.archived,
-                status: n.status.clone(),
-                title,
-            }
-        })
-        .collect()
+    vault::with(|conn| listed(conn, &query)).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -755,12 +991,14 @@ mod tests {
         };
         let note = write("n5-1.json", r#"{"id":"n5-1","title":"Plan","created":5,"updated":6}"#);
         let analysis = write("n5-1.analysis.json", r#"{"templates":[]}"#);
+        let marks = write("n5-1.bookmarks.json", r#"[]"#);
         let partial = write("n5-1.json.part", r#"{"id":"n5-1"}"#);
         let idless = write("n7-2.json", r#"{"title":"Lost its id"}"#);
 
         let found = read_entry(&note).unwrap();
         assert_eq!((found.id.as_str(), found.created, found.updated), ("n5-1", 5, 6));
         assert!(read_entry(&analysis).is_none());
+        assert!(read_entry(&marks).is_none());
         assert!(read_entry(&partial).is_none());
         let found = read_entry(&idless).unwrap();
         assert_eq!(found.id, "n7-2");
@@ -792,27 +1030,102 @@ mod tests {
 
     #[test]
     fn versions_keep_each_change_once() {
-        let note = |body: &str| Note { body: body.into(), ..Default::default() };
-        let mut all = Versions::default();
-        assert_eq!(all.keep(&note(""), "you", "", 1), (0, false), "an empty note isn't a version");
-        assert_eq!(all.number(&note("first")), 1, "the number a change will be kept as");
-        assert_eq!(all.keep(&note("first"), "you", "", 1), (1, true));
-        assert_eq!(all.number(&note("first")), 1);
-        assert_eq!(all.keep(&note("first"), "you", "", 2), (1, false), "unchanged text isn't kept twice");
-        assert_eq!(all.keep(&note("shorter"), "ai", "Make it shorter", 3), (2, true));
-        assert_eq!(all.keep(&note("first"), "restore", "Version 1 brought back", 4), (3, true));
-        assert_eq!(all.versions.iter().map(|v| v.by.as_str()).collect::<Vec<_>>(), ["you", "ai", "restore"]);
+        let conn = vault::memory();
+        let note = |body: &str| Note { id: "n1".into(), body: body.into(), ..Default::default() };
+        let keep = |body: &str, by: &str, label: &str, at: u64| keep(&conn, &note(body), by, label, at).unwrap();
+        let number = |body: &str| number(kept_versions(&conn, "n1", true).unwrap().first(), &note(body));
+        assert_eq!(keep("", "you", "", 1), (0, false), "an empty note isn't a version");
+        assert_eq!(number("first"), 1, "the number a change will be kept as");
+        assert_eq!(keep("first", "you", "", 1), (1, true));
+        assert_eq!(number("first"), 1);
+        assert_eq!(keep("first", "you", "", 2), (1, false), "unchanged text isn't kept twice");
+        assert_eq!(keep("shorter", "ai", "Make it shorter", 3), (2, true));
+        assert_eq!(keep("first", "restore", "Version 1 brought back", 4), (3, true));
+        let all = kept_versions(&conn, "n1", false).unwrap();
+        assert_eq!(all.iter().map(|v| v.by.as_str()).collect::<Vec<_>>(), ["you", "ai", "restore"]);
         for i in 0..MAX_VERSIONS + 5 {
-            all.keep(&note(&format!("text {i}")), "you", "", 5);
+            keep(&format!("text {i}"), "you", "", 5);
         }
-        assert_eq!(all.versions.len(), MAX_VERSIONS);
-        assert_eq!(all.versions.last().unwrap().n, all.last);
+        let all = kept_versions(&conn, "n1", false).unwrap();
+        assert_eq!(all.len(), MAX_VERSIONS);
+        assert_eq!(all.last().unwrap().n as usize, MAX_VERSIONS + 8, "numbers are never reused");
+        assert_eq!(all.first().unwrap().n, 9, "the oldest are the ones dropped");
+        assert!(kept_versions(&conn, "n2", false).unwrap().is_empty(), "another note's versions are its own");
     }
 
     #[test]
     fn only_plain_ids_are_accepted() {
-        assert!(path("n123-4").is_ok());
-        assert!(path("../prefs").is_err());
-        assert!(path("").is_err());
+        assert!(check_id("n123-4").is_ok());
+        assert!(check_id("../prefs").is_err());
+        assert!(check_id("").is_err());
+    }
+
+    #[test]
+    fn the_list_and_search_read_what_was_saved() {
+        let conn = vault::memory();
+        let note = |id: &str, title: &str, body: &str, updated: u64| Note { id: id.into(), title: title.into(), body: body.into(), updated, format: "md".into(), ..Default::default() };
+        put(&conn, &note("n1", "", "## Offsite **plan**\n\nBook the ÉCOLE hall", 5)).unwrap();
+        put(&conn, &note("n2", "Groceries", "- [ ] milk", 9)).unwrap();
+        let all = listed(&conn, "").unwrap();
+        assert_eq!(all.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), ["n2", "n1"], "newest first");
+        assert_eq!((all[1].title.as_str(), all[1].preview.as_str(), all[1].words), ("Offsite plan", "Offsite plan Book the ÉCOLE hall", 7));
+        // Search ignores case, accents included, and reads titles as well as text.
+        assert_eq!(listed(&conn, "école").unwrap().len(), 1);
+        assert_eq!(listed(&conn, "groc").unwrap()[0].id, "n2");
+        assert!(listed(&conn, "absent").unwrap().is_empty());
+        // Saving again replaces the row rather than adding one.
+        put(&conn, &note("n1", "Renamed", "x", 12)).unwrap();
+        assert_eq!(listed(&conn, "").unwrap().iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), ["Renamed", "Groceries"]);
+        assert_eq!(get(&conn, "n1").unwrap().body, "x");
+        assert!(get(&conn, "n9").is_err());
+    }
+
+    #[test]
+    fn a_note_kept_as_files_is_brought_in_whole() {
+        let folder = std::env::temp_dir().join(format!("stv-notes-in-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("n5-1.translations")).unwrap();
+        let write = |name: &str, text: &str| std::fs::write(folder.join(name), text).unwrap();
+        write(
+            "n5-1.json",
+            r#"{"id":"n5-1","title":"Plan","body":"Ship on Friday","created":5,"updated":6,"format":"md","doc":{"type":"doc"},"commentary":"Why Friday","pronounce":{"Phocion":"Foe-shee-on"}}"#,
+        );
+        write("n5-1.versions.json", r#"{"last":2,"versions":[{"n":1,"at":5,"body":"Ship","by":"you"},{"n":2,"at":6,"body":"Ship on Friday","by":"ai","label":"Say when"}]}"#);
+        write("n5-1.chat.json", r#"{"messages":[{"role":"user","text":"When?"}]}"#);
+        write("n5-1.analysis.json", r#"{"stack":[{"template":"summary"}]}"#);
+        write("n5-1.bookmarks.json", r#"[{"id":"m1","at":0,"quote":"Ship","label":"Start","color":"c03","created":7}]"#);
+        write("n5-1.translations/fr.json", r#"{"language":"fr","updated":7}"#);
+        let file = folder.join("n5-1.json");
+        let note = read_entry(&file).unwrap();
+
+        let conn = vault::memory();
+        let (came, done) = bring_in(&conn, &file, &note).unwrap();
+        assert_eq!(came, Came::New);
+        assert_eq!(done.len(), 7, "the note, its versions, chat, analyses, bookmarks, one translation and their folder: {done:?}");
+        let back = get(&conn, "n5-1").unwrap();
+        assert_eq!((back.title.as_str(), back.body.as_str(), back.created, back.doc.is_some()), ("Plan", "Ship on Friday", 5, true));
+        assert_eq!((back.commentary.as_str(), back.pronounce.get("Phocion").map(String::as_str)), ("Why Friday", Some("Foe-shee-on")));
+        let versions = kept_versions(&conn, "n5-1", false).unwrap();
+        assert_eq!(versions.iter().map(|v| (v.n, v.by.as_str())).collect::<Vec<_>>(), [(1, "you"), (2, "ai")]);
+        let chat: serde_json::Value = vault::get_doc(&conn, "chat", "n5-1", "").unwrap();
+        assert_eq!(chat["messages"][0]["text"], "When?");
+        assert!(vault::get_doc::<serde_json::Value>(&conn, "analysis", "n5-1", "").is_some());
+        let marks: Vec<Bookmark> = vault::get_doc(&conn, "bookmarks", "n5-1", "").unwrap();
+        assert_eq!((marks[0].label.as_str(), marks[0].color.as_str()), ("Start", "c03"));
+        assert_eq!(vault::doc_names(&conn, "translation", "n5-1"), ["fr"]);
+
+        // Brought in a second time, as when its files couldn't be removed, what's in the vault stands.
+        put(&conn, &Note { body: "Edited since".into(), ..back }).unwrap();
+        assert_eq!(bring_in(&conn, &file, &note).unwrap().0, Came::Had);
+        assert_eq!(get(&conn, "n5-1").unwrap().body, "Edited since");
+        assert_eq!(kept_versions(&conn, "n5-1", false).unwrap().len(), 2);
+
+        // A copy from elsewhere is only read: its files stay, and the count says what came in.
+        let other = vault::memory();
+        let brought = bring_in_folder(&other, &folder, false);
+        assert_eq!((brought.added, brought.had, brought.failed.len()), (1, 0, 0));
+        assert!(file.exists(), "a folder that isn't this device's own is left as it was");
+        assert_eq!(bring_in_folder(&other, &folder, false).had, 1);
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 }
