@@ -26,7 +26,7 @@ async function optimiseCallout() {
   const todo = data.plan.steps.filter((s) => !s.done && !s.kind.startsWith("remove"));
   if (!data.progress.running && (!todo.length || !data.stale)) return null;
   return el("div", { class: "optimise-callout" }, svg("spark", 22),
-    el("div", { class: "grow" }, el("strong", {}, data.progress.running ? tr("Optimising Voice…") : tr("Make Voice faster and smarter on this {0}", { "0": deviceWord() })),
+    el("div", { class: "grow" }, el("strong", {}, data.progress.running ? tr("Optimising Voice-OS…") : tr("Make Voice-OS faster and smarter on this {0}", { "0": deviceWord() })),
       el("small", {}, data.progress.running ? data.progress.step : optimiseSummary(todo))),
     el("button", { class: "primary pill", onclick: () => (data.progress.running ? showAiSettings() : showOptimise(OPTIMISE_FROM.settings)) }, data.progress.running ? tr("See progress") : tr("Optimise")));
 }
@@ -54,7 +54,7 @@ async function optimiseNudge() {
   const todo = data.plan.steps.filter((s) => !s.done && !s.kind.startsWith("remove"));
   const card = el("div", { class: "optimise-nudge", role: "region", "aria-label": tr("Optimise for this device") },
     svg("spark", 22),
-    el("div", { class: "grow" }, el("strong", {}, tr("Voice can run better on this {0}", { "0": deviceWord() })), el("small", {}, optimiseSummary(todo))),
+    el("div", { class: "grow" }, el("strong", {}, tr("Voice-OS can run better on this {0}", { "0": deviceWord() })), el("small", {}, optimiseSummary(todo))),
     el("div", { class: "optimise-nudge-actions" },
       el("button", { class: "primary pill", onclick: () => showOptimise(OPTIMISE_FROM.home) }, tr("Optimise")),
       el("button", { class: "link", onclick: async () => { await invoke("optimise_dismiss").catch(() => {}); card.remove(); } }, tr("Not now"))));
@@ -74,7 +74,7 @@ async function showAiSettings(message) {
   if (!data) return;
   const { plan, current, last, progress } = data;
   const d = plan.profile;
-  page.append(el("p", { class: "hint" }, tr("All of Voice's AI runs here, offline: speech to text, analyses, translations and reading aloud. This is what each uses, and how fast.")));
+  page.append(el("p", { class: "hint" }, tr("All of Voice-OS's AI runs here, offline: speech to text, analyses, translations and reading aloud. This is what each uses, and how fast.")));
   if (message) page.append(el("div", { class: "notice" }, message));
 
   if (progress.running) {
@@ -162,7 +162,7 @@ async function showOptimise(from) {
   }
   const page = el("div", { class: "page optimise-page" }, backLinks(`‹ ${optimiseFrom[0]}`, optimiseFrom[1]),
     el("div", { class: "optimise-step" }, tr("Step 1 of 2 · Your languages")), el("h1", {}, tr("Optimise for this {0}", { "0": deviceWord() })),
-    el("p", { class: "hint" }, tr("First, the languages you speak and read. Voice then picks the best speech model, analysis model and voices for them.")));
+    el("p", { class: "hint" }, tr("First, the languages you speak and read. Voice-OS then picks the best speech model, analysis model and voices for them.")));
   const chosen = new Set(info.chosen);
   const list = el("div", { class: "group" });
   const draw = () => {
@@ -256,10 +256,10 @@ async function showOptimisePlan() {
   // Happy as things are: what's left becomes the person's choice, and isn't suggested again until
   // something changes. They can come back and follow the recommendations whenever they like.
   const keep = plan.steps.some((s) => !s.done)
-    ? el("button", { class: "pill", title: tr("Keep things as they are. Voice stops suggesting these until something changes."), onclick: async () => {
+    ? el("button", { class: "pill", title: tr("Keep things as they are. Voice-OS stops suggesting these until something changes."), onclick: async () => {
       try {
         await invoke("optimise_keep");
-        showAiSettings(tr("Kept as is. Voice won't suggest these unless something changes. Come back any time."));
+        showAiSettings(tr("Kept as is. Voice-OS won't suggest these unless something changes. Come back any time."));
       } catch (e) { showError(page, e); }
     } }, tr("Keep my setup"))
     : null;

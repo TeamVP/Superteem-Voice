@@ -604,7 +604,7 @@ pub fn add(new: NewVoice, progress: impl Fn(f32)) -> Result<Voice, String> {
             Some(_) => {}
             None => {
                 let _ = std::fs::remove_dir_all(&dir);
-                return Err("That model isn't one Voice can run: it needs to be a Piper, Kokoro, Matcha or Kitten model.".into());
+                return Err("That model isn't one Voice-OS can run: it needs to be a Piper, Kokoro, Matcha or Kitten model.".into());
             }
         }
         Ok(folder)
@@ -786,7 +786,7 @@ mod imp {
     /// Speech for `text` in voice `v`: samples and their rate.
     pub fn render(v: &Voice, text: &str, speed: f32) -> Result<(Vec<f32>, u32), String> {
         if !engine_present() {
-            return Err("The natural voice's files are missing from the app. Reinstall Voice to use it.".into());
+            return Err("The natural voice's files are missing from the app. Reinstall Voice-OS to use it.".into());
         }
         let mut slot = ENGINE.lock().unwrap();
         if slot.as_ref().is_none_or(|(model, _)| *model != v.model) {

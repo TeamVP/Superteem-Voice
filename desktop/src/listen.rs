@@ -798,7 +798,7 @@ mod imp {
             .flatten()
             .map(|e| e.path())
             .find(|p| p.extension().is_some_and(|x| x == "stvj"))
-            .ok_or("Nothing was recorded. Check Voice may use the microphone, in Settings.")?;
+            .ok_or("Nothing was recorded. Check Voice-OS may use the microphone, in Settings.")?;
         Ok(crate::sealed::load_source(&journal, RATE)?.pcm)
     }
 

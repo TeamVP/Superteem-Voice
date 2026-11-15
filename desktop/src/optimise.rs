@@ -153,7 +153,7 @@ pub fn plan(languages: &[String], d: &Profile, have: &Installed, voices: &[tts::
             done: have.gpu_on,
         }),
         (Some(name), false) => notes.push(format!("{name} shares this computer's memory, so models run on the processor, which is as fast here.")),
-        (None, _) if cfg!(windows) => notes.push("No graphics processor that models can use was found, so they run on the processor. If this computer has a graphics card, updating its driver can let Voice use it.".into()),
+        (None, _) if cfg!(windows) => notes.push("No graphics processor that models can use was found, so they run on the processor. If this computer has a graphics card, updating its driver can let Voice-OS use it.".into()),
         _ => {}
     }
 
@@ -407,7 +407,7 @@ pub fn apply(plan: &Plan, chosen: &[(String, String)], tell: impl Fn(&Progress))
     {
         let mut p = PROGRESS.lock().unwrap();
         if p.running {
-            return Err("Voice is already being optimised.".into());
+            return Err("Voice-OS is already being optimised.".into());
         }
         *p = Progress { running: true, ..Default::default() };
     }

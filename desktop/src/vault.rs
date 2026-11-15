@@ -363,7 +363,7 @@ fn tune(conn: &Connection) -> Result<(), String> {
 fn migrate(conn: &Connection) -> Result<(), String> {
     let at: usize = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(e)?;
     if at > SCHEMA.len() {
-        return Err("This vault was written by a newer version of Voice. Update Voice to open it.".into());
+        return Err("This vault was written by a newer version of Voice-OS. Update Voice-OS to open it.".into());
     }
     for (i, step) in SCHEMA.iter().enumerate().skip(at) {
         let tx = conn.unchecked_transaction().map_err(e)?;
@@ -1195,7 +1195,7 @@ pub fn set_backup_dir(folder: &str) -> Result<(), String> {
             return Err("Choose a folder outside the vault's own, ideally one that is backed up or synced, or a USB drive.".into());
         }
         let probe = path.join(".voice-backup-check");
-        std::fs::write(&probe, b"ok").map_err(|e| format!("Voice can't write to that folder: {e}"))?;
+        std::fs::write(&probe, b"ok").map_err(|e| format!("Voice-OS can't write to that folder: {e}"))?;
         let _ = std::fs::remove_file(probe);
     }
     crate::prefs::update(|p| p.vault_backup_dir = folder.to_string())?;
@@ -1231,12 +1231,12 @@ pub fn kit() -> Result<String, String> {
     }
     out += "\r\nThe first four letters of each word are enough. Capitals and spacing don't matter.\r\n\r\n";
     out += "IF VOICE ASKS FOR THEM ON THIS COMPUTER\r\n";
-    out += "Voice opens the vault by itself day to day. After Windows is reinstalled, or your Windows password is\r\n";
+    out += "Voice-OS opens the vault by itself day to day. After Windows is reinstalled, or your Windows password is\r\n";
     out += "reset by someone else, it can't, and asks for these words (or your vault password, if you set one).\r\n\r\n";
     out += "ON A NEW COMPUTER\r\n";
     out += "1. Copy the Voice-OS folder from Documents (or wherever your backups are) to the new computer, or\r\n";
     out += "   let OneDrive or your backup bring it back.\r\n";
-    out += "2. Install Voice, open Settings > Vault, and choose Bring in from a backup.\r\n";
+    out += "2. Install Voice-OS, open Settings > Vault, and choose Bring in from a backup.\r\n";
     out += "3. Choose that folder, type these words, and choose Use it on this computer. Your notes, books and\r\n";
     out += "   meetings come back, and these words keep working.\r\n\r\n";
     out += "IF YOU FORGET YOUR VAULT PASSWORD\r\n";
@@ -1566,7 +1566,7 @@ pub fn bring_in_folder(folder: &Path, words: &str, password: &str) -> Result<Bro
     }
     bring_in_extras(folder, &mut out)?;
     if out.notes + out.books + out.meetings + out.had == 0 && out.failed.is_empty() && out.other_vault.is_empty() {
-        return Err("Nothing from Voice was found in that folder. Choose the Voice-OS (or earlier Superteem Voice) folder from Documents, a Vault backups folder, or Voice's own data folder.".into());
+        return Err("Nothing from Voice-OS was found in that folder. Choose the Voice-OS (or earlier Superteem Voice) folder from Documents, a Vault backups folder, or Voice-OS's own data folder.".into());
     }
     std::thread::spawn(crate::sealed::seal_existing);
     Ok(out)

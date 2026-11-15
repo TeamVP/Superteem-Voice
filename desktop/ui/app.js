@@ -4344,7 +4344,7 @@ function renderSession(session, processingError, suggestion) {
       const heard = sel.toString().trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
       const words = heard.split(/\s+/).filter(Boolean).length;
       if (lineEls[i].text.contains(sel.focusNode) && heard && words <= 4) {
-        lineEls[i].action.append(actionButton("SPELL", tr("Teach Voice to spell “{heard}” differently", { heard: heard }), false,
+        lineEls[i].action.append(actionButton("SPELL", tr("Teach Voice-OS to spell “{heard}” differently", { heard: heard }), false,
           () => showTermEditor(null, { id, heard })));
       }
       return;
@@ -5504,7 +5504,7 @@ async function showVoicePrints(error) {
   const page = el("div", { class: "page" },
     el("button", { class: "link", onclick: () => showVoices() }, tr("‹ Voices")),
     el("h1", {}, tr("Voice prints")),
-    el("p", { class: "legend" }, tr("A voice print lets Voice recognise and name someone in new meetings. It's kept only on this device, as a description of the voice; its recording is deleted. Only make one with the person's consent.")));
+    el("p", { class: "legend" }, tr("A voice print lets Voice-OS recognise and name someone in new meetings. It's kept only on this device, as a description of the voice; its recording is deleted. Only make one with the person's consent.")));
   if (error) page.append(el("div", { class: "error" }, String(error)));
   if (!prints.length) page.append(el("div", { class: "empty" }, tr("No voice prints yet.")));
   // One person can have several prints, as they sound different on each microphone and through call apps.
@@ -5711,7 +5711,7 @@ async function showKeyphrases(printId, message) {
   const page = el("div", { class: "page" },
     el("button", { class: "link", onclick: () => showVoices() }, tr("‹ Voices")),
     el("h1", {}, tr("Wake word & commands")),
-    el("p", { class: "legend" }, tr("Say each phrase a few times so Voice hears it instantly, without waiting for speech to text. It learns your voice, so it answers you, not others in the room. Only a description of the sound is kept with your voice print; recordings are deleted. Record again discards every take for that phrase and starts fresh.")));
+    el("p", { class: "legend" }, tr("Say each phrase a few times so Voice-OS hears it instantly, without waiting for speech to text. It learns your voice, so it answers you, not others in the room. Only a description of the sound is kept with your voice print; recordings are deleted. Record again discards every take for that phrase and starts fresh.")));
   if (!print) {
     page.append(el("div", { class: "notice" }, tr("Make your voice print first: phrases are kept with it.")),
       el("div", { class: "actions" }, el("button", { class: "primary pill", onclick: () => showOnboarding(SETUP.voice) }, tr("Make my voice print"))));
@@ -5860,7 +5860,7 @@ function showPhraseTakes() {
   const stop = el("button", { class: "primary pill" }, tr("Done"));
   const cancel = el("button", { class: "pill" }, tr("Cancel"));
   const page = el("div", { class: "page" }, el("h1", {}, tr("Say “{text}”", { text: phrase.text })),
-    el("p", { class: "legend" }, tr("Say it once per line, with a pause of about a second between. Say it a little differently each time, to teach Voice how you really say it.")
+    el("p", { class: "legend" }, tr("Say it once per line, with a pause of about a second between. Say it a little differently each time, to teach Voice-OS how you really say it.")
       + (phrase.after ? tr(" Say just “{text}”; it counts only after “{after}”.", { text: phrase.text, after: phrase.after }) : "")),
     banner, el("div", { class: "meter wide-meter" }, meter),
     el("ol", { class: "takes" }, phrase.how.map((h) => el("li", {}, h))),
@@ -5914,7 +5914,7 @@ async function showVocabulary(message) {
   const page = el("div", { class: "page" },
     el("button", { class: "link", onclick: () => showTranscription() }, tr("‹ Transcription")),
     el("h1", {}, tr("Vocabulary")),
-    el("p", { class: "legend" }, tr("Names, products and acronyms that speech to text writes as everyday words, like “SIBR” as “cyber”. Voice tells the speech model about them before it listens, and fixes what it still gets wrong. In meetings, corrected words are underlined: click one to undo.")));
+    el("p", { class: "legend" }, tr("Names, products and acronyms that speech to text writes as everyday words, like “SIBR” as “cyber”. Voice-OS tells the speech model about them before it listens, and fixes what it still gets wrong. In meetings, corrected words are underlined: click one to undo.")));
   if (message) page.append(el("p", { class: "vocab-notice", role: "status" }, message));
   if (!terms.length) page.append(el("div", { class: "empty" }, tr("No words yet.")));
   for (const t of terms) {
@@ -6251,7 +6251,7 @@ async function showSettings() {
 
   const meetings = [el("h2", {}, tr("Meetings")), el("div", { class: "group" },
     el("div", { class: "row" }, el("span", { class: "label" }, tr("Consent"),
-      el("small", {}, tr("Voice always confirms everyone agreed before recording a meeting."))), el("span", { class: "value" }, tr("Always asked"))),
+      el("small", {}, tr("Voice-OS always confirms everyone agreed before recording a meeting."))), el("span", { class: "value" }, tr("Always asked"))),
     el("div", { class: "row" }, el("span", { class: "label" }, tr("Last tracks used")),
       el("span", { class: "value" }, [...prefs.inputs, prefs.pins ? tr("Voice Pins") : null].filter(Boolean).join(", ") || tr("Default microphone"))))];
 
@@ -6360,13 +6360,13 @@ const TERMS = [
   [tr("You're in control"),
     tr("Delete voice prints, notes and recordings in the app at any time. Uninstalling removes the app; your files stay in the Voice-OS folder until you delete it.")],
   [tr("Open source, no warranty"),
-    tr("Voice is free software under the GNU General Public License v3. You may use, study, change and share it under that licence. It is provided as is, without warranty of any kind.")],
+    tr("Voice-OS is free software under the GNU General Public License v3. You may use, study, change and share it under that licence. It is provided as is, without warranty of any kind.")],
   [tr("Use it lawfully"),
-    tr("You are responsible for how you use Voice. Get consent before recording anyone, follow the recording, privacy and surveillance laws where you are, and don't use it for anything illegal. We can't prevent misuse and aren't responsible for it.")],
+    tr("You are responsible for how you use Voice-OS. Get consent before recording anyone, follow the recording, privacy and surveillance laws where you are, and don't use it for anything illegal. We can't prevent misuse and aren't responsible for it.")],
   [tr("Our liability"),
     tr("To the extent the law allows, Superteem and its authors aren't liable for any loss or damage from using it, including missing or wrong transcripts. Nothing here limits rights you have under the Australian Consumer Law or other laws that can't be excluded.")],
   [tr("Governing law"),
-    tr("These terms are governed by the laws of Victoria, Australia. If they change, Voice will ask you again.")],
+    tr("These terms are governed by the laws of Victoria, Australia. If they change, Voice-OS will ask you again.")],
 ];
 
 // What a check for an update sends. A dialog rather than a hover tip, so it opens by tap on a phone too.
@@ -6442,7 +6442,7 @@ function setupSteps(step) {
 const PERMISSIONS = {
   microphone: [tr("Microphone"), tr("Needed to record meetings, notes and your voice print."), true],
   nearby: [tr("Nearby devices"), tr("For Bluetooth headsets and Voice Pins."), false],
-  notifications: [tr("Notifications"), tr("Shows recording is on while you use other apps, with a tap back to Voice."), false],
+  notifications: [tr("Notifications"), tr("Shows recording is on while you use other apps, with a tap back to Voice-OS."), false],
 };
 
 /// A live list of the app's Android permissions, each with its state and the way to allow it. Checked again
@@ -6573,7 +6573,7 @@ function showPermissions() {
   main.replaceChildren(el("div", { class: "page" },
     el("button", { class: "link back-link", onclick: () => showSettings() }, tr("‹ Settings")),
     el("h1", {}, tr("App permissions")),
-    el("p", {}, tr("What Voice may use on this phone. Everything stays on it.")),
+    el("p", {}, tr("What Voice-OS may use on this phone. Everything stays on it.")),
     permissionsPanel()));
 }
 
@@ -6630,7 +6630,7 @@ async function showOnboarding(step = SETUP.welcome) {
     const next = el("button", { class: "primary pill" }, tr("Continue"));
     next.addEventListener("click", () => showOnboarding(SETUP.voice));
     page.append(setupHeading(tr("Permissions"), skipTo(SETUP.voice)),
-      el("p", {}, tr("Allow the microphone so Voice can record. The rest are optional.")),
+      el("p", {}, tr("Allow the microphone so Voice-OS can record. The rest are optional.")),
       permissionsPanel((microphone) => {
         next.textContent = microphone ? tr("Continue") : tr("Continue without the microphone");
         next.className = microphone ? "primary pill" : "pill";

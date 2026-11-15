@@ -123,10 +123,10 @@ function showVaultWelcome() {
     vaultAdd(body, 
       el("p", { class: "hint" }, tr("{moved} Everything was read back and checked before the old files were removed.", { moved: movedText(moved) })),
       el("ul", { class: "vault-list" },
-        el("li", {}, el("strong", {}, tr("Nothing changes day to day. ")), tr("Voice opens the vault itself for your Windows account; no password to type.")),
+        el("li", {}, el("strong", {}, tr("Nothing changes day to day. ")), tr("Voice-OS opens the vault itself for your Windows account; no password to type.")),
         el("li", {}, el("strong", {}, tr("Copies can't be read. ")), tr("Backups, synced folders and copied disks hold only sealed files.")),
         el("li", {}, el("strong", {}, tr("A sealed copy is kept every day ")), `in ${vault?.backup_dir ?? tr("Documents › Voice-OS › Vault backups")}.`),
-        el("li", {}, el("strong", {}, tr("Meetings open only in Voice. ")), tr("Export makes readable copies when you need them elsewhere."))),
+        el("li", {}, el("strong", {}, tr("Meetings open only in Voice-OS. ")), tr("Export makes readable copies when you need them elsewhere."))),
       moved.failed?.length ? el("div", { class: "notice" }, tr("Not moved, left in place: {0}.", { "0": moved.failed.join(", ") })) : null,
       el("div", { class: "notice" }, el("strong", {}, tr("One thing to do now: save your recovery words. ")),
         tr("If Windows is reinstalled or this computer replaced, they get you back in. Nobody else, Superteem included, can open your vault.")),
@@ -214,9 +214,9 @@ function showVaultUnlock() {
       micToast(tr("A new vault is open. The old one was set aside, not deleted."));
     });
     vaultAdd(body, el("details", { class: "vault-more" }, el("summary", {}, tr("I don't have the words")),
-      el("p", { class: "hint" }, tr("Look for a file or printout named “Voice recovery kit”, a password manager entry, or a photo of 24 numbered words. The kit names the vault ID its words are for. "),
-        tr("If this vault was on another computer that still works, open Voice there: Settings › Vault shows the words again.")),
-      el("p", { class: "hint" }, tr("Without the words or password, nobody can open this vault, Superteem included. You can start an empty one and keep using Voice. "),
+      el("p", { class: "hint" }, tr("Look for a file or printout named “Voice-OS recovery kit”, a password manager entry, or a photo of 24 numbered words. The kit names the vault ID its words are for. "),
+        tr("If this vault was on another computer that still works, open Voice-OS there: Settings › Vault shows the words again.")),
+      el("p", { class: "hint" }, tr("Without the words or password, nobody can open this vault, Superteem included. You can start an empty one and keep using Voice-OS. "),
         tr("The locked vault is set aside untouched, and its meetings stay where they are, shown as locked. Both open again if the words turn up: Settings › Vault › Bring in from a backup.")),
       el("div", { class: "actions" }, fresh)),
       el("div", { class: "actions" }, el("button", { class: "pill", onclick: () => dialog.close() }, tr("Close"))));
@@ -229,8 +229,8 @@ function showVaultCopies() {
   vaultSheet(vault?.state === "damaged" ? tr("Restore your vault") : tr("Restore a copy"), (dialog, body) => {
     const damaged = vault?.state === "damaged";
     vaultAdd(body, el("p", { class: "hint" }, damaged
-      ? tr("The vault can't be read{0}. Voice keeps sealed copies as it changes; choose one to replace it. The unreadable vault is set aside, not deleted.", { "0": vault.detail ? ` (${vault.detail.replace(/\.$/, "")})` : "" })
-      : tr("Voice keeps sealed copies of the vault as it changes. Restoring one puts every note and book back as it was. The vault as it is now is copied first, so this can be undone.")));
+      ? tr("The vault can't be read{0}. Voice-OS keeps sealed copies as it changes; choose one to replace it. The unreadable vault is set aside, not deleted.", { "0": vault.detail ? ` (${vault.detail.replace(/\.$/, "")})` : "" })
+      : tr("Voice-OS keeps sealed copies of the vault as it changes. Restoring one puts every note and book back as it was. The vault as it is now is copied first, so this can be undone.")));
     if (!vault?.snapshots.length) {
       vaultAdd(body, el("p", { class: "notice" }, tr("No copies on this computer yet.")),
         damaged ? el("p", { class: "hint" }, tr("If Documents is backed up or synced, a daily copy is in Documents › Voice-OS › Vault backups. Open the vault, or start an empty one, then use Settings › Vault › Bring in from a backup.")) : null);
@@ -292,7 +292,7 @@ async function showVaultWords() {
       });
       const save = el("button", { class: "pill" }, tr("Save kit…"));
       save.addEventListener("click", () => vaultTry(save, body, async () => {
-        const path = await window.__TAURI__.dialog.save({ title: tr("Save recovery kit"), defaultPath: `Voice recovery kit ${vault?.id ?? ""}.txt`.replace(" .txt", ".txt"), filters: [{ name: tr("Text"), extensions: ["txt"] }] });
+        const path = await window.__TAURI__.dialog.save({ title: tr("Save recovery kit"), defaultPath: `Voice-OS recovery kit ${vault?.id ?? ""}.txt`.replace(" .txt", ".txt"), filters: [{ name: tr("Text"), extensions: ["txt"] }] });
         if (!path) return;
         await invoke("vault_save_kit", { path });
         save.textContent = tr("Saved");
@@ -301,7 +301,7 @@ async function showVaultWords() {
       print.addEventListener("click", () => vaultTry(print, body, async () => vaultPrint(await invoke("vault_kit"))));
       const next = el("button", { class: "primary pill", onclick: () => quiz() }, tr("I've saved them"));
       body.replaceChildren(
-        el("p", { class: "hint" }, tr("These 24 words open your vault{0}, on this computer or any other. Voice opens it itself day to day; the words are for when it can't. ", { "0": vault?.id ? tr(" (ID {id})", { id: vault.id }) : "" }),
+        el("p", { class: "hint" }, tr("These 24 words open your vault{0}, on this computer or any other. Voice-OS opens it itself day to day; the words are for when it can't. ", { "0": vault?.id ? tr(" (ID {id})", { id: vault.id }) : "" }),
           el("strong", {}, tr("Anyone with them can read your notes, and without them a vault this computer can't open stays shut."))),
         grid,
         el("p", { class: "hint" }, tr("Print the kit and file it, or keep the words in a password manager. Don't keep them only on this computer. The kit says what to do on a new computer.")),
@@ -345,7 +345,7 @@ function showVaultCheck() {
       await vaultChanged();
       micToast(tr("Those are the right words for this vault."));
     });
-    vaultAdd(body, el("p", { class: "hint" }, tr("Type the words from where you keep them. Voice says whether they open this vault, so you know your copy is good.")),
+    vaultAdd(body, el("p", { class: "hint" }, tr("Type the words from where you keep them. Voice-OS says whether they open this vault, so you know your copy is good.")),
       el("label", { class: "field" }, el("span", {}, tr("Recovery words")), box, count),
       el("div", { class: "actions" }, el("button", { class: "pill", onclick: () => dialog.close() }, tr("Cancel")), check));
     box.focus();
@@ -434,7 +434,7 @@ function showVaultBringIn({ path, folder, adopt = false }) {
     vaultAdd(body, 
       el("p", { class: "vault-path" }, path),
       el("p", { class: "hint" }, folder
-        ? tr("Voice looks in this folder for the newest vault copy, notes and books from before the vault, and meetings. Nothing in the folder is changed.")
+        ? tr("Voice-OS looks in this folder for the newest vault copy, notes and books from before the vault, and meetings. Nothing in the folder is changed.")
         : tr("A vault file: a daily copy from Vault backups, a vault set aside, or one from another computer.")),
       el("label", { class: "field" }, el("span", {}, tr("That vault's recovery words"), el("small", {}, tr("Leave empty for a copy of this vault, or notes from before the vault."))), box, count),
       el("details", { class: "vault-more" }, el("summary", {}, tr("Use its vault password instead")),
@@ -519,7 +519,7 @@ async function showVaultSettings() {
     vaultAdd(page, 
       el("p", { class: "hint" }, tr("Your notes, books, bookmarks, chats, analyses and translations ({counts}) are in one encrypted database. Meetings, and pictures and files in notes and books, are sealed with the same key. This computer opens it itself, for your Windows account only. Copied anywhere else, none of it can be read without one of the ways back in below.", { counts: counts })),
       el("p", { class: "hint vault-id-line" }, tr("Vault ID "), el("strong", {}, vault.id), tr(" · your recovery kit and backups carry the same ID.")),
-      vault.sealing ? el("div", { class: "notice" }, tr("Sealing earlier recordings: {0} to go. It continues in the background and resumes next time Voice starts.", { "0": vaultPlural(vault.sealing, "file") })) : null);
+      vault.sealing ? el("div", { class: "notice" }, tr("Sealing earlier recordings: {0} to go. It continues in the background and resumes next time Voice-OS starts.", { "0": vaultPlural(vault.sealing, "file") })) : null);
 
     // Ways back in: each with whether it's ready.
     const sixMonths = 183 * 24 * 3600;
@@ -563,7 +563,7 @@ async function showVaultSettings() {
       copyNow, vault.snapshots.length ? button(tr("Restore a copy…"), () => showVaultCopies()) : null)));
   if (isDesktop()) {
     vaultAdd(page, el("h2", {}, tr("Bring in")), el("div", { class: "group" },
-      row(tr("From a backup or another computer"), tr("A Vault backups folder, a copy of Documents › Voice-OS, or Voice's data folder from before the vault. Brings notes, books and meetings."),
+      row(tr("From a backup or another computer"), tr("A Vault backups folder, a copy of Documents › Voice-OS, or Voice-OS's data folder from before the vault. Brings notes, books and meetings."),
         button(tr("Choose a folder…"), () => chooseBringIn(true))),
       row(tr("From a vault file"), tr("A single daily copy, or a vault set aside."), button(tr("Choose a file…"), () => chooseBringIn(false))),
       vault.sealed ? row(tr("Meetings from another vault"), vault.keyring ? tr("This vault also opens what {0} sealed.", { "0": vaultPlural(vault.keyring, "other vault") }) : tr("Open meetings sealed on another computer, with that vault's words."),

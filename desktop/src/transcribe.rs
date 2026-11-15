@@ -162,7 +162,7 @@ pub fn model_for(languages: &[String]) -> (&'static SpeechModel, bool) {
 /// Runs only when the person asks. Uses a temporary name so a failed download is never loaded, and checks
 /// the file against its pinned hash. `progress` gets the fraction done.
 pub fn download(id: &str, cancel: &AtomicBool, progress: impl Fn(f32)) -> Result<(), String> {
-    let m = model(id).ok_or("That speech model isn't one Voice knows.")?;
+    let m = model(id).ok_or("That speech model isn't one Voice-OS knows.")?;
     let path = path_of(m);
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
     let partial = path.with_extension("part");
@@ -211,7 +211,7 @@ pub fn download_model(progress: impl Fn(f32)) -> Result<(), String> {
 }
 
 pub fn delete(id: &str) -> Result<(), String> {
-    let m = model(id).ok_or("That speech model isn't one Voice knows.")?;
+    let m = model(id).ok_or("That speech model isn't one Voice-OS knows.")?;
     crate::listen::forget_transcriber();
     match std::fs::remove_file(path_of(m)) {
         Ok(()) => Ok(()),

@@ -48,7 +48,7 @@ fn dir(id: &str) -> Result<PathBuf, String> {
 }
 
 fn known(language: &str) -> Result<(), String> {
-    if lang::is_known(language) { Ok(()) } else { Err("That language isn't one Voice offers yet.".into()) }
+    if lang::is_known(language) { Ok(()) } else { Err("That language isn't one Voice-OS offers yet.".into()) }
 }
 
 pub fn load(item: &Item, language: &str) -> Store {

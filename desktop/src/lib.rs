@@ -2409,7 +2409,7 @@ fn analyse<R: Runtime>(app: AppHandle<R>, kind: String, id: String, template: St
     let (t, language) = analysis::split_key(&template);
     analysis::template(t)?;
     if language.is_some_and(|l| !stv_core::lang::is_known(l)) {
-        return Err("That language isn't one Voice offers yet.".into());
+        return Err("That language isn't one Voice-OS offers yet.".into());
     }
     enqueue_analysis(&app, Job { kind, id, template });
     Ok(())
@@ -2582,7 +2582,7 @@ async fn optimise_plan() -> Result<OptimiseView, String> {
 #[tauri::command]
 fn optimise_apply<R: Runtime>(app: AppHandle<R>, steps: Vec<(String, String)>) -> Result<(), String> {
     if optimise::progress().running {
-        return Err("Voice is already being optimised.".into());
+        return Err("Voice-OS is already being optimised.".into());
     }
     std::thread::spawn(move || {
         let languages = prefs::load().languages();
@@ -2718,7 +2718,7 @@ fn get_languages() -> Languages {
 #[tauri::command]
 fn save_languages(languages: Vec<String>, primary: String) -> Result<Languages, String> {
     if !stv_core::lang::is_known(&primary) {
-        return Err("That language isn't one Voice offers yet.".into());
+        return Err("That language isn't one Voice-OS offers yet.".into());
     }
     let mut chosen: Vec<String> = Vec::new();
     for l in languages.into_iter().filter(|l| stv_core::lang::is_known(l)) {
@@ -2749,7 +2749,7 @@ fn save_language_settings(
     speech_model: Option<String>,
 ) -> Result<Languages, String> {
     if let Some(m) = speech_model.as_deref().filter(|m| !m.is_empty()) {
-        transcribe::model(m).filter(|m| m.multilingual).ok_or("That speech model isn't one Voice knows.")?;
+        transcribe::model(m).filter(|m| m.multilingual).ok_or("That speech model isn't one Voice-OS knows.")?;
     }
     prefs::update(|p| {
         if let Some(d) = defaults {
@@ -2925,7 +2925,7 @@ fn get_translation(kind: String, id: String, language: String) -> Result<Transla
 fn translate_item<R: Runtime>(app: AppHandle<R>, kind: String, id: String, language: String) -> Result<(), String> {
     analysis::Item::new(&kind, &id)?;
     if !stv_core::lang::is_known(&language) {
-        return Err("That language isn't one Voice offers yet.".into());
+        return Err("That language isn't one Voice-OS offers yet.".into());
     }
     let p = prefs::load();
     if p.llm_server.trim().is_empty() && llm::installed().is_empty() {
@@ -2980,7 +2980,7 @@ fn save_voice_settings(
     }
     if let Some(v) = &voice {
         if !tts::voices().iter().any(|x| x.id == *v) {
-            return Err("That voice isn't one Voice offers.".into());
+            return Err("That voice isn't one Voice-OS offers.".into());
         }
     }
     prefs::update(|p| {

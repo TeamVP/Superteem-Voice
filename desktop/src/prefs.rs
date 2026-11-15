@@ -152,7 +152,7 @@ pub fn check_language(language: &str) -> Result<String, String> {
     if language.is_empty() || lang::is_known(language) {
         Ok(language.to_string())
     } else {
-        Err("That language isn't one Voice offers yet.".into())
+        Err("That language isn't one Voice-OS offers yet.".into())
     }
 }
 

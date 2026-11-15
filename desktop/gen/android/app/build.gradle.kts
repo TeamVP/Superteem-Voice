@@ -19,7 +19,7 @@ android {
     namespace = "io.superteem.voice"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "io.github.teamvp.voiceos"
+        applicationId = "com.superteem.voiceos"
         minSdk = 29
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
