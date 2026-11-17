@@ -115,7 +115,7 @@ cargo test --manifest-path core/Cargo.toml
 1. Set the version in `desktop/tauri.conf.json`.
 2. Push a matching tag, for example `v0.2.0`.
 
-The Release workflow then builds the Windows, Mac and Android apps and publishes a GitHub release, and the download page links to it automatically. Android releases are signed with the key in the repository secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
+The Release workflow then builds the Windows, Mac and Android apps and publishes a GitHub release. Publishing a release, from that workflow or with `gh release create`, tells voice.superteem.com to copy it. Android releases are signed with the key in the repository secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
 
 The Mac app is signed ad hoc unless the Developer ID secrets are set: `APPLE_CERTIFICATE` (the .p12, base64), `APPLE_CERTIFICATE_PASSWORD` and `APPLE_SIGNING_IDENTITY`. It is notarized too when the App Store Connect key is set: `APPLE_API_ISSUER`, `APPLE_API_KEY` (the key ID) and `APPLE_API_KEY_P8` (the key file's text). The iPhone app is built for the Simulator unless `APPLE_DEVELOPMENT_TEAM`, `IOS_CERTIFICATE`, `IOS_CERTIFICATE_PASSWORD` and `IOS_MOBILE_PROVISION` are set; then it is built for the App Store, and with the App Store Connect key a tagged release is uploaded to TestFlight.
 

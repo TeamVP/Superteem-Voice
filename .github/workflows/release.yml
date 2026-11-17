@@ -400,11 +400,6 @@ jobs:
           ls -l dist
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
             --title "Voice-OS ${GITHUB_REF_NAME#v}" --generate-notes
-      # The download page at voice.superteem.com (TeamVP/voice-superteem-site, on Vercel) serves its own copy of
-      # the release's files, and installed apps check its release.json for updates. Its deploy hook rebuilds it.
-      - name: Republish the download page
-        env:
-          DEPLOY_HOOK: ${{ secrets.VOICE_SITE_DEPLOY_HOOK }}
-        run: |
-          if [ -z "$DEPLOY_HOOK" ]; then echo "::warning::VOICE_SITE_DEPLOY_HOOK isn't set, so the download page wasn't rebuilt."; exit 0; fi
-          curl -sSf --retry 5 --retry-all-errors -X POST "$DEPLOY_HOOK" > /dev/null
+      # Publishing the release fires this repository's webhook, which calls the download page's
+      # deploy hook. voice.superteem.com then copies the release. That also covers a release
+      # created on a PC, so this job does not call the hook itself.
